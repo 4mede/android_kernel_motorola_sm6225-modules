@@ -3036,6 +3036,7 @@ ccflags-y += $(INCS)
 
 cppflags-y +=	-Wall\
 		-Werror
+		-D__ANDROID_COMMON_KERNEL__ \
 
 cppflags-$(CONFIG_THERMAL_STATS_SUPPORT) += -DTHERMAL_STATS_SUPPORT
 cppflags-$(CONFIG_PTT_SOCK_SVC_ENABLE) += -DPTT_SOCK_SVC_ENABLE
