@@ -7,9 +7,10 @@ DLKM_DIR := $(TOP)/device/qcom/common/dlkm
 
 # Kbuild options
 KBUILD_OPTIONS := CAMERA_KERNEL_ROOT=$(shell pwd)/$(LOCAL_PATH)
-KBUILD_OPTIONS += KERNEL_ROOT=$(shell pwd)/kernel/msm-$(TARGET_KERNEL_VERSION)/
+KBUILD_OPTIONS += KERNEL_ROOT=$(KERNEL_SRC)/
 KBUILD_OPTIONS += MODNAME=camera
 KBUILD_OPTIONS += BOARD_PLATFORM=$(TARGET_BOARD_PLATFORM)
+KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS=$(OUT_DIR)/../sm6225-modules/qcom/opensource/mmrm-driver/Module.symvers
 
 # Clear shell environment variables from previous android module during build
 include $(CLEAR_VARS)
