@@ -2808,10 +2808,8 @@ static const struct snd_soc_dapm_route wcd937x_audio_map[] = {
 	{"AUX_RDAC", "Switch", "RDAC4"},
 	{"AUX PGA", NULL, "AUX_RDAC"},
 #if defined(CONFIG_SND_SOC_AW87XXX)
-	{"AW87XXX_DEV_0", NULL, "AUX PGA"},
-	{"AUX", NULL, "AW87XXX_DEV_0"},
 	{"AW87XXX_DEV_1", NULL, "AUX PGA"},
-	{"AUX", NULL, "AW87XXX_DEV_1"},	
+	{"AUX", NULL, "AW87XXX_DEV_1"},
 #else
 	{"AUX", NULL, "AUX PGA"},
 #endif /* CONFIG_SND_SOC_AW87XXX */
