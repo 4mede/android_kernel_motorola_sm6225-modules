@@ -2819,7 +2819,12 @@ static const struct snd_soc_dapm_route wcd937x_audio_map[] = {
 	{"RDAC3", NULL, "RDAC3_MUX"},
 	{"EAR_RDAC", "Switch", "RDAC3"},
 	{"EAR PGA", NULL, "EAR_RDAC"},
+#if defined(CONFIG_SND_SOC_AW87XXX) && defined(CONFIG_TARGET_PROJECT_K7T)
+	{"AW87XXX_DEV_0", NULL, "EAR PGA"},
+	{"EAR", NULL, "AW87XXX_DEV_0"},
+#else
 	{"EAR", NULL, "EAR PGA"},
+#endif
 };
 
 static const struct snd_soc_dapm_route wcd9375_audio_map[] = {
