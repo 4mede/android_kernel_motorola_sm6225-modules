@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -114,6 +114,7 @@ static QDF_STATUS wlan_objmgr_vdev_obj_free(struct wlan_objmgr_vdev *vdev)
 
 	qdf_mem_free(vdev->vdev_mlme.bss_chan);
 	qdf_mem_free(vdev->vdev_mlme.des_chan);
+	wlan_minidump_remove(vdev);
 	qdf_mem_free(vdev);
 
 	return QDF_STATUS_SUCCESS;
@@ -209,10 +210,6 @@ struct wlan_objmgr_vdev *wlan_objmgr_vdev_obj_create(
 	wlan_vdev_mlme_set_macaddr(vdev, params->macaddr);
 	/* set MAT address */
 	wlan_vdev_mlme_set_mataddr(vdev, params->mataddr);
-	/* set MLD address */
-	wlan_vdev_mlme_set_mldaddr(vdev, params->mldaddr);
-	/* set link address */
-	wlan_vdev_mlme_set_linkaddr(vdev, params->macaddr);
 	/* Set create flags */
 	vdev->vdev_objmgr.c_flags = params->flags;
 	/* store os-specific pointer */
@@ -312,9 +309,6 @@ static QDF_STATUS wlan_objmgr_vdev_obj_destroy(struct wlan_objmgr_vdev *vdev)
 		WLAN_OBJMGR_BUG(0);
 		return QDF_STATUS_E_FAILURE;
 	}
-
-	wlan_minidump_remove(vdev, sizeof(*vdev), wlan_vdev_get_psoc(vdev),
-			     WLAN_MD_OBJMGR_VDEV, "wlan_objmgr_vdev");
 
 	/* Invoke registered destroy handlers */
 	for (id = 0; id < WLAN_UMAC_MAX_COMPONENTS; id++) {
@@ -831,8 +825,7 @@ QDF_STATUS wlan_objmgr_vdev_peer_attach(struct wlan_objmgr_vdev *vdev,
 	wlan_vdev_obj_lock(vdev);
 	pdev = wlan_vdev_get_pdev(vdev);
 	/* If Max VDEV peer count exceeds, return failure */
-	if (peer->peer_mlme.peer_type != WLAN_PEER_STA_TEMP &&
-	    peer->peer_mlme.peer_type != WLAN_PEER_MLO_TEMP) {
+	if (peer->peer_mlme.peer_type != WLAN_PEER_STA_TEMP) {
 		if (objmgr->wlan_peer_count >= objmgr->max_peer_count) {
 			wlan_vdev_obj_unlock(vdev);
 			return QDF_STATUS_E_FAILURE;
@@ -842,8 +835,7 @@ QDF_STATUS wlan_objmgr_vdev_peer_attach(struct wlan_objmgr_vdev *vdev,
 
 	/* If Max PDEV peer count exceeds, return failure */
 	wlan_pdev_obj_lock(pdev);
-	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP ||
-	    peer->peer_mlme.peer_type == WLAN_PEER_MLO_TEMP) {
+	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP) {
 		if (wlan_pdev_get_temp_peer_count(pdev) >=
 			WLAN_MAX_PDEV_TEMP_PEERS) {
 			wlan_pdev_obj_unlock(pdev);
@@ -857,8 +849,7 @@ QDF_STATUS wlan_objmgr_vdev_peer_attach(struct wlan_objmgr_vdev *vdev,
 		}
 	}
 
-	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP ||
-	    peer->peer_mlme.peer_type == WLAN_PEER_MLO_TEMP)
+	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP)
 		wlan_pdev_incr_temp_peer_count(wlan_vdev_get_pdev(vdev));
 	else
 		wlan_pdev_incr_peer_count(wlan_vdev_get_pdev(vdev));
@@ -945,8 +936,7 @@ QDF_STATUS wlan_objmgr_vdev_peer_detach(struct wlan_objmgr_vdev *vdev,
 	wlan_vdev_obj_unlock(vdev);
 
 	wlan_pdev_obj_lock(pdev);
-	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP ||
-	    peer->peer_mlme.peer_type == WLAN_PEER_MLO_TEMP)
+	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP)
 		wlan_pdev_decr_temp_peer_count(pdev);
 	else
 		wlan_pdev_decr_peer_count(pdev);
@@ -1427,7 +1417,7 @@ QDF_STATUS wlan_vdev_get_bss_peer_mac(struct wlan_objmgr_vdev *vdev,
 	peer = wlan_objmgr_vdev_try_get_bsspeer(vdev, WLAN_MLME_OBJMGR_ID);
 	if (!peer) {
 		obj_mgr_debug("not able to find bss peer for vdev %d",
-			      wlan_vdev_get_id(vdev));
+			    wlan_vdev_get_id(vdev));
 		return QDF_STATUS_E_INVAL;
 	}
 	wlan_peer_obj_lock(peer);
@@ -1439,31 +1429,3 @@ QDF_STATUS wlan_vdev_get_bss_peer_mac(struct wlan_objmgr_vdev *vdev,
 
 	return QDF_STATUS_SUCCESS;
 }
-
-#ifdef WLAN_FEATURE_11BE_MLO
-QDF_STATUS wlan_vdev_get_bss_peer_mld_mac(struct wlan_objmgr_vdev *vdev,
-					  struct qdf_mac_addr *mld_mac)
-{
-	struct wlan_objmgr_peer *peer;
-
-	if (!vdev) {
-		obj_mgr_err("vdev is null");
-		return QDF_STATUS_E_INVAL;
-	}
-
-	peer = wlan_objmgr_vdev_try_get_bsspeer(vdev, WLAN_MLME_OBJMGR_ID);
-	if (!peer) {
-		obj_mgr_err("not able to find bss peer for vdev %d",
-			    wlan_vdev_get_id(vdev));
-		return QDF_STATUS_E_INVAL;
-	}
-	wlan_peer_obj_lock(peer);
-	qdf_mem_copy(mld_mac->bytes, wlan_peer_mlme_get_mldaddr(peer),
-		     QDF_MAC_ADDR_SIZE);
-	wlan_peer_obj_unlock(peer);
-
-	wlan_objmgr_peer_release_ref(peer, WLAN_MLME_OBJMGR_ID);
-
-	return QDF_STATUS_SUCCESS;
-}
-#endif

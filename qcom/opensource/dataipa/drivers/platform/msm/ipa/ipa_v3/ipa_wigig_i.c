@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
  */
 
 #include "ipa_i.h"
@@ -888,13 +888,13 @@ static int ipa3_wigig_config_uc(bool init,
 			(struct IpaHwOffloadSetUpCmdData_t_v4_0 *)cmd.base;
 
 		cmd_data->protocol = IPA_HW_PROTOCOL_11ad;
-		cmd_data->SetupCh_params.w11ad_params.dir =
+		cmd_data->SetupCh_params.W11AdSetupCh_params.dir =
 			Rx ? W11AD_RX : W11AD_TX;
-		cmd_data->SetupCh_params.w11ad_params.gsi_ch = gsi_ch;
-		cmd_data->SetupCh_params.w11ad_params.wifi_ch = wifi_ch;
-		cmd_data->SetupCh_params.w11ad_params.wifi_hp_addr_msb =
+		cmd_data->SetupCh_params.W11AdSetupCh_params.gsi_ch = gsi_ch;
+		cmd_data->SetupCh_params.W11AdSetupCh_params.wifi_ch = wifi_ch;
+		cmd_data->SetupCh_params.W11AdSetupCh_params.wifi_hp_addr_msb =
 			IPA_WIGIG_MSB(HWHEAD);
-		cmd_data->SetupCh_params.w11ad_params.wifi_hp_addr_lsb =
+		cmd_data->SetupCh_params.W11AdSetupCh_params.wifi_hp_addr_lsb =
 			IPA_WIGIG_LSB(HWHEAD);
 		command = IPA_CPU_2_HW_CMD_OFFLOAD_CHANNEL_SET_UP;
 
@@ -913,8 +913,8 @@ static int ipa3_wigig_config_uc(bool init,
 			(struct IpaHwOffloadCommonChCmdData_t_v4_0 *)cmd.base;
 
 		cmd_data->protocol = IPA_HW_PROTOCOL_11ad;
-		cmd_data->CommonCh_params.w11ad_params.gsi_ch = gsi_ch;
-		command = IPA_CPU_2_HW_CMD_OFFLOAD_CHANNEL_TEAR_DOWN;
+		cmd_data->CommonCh_params.W11AdCommonCh_params.gsi_ch = gsi_ch;
+		command = IPA_CPU_2_HW_CMD_OFFLOAD_TEAR_DOWN;
 	}
 
 	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
@@ -959,7 +959,7 @@ int ipa3_conn_wigig_rx_pipe_i(void *in, struct ipa_wigig_conn_out_params *out,
 
 	ipa_ep_idx = ipa_get_ep_mapping(rx_client);
 	if (ipa_ep_idx == IPA_EP_NOT_ALLOCATED ||
-		ipa_ep_idx >= ipa3_get_max_num_pipes()) {
+		ipa_ep_idx >= IPA3_MAX_NUM_PIPES) {
 		IPAERR("fail to get ep (IPA_CLIENT_WIGIG_PROD) %d.\n",
 			ipa_ep_idx);
 		return -EFAULT;
@@ -1253,7 +1253,7 @@ int ipa3_conn_wigig_client_i(void *in,
 
 	ipa_ep_idx = ipa_get_ep_mapping(tx_client);
 	if (ipa_ep_idx == IPA_EP_NOT_ALLOCATED ||
-		ipa_ep_idx >= ipa3_get_max_num_pipes()) {
+		ipa_ep_idx >= IPA3_MAX_NUM_PIPES) {
 		IPAERR("fail to get ep (%d) %d.\n",
 			tx_client, ipa_ep_idx);
 		return -EFAULT;
@@ -1393,7 +1393,7 @@ int ipa3_disconn_wigig_pipe_i(enum ipa_client_type client,
 
 	ipa_ep_idx = ipa_get_ep_mapping(client);
 	if (ipa_ep_idx == IPA_EP_NOT_ALLOCATED ||
-		ipa_ep_idx >= ipa3_get_max_num_pipes()) {
+		ipa_ep_idx >= IPA3_MAX_NUM_PIPES) {
 		IPAERR("fail to get ep (%d) %d.\n",
 			client, ipa_ep_idx);
 		return -EFAULT;
@@ -1661,7 +1661,7 @@ int ipa3_enable_wigig_pipe_i(enum ipa_client_type client)
 
 	ipa_ep_idx = ipa_get_ep_mapping(client);
 	if (ipa_ep_idx == IPA_EP_NOT_ALLOCATED ||
-		ipa_ep_idx >= ipa3_get_max_num_pipes()) {
+		ipa_ep_idx >= IPA3_MAX_NUM_PIPES) {
 		IPAERR("fail to get ep (%d) %d.\n",
 			client, ipa_ep_idx);
 		return -EFAULT;
@@ -1778,18 +1778,18 @@ int ipa3_disable_wigig_pipe_i(enum ipa_client_type client)
 	struct ipa_ep_cfg_ctrl ep_cfg_ctrl;
 	bool disable_force_clear = false;
 	u32 source_pipe_bitmask = 0;
-	u32 source_pipe_reg_idx = 0;
 	int retry_cnt = 0;
 
 	IPADBG("\n");
 
 	ipa_ep_idx = ipa_get_ep_mapping(client);
-	if (ipa_ep_idx == IPA_EP_NOT_ALLOCATED) {
+	if (ipa_ep_idx == IPA_EP_NOT_ALLOCATED ||
+		ipa_ep_idx >= IPA3_MAX_NUM_PIPES) {
 		IPAERR("fail to get ep (%d) %d.\n",
 			client, ipa_ep_idx);
 		return -EFAULT;
 	}
-	if (ipa_ep_idx >= ipa3_get_max_num_pipes()) {
+	if (ipa_ep_idx >= IPA3_MAX_NUM_PIPES) {
 		IPAERR("ep %d out of range.\n", ipa_ep_idx);
 		return -EFAULT;
 	}
@@ -1810,11 +1810,9 @@ int ipa3_disable_wigig_pipe_i(enum ipa_client_type client)
 
 	IPADBG("pipe %d\n", ipa_ep_idx);
 	if (IPA_CLIENT_IS_PROD(ep->client)) {
-		source_pipe_bitmask = ipahal_get_ep_bit(ipa_ep_idx);
-		source_pipe_reg_idx = ipahal_get_ep_reg_idx(ipa_ep_idx);
+		source_pipe_bitmask = 1 << ipa_ep_idx;
 		res = ipa3_enable_force_clear(ipa_ep_idx,
-				false, source_pipe_bitmask,
-						source_pipe_reg_idx);
+				false, source_pipe_bitmask);
 		if (res) {
 			/*
 			 * assuming here modem SSR, AP can remove
@@ -1960,6 +1958,7 @@ int ipa3_wigig_init_debugfs_i(struct dentry *parent) { return 0; }
 int ipa3_wigig_init_debugfs_i(struct dentry *parent)
 {
 	const mode_t read_write_mode = 0664;
+	struct dentry *file = NULL;
 	struct dentry *dent;
 
 	dent = debugfs_create_dir("ipa_wigig", parent);
@@ -1970,18 +1969,38 @@ int ipa3_wigig_init_debugfs_i(struct dentry *parent)
 
 	wigig_dent = dent;
 
-	debugfs_create_u8("modc", read_write_mode, dent,
+	file = debugfs_create_u8("modc", read_write_mode, dent,
 		&int_modc);
+	if (IS_ERR_OR_NULL(file)) {
+		IPAERR("fail to create file modc\n");
+		goto fail;
+	}
 
-	debugfs_create_u16("modt", read_write_mode, dent,
+	file = debugfs_create_u16("modt", read_write_mode, dent,
 		&int_modt);
+	if (IS_ERR_OR_NULL(file)) {
+		IPAERR("fail to create file modt\n");
+		goto fail;
+	}
 
-	debugfs_create_u8("rx_mod_th", read_write_mode, dent,
+	file = debugfs_create_u8("rx_mod_th", read_write_mode, dent,
 		&rx_hwtail_mod_threshold);
+	if (IS_ERR_OR_NULL(file)) {
+		IPAERR("fail to create file rx_mod_th\n");
+		goto fail;
+	}
 
-	debugfs_create_u8("tx_mod_th", read_write_mode, dent,
+	file = debugfs_create_u8("tx_mod_th", read_write_mode, dent,
 		&tx_hwtail_mod_threshold);
+	if (IS_ERR_OR_NULL(file)) {
+		IPAERR("fail to create file tx_mod_th\n");
+		goto fail;
+	}
 
 	return 0;
+fail:
+	debugfs_remove_recursive(dent);
+	wigig_dent = NULL;
+	return -EFAULT;
 }
 #endif

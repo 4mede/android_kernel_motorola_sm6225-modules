@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -185,42 +184,6 @@ free_vdevref:
 }
 #endif
 
-#ifdef MOBILE_DFS_SUPPORT
-/**
- * target_if_dfs_get_pdev() -  retrieve pdev by id
- * @psoc: PSOC object
- * @id: pdev id
- * @dbg_id: id of the caller
- *
- * Return: pdev pointer
- *         NULL on FAILURE
- */
-static struct wlan_objmgr_pdev *target_if_dfs_get_pdev(
-		struct wlan_objmgr_psoc *psoc, uint8_t id,
-		wlan_objmgr_ref_dbgid dbg_id)
-{
-	struct wlan_objmgr_pdev *pdev;
-
-	pdev = wlan_objmgr_get_pdev_by_id(psoc, id, dbg_id);
-	if (!pdev) {
-		pdev = wlan_objmgr_get_pdev_by_id(psoc, TGT_WMI_PDEV_ID_SOC,
-						  dbg_id);
-		if (!pdev)
-			target_if_err("pdev id %d null pdev",
-				      TGT_WMI_PDEV_ID_SOC);
-	}
-
-	return pdev;
-}
-#else
-static struct wlan_objmgr_pdev *target_if_dfs_get_pdev(
-		struct wlan_objmgr_psoc *psoc, uint8_t id,
-		wlan_objmgr_ref_dbgid dbg_id)
-{
-	return wlan_objmgr_get_pdev_by_id(psoc, id, dbg_id);
-}
-#endif
-
 /**
  * target_if_dfs_radar_detection_event_handler() - Indicate RADAR detection and
  * process RADAR detection.
@@ -270,9 +233,9 @@ static int target_if_dfs_radar_detection_event_handler(
 		return -EFAULT;
 	}
 
-	pdev = target_if_dfs_get_pdev(psoc, radar.pdev_id, WLAN_DFS_ID);
+	pdev = wlan_objmgr_get_pdev_by_id(psoc, radar.pdev_id, WLAN_DFS_ID);
 	if (!pdev) {
-		target_if_err("pdev id %d null pdev", radar.pdev_id);
+		target_if_err("null pdev");
 		return -EINVAL;
 	}
 
@@ -429,8 +392,7 @@ free_vdevref:
 #endif
 
 #if (defined(WLAN_DFS_FULL_OFFLOAD) || defined(QCA_WIFI_QCA8074) || \
-	defined(QCA_WIFI_QCA6018) || defined(QCA_WIFI_QCA5018) || \
-	defined(QCA_WIFI_QCA9574))
+	defined(QCA_WIFI_QCA6018) || defined(QCA_WIFI_QCA5018))
 QDF_STATUS target_process_bang_radar_cmd(
 		struct wlan_objmgr_pdev *pdev,
 		struct dfs_emulate_bang_radar_test_cmd *dfs_unit_test)

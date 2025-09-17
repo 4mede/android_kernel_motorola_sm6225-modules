@@ -345,6 +345,7 @@ static bool dp_mst_bridge_mode_fixup(struct drm_bridge *drm_bridge,
 	dp = bridge->display;
 
 	dp->convert_to_dp_mode(dp, bridge_state->dp_panel, mode, &dp_mode);
+	dp->clear_reservation(dp, bridge_state->dp_panel);
 	convert_to_drm_mode(&dp_mode, adjusted_mode);
 
 	DP_MST_DEBUG("mst bridge [%d] mode:%s fixup\n", bridge->id, mode->name);
@@ -775,6 +776,7 @@ static void dp_mst_bridge_mode_set(struct drm_bridge *drm_bridge,
 	memcpy(&bridge->drm_mode, adjusted_mode, sizeof(bridge->drm_mode));
 	dp->convert_to_dp_mode(dp, bridge->dp_panel, adjusted_mode,
 			&bridge->dp_mode);
+	dp->clear_reservation(dp, dp_bridge_state->dp_panel);
 
 	DP_MST_INFO("mst bridge:%d conn:%d mode set complete %s\n", bridge->id,
 			DP_MST_CONN_ID(bridge), mode->name);
@@ -1202,7 +1204,8 @@ static int dp_mst_connector_atomic_check(struct drm_connector *connector,
 				bridge->num_slots);
 	}
 
-	if (drm_atomic_crtc_needs_modeset(crtc_state)) {
+	/* do not attempt to release vcpi slots if crtc state is enable */
+	if (drm_atomic_crtc_needs_modeset(crtc_state) && !crtc_state->enable) {
 		if (WARN_ON(!old_conn_state->best_encoder)) {
 			rc = -EINVAL;
 			goto end;

@@ -448,11 +448,10 @@ static int ipa_pm_ut_two_clients_activate(void *priv)
 {
 	int rc = 0;
 	int hdl_USB, hdl_WLAN, vote;
-	u32 pipes[IPA_EP_ARR_SIZE] = {0, 0};
+	u32 pipes;
 	struct callback_param user_data_USB;
 	struct callback_param user_data_WLAN;
 	bool wait_for_completion;
-	int ep, i;
 
 	struct ipa_pm_init_params init_params = {
 		.threshold_size = 2,
@@ -599,23 +598,13 @@ static int ipa_pm_ut_two_clients_activate(void *priv)
 		return -EFAULT;
 	}
 
-	ep = ipa_get_ep_mapping(IPA_CLIENT_USB_CONS);
-	if (ep != IPA_EP_NOT_ALLOCATED)
-		pipes[ipahal_get_ep_reg_idx(ep)] |= ipahal_get_ep_bit(ep);
+	pipes = 1 << ipa_get_ep_mapping(IPA_CLIENT_USB_CONS);
+	pipes |= 1 << ipa_get_ep_mapping(IPA_CLIENT_WLAN1_CONS);
+	pipes |= 1 << ipa_get_ep_mapping(IPA_CLIENT_USB_DPL_CONS);
 
-	ep = ipa_get_ep_mapping(IPA_CLIENT_WLAN1_CONS);
-	if (ep != IPA_EP_NOT_ALLOCATED)
-		pipes[ipahal_get_ep_reg_idx(ep)] |= ipahal_get_ep_bit(ep);
+	IPA_UT_DBG("pipes = %d\n", pipes);
 
-	ep = ipa_get_ep_mapping(IPA_CLIENT_USB_DPL_CONS);
-	if (ep != IPA_EP_NOT_ALLOCATED)
-		pipes[ipahal_get_ep_reg_idx(ep)] |= ipahal_get_ep_bit(ep);
-
-	for (i = 0; i < IPA_EP_ARR_SIZE; i++) {
-		IPA_UT_DBG("pipes[%d] = %d\n", i, pipes[i]);
-		if (pipes[i])
-			ipa_pm_handle_suspend(pipes[i], i);
-	}
+	rc = ipa_pm_handle_suspend(pipes);
 
 	if (!wait_for_completion_timeout(&user_data_USB.complete,
 		msecs_to_jiffies(2000))) {
@@ -659,18 +648,9 @@ static int ipa_pm_ut_two_clients_activate(void *priv)
 		return -EFAULT;
 	}
 
-	for (i = 0; i < IPA_EP_ARR_SIZE; i++)
-		pipes[i] = 0;
+	pipes = 1 << ipa_get_ep_mapping(IPA_CLIENT_USB_CONS);
 
-	ep = ipa_get_ep_mapping(IPA_CLIENT_USB_CONS);
-	if (ep != IPA_EP_NOT_ALLOCATED)
-		pipes[ipahal_get_ep_reg_idx(ep)] |= ipahal_get_ep_bit(ep);
-
-	for (i = 0; i < IPA_EP_ARR_SIZE; i++) {
-		IPA_UT_DBG("pipes[%d] = %d\n", i, pipes[i]);
-		if (pipes[i])
-			ipa_pm_handle_suspend(pipes[i], i);
-	}
+	rc = ipa_pm_handle_suspend(pipes);
 
 	if (!wait_for_completion_timeout(&user_data_USB.complete,
 		msecs_to_jiffies(2000))) {

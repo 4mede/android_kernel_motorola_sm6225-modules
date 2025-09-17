@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ *
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -26,10 +26,6 @@
 #define __REG_PRIV_OBJS_H
 
 #include <wlan_scan_public_structs.h>
-#ifdef CONFIG_AFC_SUPPORT
-#include "reg_services_common.h"
-#endif
-#include <wlan_objmgr_psoc_obj.h>
 
 #define reg_alert(params...) \
 	QDF_TRACE_FATAL(QDF_MODULE_ID_REGULATORY, params)
@@ -84,21 +80,6 @@ struct chan_change_cbk_entry {
 	void *arg;
 };
 
-#ifdef CONFIG_REG_CLIENT
-#define MAX_INDOOR_LIST_SIZE 3
-
-/**
- * struct indoor_concurrency_list - Active indoor station list
- * @vdev_id: vdev ID
- * @freq: frequency of the interface
- * @chan_range: Range of channels based on bandwidth
- */
-struct indoor_concurrency_list {
-	uint8_t vdev_id;
-	uint32_t freq;
-	const struct bonded_channel_freq *chan_range;
-};
-#endif
 /**
  * struct wlan_regulatory_psoc_priv_obj - wlan regulatory psoc private object
  * @mas_chan_params: master channel parameters list
@@ -128,13 +109,6 @@ struct indoor_concurrency_list {
  * supported
  * @is_upper_6g_edge_ch_disabled: whether upper 6ghz edge channel 7115MHz is
  * disabled
- * @ch_avoid_ext_ind: whether need to update extended channel frequency list
- * @avoid_freq_ext_list: the extended avoid channel frequency list
- * @coex_unsafe_chan_nb_user_prefer: Honor coex unsafe chan cmd from firmware or
- * userspace
- * @coex_unsafe_chan_reg_disable: To disable reg channels for received coex
- * unsafe channels list
- * @sta_sap_scc_on_indoor_channel: Value of sap+sta scc on indoor support
  */
 struct wlan_regulatory_psoc_priv_obj {
 	struct mas_chan_params mas_chan_params[PSOC_MAX_PHY_REG_CAP];
@@ -192,17 +166,10 @@ struct wlan_regulatory_psoc_priv_obj {
 	uint8_t domain_code_6g_client[REG_CURRENT_MAX_AP_TYPE][REG_MAX_CLIENT_TYPE];
 #endif
 	bool is_ext_tpc_supported;
-#if defined(CONFIG_BAND_6GHZ)
+#if defined(CONFIG_BAND_6GHZ) && defined(CONFIG_REG_CLIENT)
 	bool is_lower_6g_edge_ch_supported;
 	bool is_upper_6g_edge_ch_disabled;
 #endif
-#ifdef FEATURE_WLAN_CH_AVOID_EXT
-	bool ch_avoid_ext_ind;
-	struct ch_avoid_ind_type avoid_freq_ext_list;
-	bool coex_unsafe_chan_nb_user_prefer;
-	bool coex_unsafe_chan_reg_disable;
-#endif
-	bool sta_sap_scc_on_indoor_channel;
 };
 
 /**
@@ -211,7 +178,6 @@ struct wlan_regulatory_psoc_priv_obj {
  * @secondary_cur_chan_list: secondary current channel list, for concurrency
  * situations
  * @mas_chan_list: master channel list
- * from the firmware.
  * @is_6g_channel_list_populated: indicates the channel lists are populated
  * @mas_chan_list_6g_ap: master channel list for 6G AP, includes all power types
  * @mas_chan_list_6g_client: master channel list for 6G client, includes
@@ -226,25 +192,6 @@ struct wlan_regulatory_psoc_priv_obj {
  * domain.
  * @reg_unspecified_ap_usable: Indicates if the AP type mentioned is not part of
  * 802.11 standard.
- * @max_phymode: The maximum phymode supported by the device and regulatory.
- * @max_chwidth: The maximum bandwidth corresponding to the maximum phymode.
- * @avoid_chan_ext_list: the extended avoid frequency list.
- * @afc_cb_lock: The spinlock to synchronize afc callbacks
- * @afc_cb_obj: The object containing the callback function and opaque argument
- * @afc_request_id: The last AFC request id received from FW/halphy
- * @is_6g_afc_power_event_received: indicates if the AFC power event is
- * received
- * @is_6g_afc_expiry_event_received: indicates if the AFC exipiry event is
- * received
- * @afc_chan_list: Intersection of AFC master and Standard power channel list
- * @mas_chan_list_6g_afc: AFC master channel list constructed from the AFC
- * server response.
- * @power_info: pointer to AFC power information received from the AFC event
- * sent by the target
- * @is_reg_noaction_on_afc_pwr_evt: indicates whether regulatory needs to
- * take action when AFC Power event is received
- * @sta_sap_scc_on_indoor_channel: Value of sap+sta scc on indoor support
- * @indoor_concurrency_list: List of current indoor station interfaces
  */
 struct wlan_regulatory_pdev_priv_obj {
 	struct regulatory_channel cur_chan_list[NUM_CHANNELS];
@@ -284,7 +231,7 @@ struct wlan_regulatory_pdev_priv_obj {
 	uint32_t band_capability;
 	bool indoor_chan_enabled;
 	bool en_chan_144;
-	uint64_t wireless_modes;
+	uint32_t wireless_modes;
 	struct ch_avoid_ind_type freq_avoid_list;
 	bool force_ssc_disable_indoor_channel;
 	bool sap_state;
@@ -297,28 +244,6 @@ struct wlan_regulatory_pdev_priv_obj {
 	enum reg_6g_client_type reg_cur_6g_client_mobility_type;
 	bool reg_rnr_tpe_usable;
 	bool reg_unspecified_ap_usable;
-#endif
-#ifdef CONFIG_HOST_FIND_CHAN
-	enum reg_phymode max_phymode;
-	enum phy_ch_width max_chwidth;
-#endif
-#ifdef FEATURE_WLAN_CH_AVOID_EXT
-	avoid_ch_ext_list avoid_chan_ext_list;
-#endif
-#ifdef CONFIG_AFC_SUPPORT
-	qdf_spinlock_t afc_cb_lock;
-	struct afc_cb_handler afc_cb_obj;
-	uint64_t afc_request_id;
-	bool is_6g_afc_power_event_received;
-	bool is_6g_afc_expiry_event_received;
-	struct regulatory_channel afc_chan_list[NUM_6GHZ_CHANNELS];
-	struct regulatory_channel mas_chan_list_6g_afc[NUM_6GHZ_CHANNELS];
-	struct reg_fw_afc_power_event *power_info;
-	bool is_reg_noaction_on_afc_pwr_evt;
-#endif
-	bool sta_sap_scc_on_indoor_channel;
-#ifdef CONFIG_REG_CLIENT
-	struct indoor_concurrency_list indoor_list[MAX_INDOOR_LIST_SIZE];
 #endif
 };
 
@@ -391,20 +316,4 @@ QDF_STATUS wlan_regulatory_pdev_obj_created_notification(
  */
 QDF_STATUS wlan_regulatory_pdev_obj_destroyed_notification(
 		struct wlan_objmgr_pdev *pdev, void *arg_list);
-
-#ifdef CONFIG_AFC_SUPPORT
-/**
- * reg_free_afc_pwr_info() - Free the AFC power information object
- * @pdev_priv_obj: Pointer to pdev_priv_obj
- *
- * Return: void
- */
-void
-reg_free_afc_pwr_info(struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj);
-#else
-static inline void
-reg_free_afc_pwr_info(struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj)
-{
-}
-#endif
 #endif

@@ -477,7 +477,7 @@ int cam_res_mgr_gpio_request(struct device *dev, uint gpio,
 }
 EXPORT_SYMBOL(cam_res_mgr_gpio_request);
 
-#ifdef CONFIG_CAMERA_FLASH_SPES
+#ifdef CONFIG_CAMERA_FLASH_PWM
 void cam_res_mgr_gpio_free(struct device *dev, uint gpio)
 #else
 static void cam_res_mgr_gpio_free(struct device *dev, uint gpio)
@@ -539,7 +539,7 @@ static void cam_res_mgr_gpio_free(struct device *dev, uint gpio)
 	if (need_free)
 		gpio_free(gpio);
 }
-#ifdef CONFIG_CAMERA_FLASH_SPES
+#ifdef CONFIG_CAMERA_FLASH_PWM
 EXPORT_SYMBOL(cam_res_mgr_gpio_free);
 #endif
 
@@ -676,9 +676,6 @@ static int cam_res_mgr_parse_dt(struct device *dev)
 static int cam_res_mgr_probe(struct platform_device *pdev)
 {
 	int rc = 0;
-
-	if (cam_res)
-		return 0;
 
 	cam_res = kzalloc(sizeof(*cam_res), GFP_KERNEL);
 	if (!cam_res)

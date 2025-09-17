@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -247,21 +246,15 @@ wlan_ser_move_non_scan_pending_to_active(
 	bool vdev_cmd_active = 0;
 	bool vdev_queue_lookup = false;
 
+	pdev_queue = &ser_pdev_obj->pdev_q[SER_PDEV_QUEUE_COMP_NON_SCAN];
+
+	ser_vdev_obj = wlan_serialization_get_vdev_obj(vdev);
+	vdev_queue = &ser_vdev_obj->vdev_q[SER_VDEV_QUEUE_COMP_NON_SCAN];
+
 	if (!ser_pdev_obj) {
 		ser_err("Can't find ser_pdev_obj");
 		goto error;
 	}
-
-	pdev_queue = &ser_pdev_obj->pdev_q[SER_PDEV_QUEUE_COMP_NON_SCAN];
-
-	ser_vdev_obj = wlan_serialization_get_vdev_obj(vdev);
-
-	if (!ser_vdev_obj) {
-		ser_err("Can't find ser_vdev_obj");
-		goto error;
-	}
-
-	vdev_queue = &ser_vdev_obj->vdev_q[SER_VDEV_QUEUE_COMP_NON_SCAN];
 
 	wlan_serialization_acquire_lock(&pdev_queue->pdev_queue_lock);
 
@@ -563,11 +556,9 @@ wlan_ser_cancel_non_scan_cmd(
 			qdf_container_of(nnode,
 					 struct wlan_serialization_command_list,
 					 pdev_node);
-		if (cmd &&
-		    !(wlan_serialization_match_cmd_id_type(nnode, cmd,
-							  WLAN_SER_PDEV_NODE) &&
-		      wlan_serialization_match_cmd_vdev(nnode, cmd->vdev,
-							WLAN_SER_PDEV_NODE))) {
+		if (cmd && !wlan_serialization_match_cmd_id_type(
+							nnode, cmd,
+							WLAN_SER_PDEV_NODE)) {
 			pnode = nnode;
 			continue;
 		}

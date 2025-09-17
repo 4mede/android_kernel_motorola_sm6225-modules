@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -54,33 +53,6 @@ void hif_pci_disable_power_management(struct hif_softc *hif_ctx);
 int hif_pci_configure_grp_irq(struct hif_softc *scn,
 			      struct hif_exec_context *exec);
 void hif_pci_deconfigure_grp_irq(struct hif_softc *scn);
-
-/**
- * hif_pci_reg_read32() - Read register in 32bits
- * @hif_sc: PCIe control struct
- * @offset: The register offset
- *
- * This function will read register in 32bits
- *
- * Return: return value for register with specified offset
- */
-uint32_t hif_pci_reg_read32(struct hif_softc *hif_sc,
-			    uint32_t offset);
-
-/**
- * hif_pci_reg_write32() - Write register in 32bits
- * @hif_sc: PCIe control struct
- * @offset: The register offset
- * @value: The value need to be written
- *
- * This function will write register in 32bits
- *
- * Return: None
- */
-void hif_pci_reg_write32(struct hif_softc *hif_sc,
-			 uint32_t offset,
-			 uint32_t value);
-
 void hif_pci_display_stats(struct hif_softc *hif_ctx);
 void hif_pci_clear_stats(struct hif_softc *hif_ctx);
 int hif_pci_legacy_map_ce_to_irq(struct hif_softc *scn, int ce_id);
@@ -96,19 +68,4 @@ const char *hif_pci_get_irq_name(int irq_no);
  * Return: None
  */
 void hif_pci_config_irq_affinity(struct hif_softc *scn);
-int hif_ce_msi_configure_irq_by_ceid(struct hif_softc *scn, int ce_id);
-
-#ifdef FEATURE_IRQ_AFFINITY
-/*
- * hif_pci_set_grp_intr_affinity() - Set irq affinity hint for grp
- *  intrs based on bitmask
- * @scn: hif context
- * @grp_intr_bitmask:
- * @perf: affine to perf or non-perf cluster
- *
- * Return: None
- */
-void hif_pci_set_grp_intr_affinity(struct hif_softc *scn,
-				   uint32_t grp_intr_bitmask, bool perf);
-#endif
 #endif /* _PCI_API_H_ */

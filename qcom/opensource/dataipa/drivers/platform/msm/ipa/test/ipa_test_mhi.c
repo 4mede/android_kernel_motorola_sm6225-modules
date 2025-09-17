@@ -8,7 +8,7 @@
 #include <linux/ipa.h>
 #include "ipa_i.h"
 #include "gsi.h"
-#include "gsihal.h"
+#include "gsi_reg.h"
 #include "ipa_ut_framework.h"
 
 #define IPA_MHI_TEST_NUM_CHANNELS		8
@@ -322,6 +322,7 @@ struct ipa_mhi_transfer_ring_element {
  * struct ipa_test_mhi_context - MHI test context
  */
 struct ipa_test_mhi_context {
+	void __iomem *gsi_mmio;
 	struct ipa_mem_buffer msi;
 	struct ipa_mem_buffer ch_ctx_array;
 	struct ipa_mem_buffer ev_ctx_array;
@@ -650,7 +651,7 @@ static int ipa_mhi_test_config_channel_context(
 	p_channels[ch_idx].rp = (u32)transfer_ring_bufs[ch_idx].phys_base;
 	p_channels[ch_idx].wp = (u32)transfer_ring_bufs[ch_idx].phys_base;
 	p_channels[ch_idx].chtype = ch_type;
-	p_channels[ch_idx].brsmode = IPA_MHI_BURST_MODE_DISABLE;
+	p_channels[ch_idx].brsmode = IPA_MHI_BURST_MODE_DEFAULT;
 	p_channels[ch_idx].pollcfg = 0;
 
 	return 0;
@@ -808,10 +809,20 @@ static int ipa_test_mhi_suite_setup(void **ppriv)
 		goto fail_free_ctx;
 	}
 
+	test_mhi_ctx->gsi_mmio =
+	    ioremap(test_mhi_ctx->transport_phys_addr,
+			    test_mhi_ctx->transport_size);
+	if (!test_mhi_ctx->gsi_mmio) {
+		IPA_UT_ERR("failed to remap GSI HW size=%lu\n",
+			   test_mhi_ctx->transport_size);
+		rc = -EFAULT;
+		goto fail_free_ctx;
+	}
+
 	rc = ipa_test_mhi_alloc_mmio_space();
 	if (rc) {
 		IPA_UT_ERR("failed to alloc mmio space");
-		goto fail_free_ctx;
+		goto fail_iounmap;
 	}
 
 	rc = ipa_mhi_test_setup_data_structures();
@@ -838,6 +849,8 @@ fail_destroy_data_structures:
 	ipa_mhi_test_destroy_data_structures();
 fail_free_mmio_spc:
 	ipa_test_mhi_free_mmio_space();
+fail_iounmap:
+	iounmap(test_mhi_ctx->gsi_mmio);
 fail_free_ctx:
 	kfree(test_mhi_ctx);
 	test_mhi_ctx = NULL;
@@ -857,6 +870,7 @@ static int ipa_test_mhi_suite_teardown(void *priv)
 	ipa_teardown_sys_pipe(test_mhi_ctx->test_prod_hdl);
 	ipa_mhi_test_destroy_data_structures();
 	ipa_test_mhi_free_mmio_space();
+	iounmap(test_mhi_ctx->gsi_mmio);
 	kfree(test_mhi_ctx);
 	test_mhi_ctx = NULL;
 
@@ -1154,6 +1168,13 @@ static int ipa_mhi_test_channel_reset(void)
 		sizeof(struct ipa_mhi_channel_context_array));
 	p_ch_ctx_array = test_mhi_ctx->ch_ctx_array.base +
 		(phys_addr - test_mhi_ctx->ch_ctx_array.phys_base);
+	if (p_ch_ctx_array->chstate != IPA_HW_MHI_CHANNEL_STATE_DISABLE) {
+		IPA_UT_LOG("chstate is not disabled! ch %d chstate %s\n",
+			IPA_MHI_TEST_FIRST_CHANNEL_ID + 1,
+			MHI_STATE_STR(p_ch_ctx_array->chstate));
+		IPA_UT_TEST_FAIL_REPORT("CONS pipe state is not disabled");
+		return -EFAULT;
+	}
 
 	dma_free_coherent(ipa3_ctx->pdev,
 		test_mhi_ctx->xfer_ring_bufs[1].size,
@@ -1188,6 +1209,13 @@ static int ipa_mhi_test_channel_reset(void)
 		sizeof(struct ipa_mhi_channel_context_array));
 	p_ch_ctx_array = test_mhi_ctx->ch_ctx_array.base +
 		(phys_addr - test_mhi_ctx->ch_ctx_array.phys_base);
+	if (p_ch_ctx_array->chstate != IPA_HW_MHI_CHANNEL_STATE_DISABLE) {
+		IPA_UT_LOG("chstate is not disabled! ch %d chstate %s\n",
+			IPA_MHI_TEST_FIRST_CHANNEL_ID,
+			MHI_STATE_STR(p_ch_ctx_array->chstate));
+		IPA_UT_TEST_FAIL_REPORT("PROD pipe state is not disabled");
+		return -EFAULT;
+	}
 
 	dma_free_coherent(ipa3_ctx->pdev, test_mhi_ctx->xfer_ring_bufs[0].size,
 		test_mhi_ctx->xfer_ring_bufs[0].base,
@@ -1371,11 +1399,12 @@ static int ipa_mhi_test_q_transfer_re(struct ipa_mem_buffer *mmio,
 		IPA_UT_LOG("DB to event 0x%llx: base %pa ofst 0x%x\n",
 			p_events[event_ring_index].wp,
 			&(test_mhi_ctx->transport_phys_addr),
-			gsihal_get_reg_nk_ofst(GSI_EE_n_EV_CH_k_DOORBELL_0, 0,
-			event_ring_index + ipa3_ctx->mhi_evid_limits[0]));
-		gsihal_write_reg_nk(GSI_EE_n_EV_CH_k_DOORBELL_0, 0,
-			event_ring_index + ipa3_ctx->mhi_evid_limits[0],
-			p_events[event_ring_index].wp);
+			GSI_EE_n_EV_CH_k_DOORBELL_0_OFFS(
+			event_ring_index + ipa3_ctx->mhi_evid_limits[0], 0));
+		iowrite32(p_events[event_ring_index].wp,
+			test_mhi_ctx->gsi_mmio +
+			GSI_EE_n_EV_CH_k_DOORBELL_0_OFFS(
+			event_ring_index + ipa3_ctx->mhi_evid_limits[0], 0));
 	}
 
 	for (i = 0; i < buf_array_size; i++) {
@@ -1417,13 +1446,12 @@ static int ipa_mhi_test_q_transfer_re(struct ipa_mem_buffer *mmio,
 					"DB to channel 0x%llx: base %pa ofst 0x%x\n"
 					, p_channels[channel_idx].wp
 					, &(test_mhi_ctx->transport_phys_addr)
-					, gsihal_get_reg_nk_ofst(
-						GSI_EE_n_GSI_CH_k_DOORBELL_0,
-						0, channel_idx));
-				gsihal_write_reg_nk(
-					GSI_EE_n_GSI_CH_k_DOORBELL_0,
-					0, channel_idx,
-					p_channels[channel_idx].wp);
+					, GSI_EE_n_GSI_CH_k_DOORBELL_0_OFFS(
+						channel_idx, 0));
+				iowrite32(p_channels[channel_idx].wp,
+					test_mhi_ctx->gsi_mmio +
+					GSI_EE_n_GSI_CH_k_DOORBELL_0_OFFS(
+					channel_idx, 0));
 			}
 		} else {
 			curr_re->word_C.bits.chain = 1;
@@ -1769,8 +1797,7 @@ static int ipa_mhi_test_create_aggr_open_frame(void)
 	struct sk_buff *skb;
 	int rc;
 	int i;
-	u64 aggr_state_active;
-	enum ipa_hw_type ipa_ver;
+	u32 aggr_state_active;
 
 	IPA_UT_LOG("Entry\n");
 
@@ -1827,18 +1854,7 @@ static int ipa_mhi_test_create_aggr_open_frame(void)
 
 	msleep(20);
 
-	ipa_ver = ipa_get_hw_type();
-	if (ipa_ver >= IPA_HW_v5_0) {
-		aggr_state_active =
-			(u64)ipahal_read_ep_reg_n(IPA_STATE_AGGR_ACTIVE_n, 0,
-						test_mhi_ctx->cons_hdl) |
-			(((u64)ipahal_read_ep_reg_n(IPA_STATE_AGGR_ACTIVE_n, 1,
-						test_mhi_ctx->cons_hdl)) << 32);
-	} else {
-		aggr_state_active =
-			(u64)ipahal_read_reg(IPA_STATE_AGGR_ACTIVE);
-	}
-
+	aggr_state_active = ipahal_read_reg(IPA_STATE_AGGR_ACTIVE);
 	IPA_UT_LOG("IPA_STATE_AGGR_ACTIVE  0x%x\n", aggr_state_active);
 	if (aggr_state_active == 0) {
 		IPA_UT_LOG("No aggregation frame open!\n");
@@ -1908,13 +1924,7 @@ static int ipa_mhi_test_suspend_aggr_open(bool force)
 		IPA_UT_LOG("AFTER resume\n");
 	}
 
-	if (ipa_get_hw_type() >= IPA_HW_v5_0)
-		ipahal_write_ep_reg(IPA_AGGR_FORCE_CLOSE_n,
-			test_mhi_ctx->cons_hdl,
-			ipahal_get_ep_bit(test_mhi_ctx->cons_hdl));
-	else
-		ipahal_write_reg(IPA_AGGR_FORCE_CLOSE,
-			ipahal_get_ep_bit(test_mhi_ctx->cons_hdl));
+	ipahal_write_reg(IPA_AGGR_FORCE_CLOSE, (1 << test_mhi_ctx->cons_hdl));
 
 	IPA_MHI_TEST_CHECK_MSI_INTR(false, timeout);
 	if (timeout) {
@@ -2272,7 +2282,6 @@ static int ipa_mhi_test_channel_reset_aggr_open(void)
 	int rc;
 	u32 aggr_state_active;
 	struct ipa_ep_cfg_aggr ep_aggr;
-	enum ipa_hw_type ipa_ver;
 
 	IPA_UT_LOG("Entry\n");
 
@@ -2290,16 +2299,7 @@ static int ipa_mhi_test_channel_reset_aggr_open(void)
 		return rc;
 	}
 
-	ipa_ver = ipa_get_hw_type();
-	if (ipa_ver >= IPA_HW_v5_0) {
-		aggr_state_active =
-			ipahal_read_ep_reg(IPA_STATE_AGGR_ACTIVE_n,
-				test_mhi_ctx->cons_hdl);
-	} else {
-		aggr_state_active =
-			ipahal_read_reg(IPA_STATE_AGGR_ACTIVE);
-	}
-
+	aggr_state_active = ipahal_read_reg(IPA_STATE_AGGR_ACTIVE);
 	IPADBG("IPA_STATE_AGGR_ACTIVE 0x%x\n", aggr_state_active);
 	if (aggr_state_active != 0) {
 		IPA_UT_LOG("aggregation frame open after reset!\n");

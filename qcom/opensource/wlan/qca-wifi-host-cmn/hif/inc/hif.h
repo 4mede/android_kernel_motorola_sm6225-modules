@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -41,8 +41,6 @@ extern "C" {
 #endif
 #include "cfg_ucfg_api.h"
 #include "qdf_dev.h"
-#include <wlan_init_cfg.h>
-
 #define ENABLE_MBOX_DUMMY_SPACE_FEATURE 1
 
 typedef void __iomem *A_target_id_t;
@@ -77,10 +75,7 @@ typedef void *hif_handle_t;
 #define HIF_TYPE_QCA6490 22
 #define HIF_TYPE_QCA6750 23
 #define HIF_TYPE_QCA5018 24
-#define HIF_TYPE_QCN6122 25
-#define HIF_TYPE_KIWI 26
-#define HIF_TYPE_QCN9224 27
-#define HIF_TYPE_QCA9574 28
+#define HIF_TYPE_QCN9100 25
 
 #define DMA_COHERENT_MASK_DEFAULT   37
 
@@ -131,20 +126,11 @@ enum hif_ic_irq {
 };
 
 struct CE_state;
-#ifdef QCA_WIFI_QCN9224
-#define CE_COUNT_MAX 16
-#else
 #define CE_COUNT_MAX 12
-#endif
+#define HIF_MAX_GRP_IRQ 16
 
 #ifndef HIF_MAX_GROUP
-#define HIF_MAX_GROUP WLAN_CFG_INT_NUM_CONTEXTS
-#endif
-
-#ifdef CONFIG_BERYLLIUM
-#define HIF_MAX_GRP_IRQ 25
-#else
-#define HIF_MAX_GRP_IRQ 16
+#define HIF_MAX_GROUP 7
 #endif
 
 #ifndef NAPI_YIELD_BUDGET_BASED
@@ -374,12 +360,11 @@ enum hif_system_pm_state {
 };
 
 #ifdef WLAN_FEATURE_DP_EVENT_HISTORY
-#define HIF_NUM_INT_CONTEXTS		HIF_MAX_GROUP
 
-#if defined(HIF_CONFIG_SLUB_DEBUG_ON) || defined(HIF_CE_DEBUG_DATA_BUF)
+#if defined(HIF_CONFIG_SLUB_DEBUG_ON)
 /* HIF_EVENT_HIST_MAX should always be power of 2 */
 #define HIF_EVENT_HIST_MAX		512
-
+#define HIF_NUM_INT_CONTEXTS		HIF_MAX_GROUP
 #define HIF_EVENT_HIST_ENABLE_MASK	0xFF
 
 static inline uint64_t hif_get_log_timestamp(void)
@@ -390,6 +375,7 @@ static inline uint64_t hif_get_log_timestamp(void)
 #else
 
 #define HIF_EVENT_HIST_MAX		32
+#define HIF_NUM_INT_CONTEXTS		HIF_MAX_GROUP
 /* Enable IRQ TRIGGER, NAPI SCHEDULE, SRNG ACCESS START */
 #define HIF_EVENT_HIST_ENABLE_MASK	0x19
 
@@ -526,14 +512,6 @@ static inline void hif_event_history_deinit(struct hif_opaque_softc *hif_ctx,
 {
 }
 #endif /* WLAN_FEATURE_DP_EVENT_HISTORY */
-
-void hif_display_ctrl_traffic_pipes_state(struct hif_opaque_softc *hif_ctx);
-
-#if defined(HIF_CONFIG_SLUB_DEBUG_ON) || defined(HIF_CE_DEBUG_DATA_BUF)
-void hif_display_latest_desc_hist(struct hif_opaque_softc *hif_ctx);
-#else
-static inline void hif_display_latest_desc_hist(struct hif_opaque_softc *hif_ctx) {}
-#endif
 
 /**
  * enum HIF_DEVICE_POWER_CHANGE_TYPE: Device Power change type
@@ -709,25 +687,6 @@ hif_needs_bmi(struct hif_opaque_softc *hif_ctx)
 	return false;
 }
 #endif /* WLAN_FEATURE_BMI */
-
-#ifdef HIF_CPU_CLEAR_AFFINITY
-/**
- * hif_config_irq_clear_cpu_affinity() - Remove cpu affinity of IRQ
- * @scn: HIF handle
- * @intr_ctxt_id: interrupt group index
- * @cpu: CPU core to clear
- *
- * Return: None
- */
-void hif_config_irq_clear_cpu_affinity(struct hif_opaque_softc *scn,
-				       int intr_ctxt_id, int cpu);
-#else
-static inline
-void hif_config_irq_clear_cpu_affinity(struct hif_opaque_softc *scn,
-				       int intr_ctxt_id, int cpu)
-{
-}
-#endif
 
 /*
  * APIs to handle HIF specific diagnostic read accesses. These APIs are
@@ -1066,37 +1025,21 @@ hif_pm_wake_irq_type hif_pm_get_wake_irq_type(struct hif_opaque_softc *hif_ctx);
  * @RTPM_ID_DW_TX_HW_ENQUEUE:   operation in functin dp_tx_hw_enqueue
  * @RTPM_ID_HAL_REO_CMD:        HAL_REO_CMD operation
  * @RTPM_ID_DP_PRINT_RING_STATS:  operation in dp_print_ring_stats
- * @RTPM_ID_PM_STOP:        operation in hif_pm_runtime_stop
- * @RTPM_ID_CONN_DISCONNECT:operation when issue disconnect
- * @RTPM_ID_SOC_REMOVE: operation in soc remove
- * @RTPM_ID_DRIVER_UNLOAD: operation in driver unload
- * @RTPM_ID_CE_INTR_HANDLER: operation from ce interrupt handler
- * @RTPM_ID_WAKE_INTR_HANDLER: operation from wake interrupt handler
- * @RTPM_ID_SOC_IDLE_SHUTDOWN: operation in soc idle shutdown
- * @RTPM_ID_HIF_FORCE_WAKE: operation in hif force wake
  */
 /* New value added to the enum must also be reflected in function
  *  rtpm_string_from_dbgid()
  */
 typedef enum {
 	RTPM_ID_RESVERD   = 0,
-	RTPM_ID_WMI,
-	RTPM_ID_HTC,
-	RTPM_ID_QOS_NOTIFY,
-	RTPM_ID_DP_TX_DESC_ALLOC_FREE,
-	RTPM_ID_CE_SEND_FAST,
-	RTPM_ID_SUSPEND_RESUME,
-	RTPM_ID_DW_TX_HW_ENQUEUE,
-	RTPM_ID_HAL_REO_CMD,
-	RTPM_ID_DP_PRINT_RING_STATS,
-	RTPM_ID_PM_STOP,
-	RTPM_ID_CONN_DISCONNECT,
-	RTPM_ID_SOC_REMOVE,
-	RTPM_ID_DRIVER_UNLOAD,
-	RTPM_ID_CE_INTR_HANDLER,
-	RTPM_ID_WAKE_INTR_HANDLER,
-	RTPM_ID_SOC_IDLE_SHUTDOWN,
-	RTPM_ID_HIF_FORCE_WAKE,
+	RTPM_ID_WMI       = 1,
+	RTPM_ID_HTC       = 2,
+	RTPM_ID_QOS_NOTIFY  = 3,
+	RTPM_ID_DP_TX_DESC_ALLOC_FREE  = 4,
+	RTPM_ID_CE_SEND_FAST       = 5,
+	RTPM_ID_SUSPEND_RESUME     = 6,
+	RTPM_ID_DW_TX_HW_ENQUEUE   = 7,
+	RTPM_ID_HAL_REO_CMD        = 8,
+	RTPM_ID_DP_PRINT_RING_STATS  = 9,
 
 	RTPM_ID_MAX,
 } wlan_rtpm_dbgid;
@@ -1121,13 +1064,6 @@ static inline char *rtpm_string_from_dbgid(wlan_rtpm_dbgid id)
 					"RTPM_ID_DW_TX_HW_ENQUEUE",
 					"RTPM_ID_HAL_REO_CMD",
 					"RTPM_ID_DP_PRINT_RING_STATS",
-					"RTPM_ID_PM_STOP",
-					"RTPM_ID_CONN_DISCONNECT",
-					"RTPM_ID_SOC_REMOVE",
-					"RTPM_ID_DRIVER_UNLOAD",
-					"RTPM_ID_CE_INTR_HANDLER",
-					"RTPM_ID_WAKE_INTR_HANDLER",
-					"RTPM_ID_SOC_IDLE_SHUTDOWN",
 					"RTPM_ID_MAX"};
 
 	return (char *)strings[id];
@@ -1207,8 +1143,7 @@ int hif_pm_runtime_get_sync(struct hif_opaque_softc *hif_ctx,
 			    wlan_rtpm_dbgid rtpm_dbgid);
 int hif_pm_runtime_put_sync_suspend(struct hif_opaque_softc *hif_ctx,
 				    wlan_rtpm_dbgid rtpm_dbgid);
-int hif_pm_runtime_request_resume(struct hif_opaque_softc *hif_ctx,
-				  wlan_rtpm_dbgid rtpm_dbgid);
+int hif_pm_runtime_request_resume(struct hif_opaque_softc *hif_ctx);
 int hif_pm_runtime_get(struct hif_opaque_softc *hif_ctx,
 		       wlan_rtpm_dbgid rtpm_dbgid,
 		       bool is_critical_ctx);
@@ -1236,8 +1171,7 @@ void hif_pm_runtime_check_and_request_resume(struct hif_opaque_softc *hif_ctx);
 void hif_pm_runtime_mark_dp_rx_busy(struct hif_opaque_softc *hif_ctx);
 int hif_pm_runtime_is_dp_rx_busy(struct hif_opaque_softc *hif_ctx);
 qdf_time_t hif_pm_runtime_get_dp_rx_busy_mark(struct hif_opaque_softc *hif_ctx);
-int hif_pm_runtime_sync_resume(struct hif_opaque_softc *hif_ctx,
-			       wlan_rtpm_dbgid rtpm_dbgid);
+int hif_pm_runtime_sync_resume(struct hif_opaque_softc *hif_ctx);
 void hif_pm_runtime_update_stats(struct hif_opaque_softc *hif_ctx,
 				 wlan_rtpm_dbgid rtpm_dbgid,
 				 enum hif_pm_htc_stats stats);
@@ -1257,31 +1191,6 @@ void hif_pm_set_link_state(struct hif_opaque_softc *hif_handle, uint8_t val);
  * Return: 1 link is up, 0 link is down
  */
 uint8_t hif_pm_get_link_state(struct hif_opaque_softc *hif_handle);
-
-/**
- * hif_pm_runtime_set_delay() - Set delay to trigger RTPM suspend
- * @hif_sc: HIF Context
- * @delay: delay in ms to be set
- *
- * Return: Success if delay is set successfully
- */
-QDF_STATUS hif_pm_runtime_set_delay(struct hif_opaque_softc *hif_ctx,
-				    int delay);
-
-/**
- * hif_pm_runtime_restore_delay() - Restore delay value to default value
- *
- * Return: Success if reset done. E_ALREADY if delay same as config value
- */
-QDF_STATUS hif_pm_runtime_restore_delay(struct hif_opaque_softc *hif_ctx);
-
-/**
- * hif_pm_runtime_get_delay() -Get delay to trigger RTPM suspend
- *
- * Return: Delay in ms
- */
-int hif_pm_runtime_get_delay(struct hif_opaque_softc *hif_ctx);
-
 #else
 struct hif_pm_runtime_lock {
 	const char *name;
@@ -1296,8 +1205,7 @@ hif_pm_runtime_put_sync_suspend(struct hif_opaque_softc *hif_ctx,
 				wlan_rtpm_dbgid rtpm_dbgid)
 { return 0; }
 static inline int
-hif_pm_runtime_request_resume(struct hif_opaque_softc *hif_ctx,
-			      wlan_rtpm_dbgid rtpm_dbgid)
+hif_pm_runtime_request_resume(struct hif_opaque_softc *hif_ctx)
 { return 0; }
 static inline void
 hif_pm_runtime_get_noresume(struct hif_opaque_softc *hif_ctx,
@@ -1355,8 +1263,7 @@ hif_pm_runtime_is_dp_rx_busy(struct hif_opaque_softc *hif_ctx)
 static inline qdf_time_t
 hif_pm_runtime_get_dp_rx_busy_mark(struct hif_opaque_softc *hif_ctx)
 { return 0; }
-static inline int hif_pm_runtime_sync_resume(struct hif_opaque_softc *hif_ctx,
-					     wlan_rtpm_dbgid rtpm_dbgid)
+static inline int hif_pm_runtime_sync_resume(struct hif_opaque_softc *hif_ctx)
 { return 0; }
 static inline
 void hif_pm_set_link_state(struct hif_opaque_softc *hif_handle, uint8_t val)
@@ -1367,18 +1274,6 @@ void hif_pm_runtime_update_stats(struct hif_opaque_softc *hif_ctx,
 				 wlan_rtpm_dbgid rtpm_dbgid,
 				 enum hif_pm_htc_stats stats)
 {}
-
-static inline
-QDF_STATUS hif_pm_runtime_set_delay(struct hif_opaque_softc *hif_ctx, int delay)
-{ return QDF_STATUS_SUCCESS; }
-
-static inline
-QDF_STATUS hif_pm_runtime_restore_delay(struct hif_opaque_softc *hif_ctx)
-{ return QDF_STATUS_SUCCESS; }
-
-static inline
-int hif_pm_runtime_get_delay(struct hif_opaque_softc *hif_ctx)
-{ return 0; }
 #endif
 
 void hif_enable_power_management(struct hif_opaque_softc *hif_ctx,
@@ -1997,8 +1892,6 @@ void hif_latency_detect_credit_record_time(
 
 void hif_latency_detect_timer_start(struct hif_opaque_softc *hif_ctx);
 void hif_latency_detect_timer_stop(struct hif_opaque_softc *hif_ctx);
-void hif_tasklet_latency(struct hif_softc *scn, bool from_timer);
-void hif_credit_latency(struct hif_softc *scn, bool from_timer);
 void hif_check_detection_latency(struct hif_softc *scn,
 				 bool from_timer,
 				 uint32_t bitmap_type);
@@ -2139,27 +2032,6 @@ int32_t hif_system_pm_get_state(struct hif_opaque_softc *hif)
 static inline int hif_system_pm_state_check(struct hif_opaque_softc *hif)
 {
 	return 0;
-}
-#endif
-
-#ifdef FEATURE_IRQ_AFFINITY
-/**
- * hif_set_grp_intr_affinity() - API to set affinity for grp
- *  intrs set in the bitmap
- * @scn: hif handle
- * @grp_intr_bitmask: grp intrs for which perf affinity should be
- *  applied
- * @perf: affine to perf or non-perf cluster
- *
- * Return: None
- */
-void hif_set_grp_intr_affinity(struct hif_opaque_softc *scn,
-			       uint32_t grp_intr_bitmask, bool perf);
-#else
-static inline
-void hif_set_grp_intr_affinity(struct hif_opaque_softc *scn,
-			       uint32_t grp_intr_bitmask, bool perf)
-{
 }
 #endif
 #endif /* _HIF_H_ */

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -55,7 +55,7 @@ const struct nla_policy cfg80211_scan_policy[
 /**
  * wlan_cfg80211_is_colocated_6ghz_scan_supported() - Check whether colocated
  * 6ghz scan flag present in scan request or not
- * @scan_flag: Flags bitmap comming from kernel
+ * @scan_flag: Flags bitmap coming from kernel
  *
  * Return: True if colocated 6ghz scan flag present in scan req
  */
@@ -453,7 +453,7 @@ int wlan_cfg80211_sched_scan_start(struct wlan_objmgr_vdev *vdev,
 	req->vdev_id = wlan_vdev_get_id(vdev);
 	req->vdev = vdev;
 	req->scan_policy_colocated_6ghz =
-		wlan_cfg80211_is_colocated_6ghz_scan_supported(request->flags);
+		 wlan_cfg80211_is_colocated_6ghz_scan_supported(request->flags);
 
 	if ((!req->networks_cnt) ||
 	    (req->networks_cnt > SCAN_PNO_MAX_SUPP_NETWORKS)) {
@@ -611,6 +611,12 @@ int wlan_cfg80211_sched_scan_start(struct wlan_objmgr_vdev *vdev,
 	req->scan_backoff_multiplier = scan_backoff_multiplier;
 
 	wlan_hdd_sched_scan_update_relative_rssi(req, request);
+
+	//BEGIN MOT a19110 IKSWM-31041 Modify PNO timers
+	req->fast_scan_period = 45000;
+	req->fast_scan_max_cycles = 7;
+	req->slow_scan_period = 480000;
+	//END IKSWM-31041
 
 	psoc = wlan_pdev_get_psoc(pdev);
 	ucfg_scan_register_pno_cb(psoc,
@@ -1092,12 +1098,6 @@ static void wlan_cfg80211_scan_done_callback(
 
 	if (!netdev) {
 		osif_err("net dev is NULL,Drop scan event Id: %d", scan_id);
-		/*
-		 * Free scan request in case of VENDOR_SCAN as it is
-		 * allocated in driver.
-		 */
-		if (source == VENDOR_SCAN)
-			qdf_mem_free(req);
 		goto allow_suspend;
 	}
 
@@ -1105,12 +1105,6 @@ static void wlan_cfg80211_scan_done_callback(
 	status = wlan_objmgr_vdev_try_get_ref(vdev, WLAN_OSIF_ID);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		osif_err("Failed to get vdev reference: scan Id: %d", scan_id);
-		/*
-		 * Free scan request in case of VENDOR_SCAN as it is
-		 * allocated in driver.
-		 */
-		if (source == VENDOR_SCAN)
-			qdf_mem_free(req);
 		goto allow_suspend;
 	}
 
@@ -1371,7 +1365,6 @@ static void wlan_cfg80211_update_scan_policy_type_flags(
 		scan_req->scan_policy_low_span = true;
 	if (req->flags & NL80211_SCAN_FLAG_LOW_POWER)
 		scan_req->scan_policy_low_power = true;
-
 	if (wlan_cfg80211_is_colocated_6ghz_scan_supported(req->flags))
 		scan_req->scan_policy_colocated_6ghz = true;
 }
@@ -1396,30 +1389,6 @@ wlan_cfg80211_allow_simultaneous_scan(struct wlan_objmgr_psoc *psoc)
 	return true;
 }
 #endif
-
-enum scan_priority convert_nl_scan_priority_to_internal(
-	enum qca_wlan_vendor_scan_priority nl_scan_priority)
-{
-	switch (nl_scan_priority) {
-	case QCA_WLAN_VENDOR_SCAN_PRIORITY_VERY_LOW:
-		return SCAN_PRIORITY_VERY_LOW;
-
-	case QCA_WLAN_VENDOR_SCAN_PRIORITY_LOW:
-		return SCAN_PRIORITY_LOW;
-
-	case QCA_WLAN_VENDOR_SCAN_PRIORITY_MEDIUM:
-		return SCAN_PRIORITY_MEDIUM;
-
-	case QCA_WLAN_VENDOR_SCAN_PRIORITY_HIGH:
-		return SCAN_PRIORITY_HIGH;
-
-	case QCA_WLAN_VENDOR_SCAN_PRIORITY_VERY_HIGH:
-		return SCAN_PRIORITY_VERY_HIGH;
-
-	default:
-		return SCAN_PRIORITY_COUNT;
-	}
-}
 
 int wlan_cfg80211_scan(struct wlan_objmgr_vdev *vdev,
 		       struct cfg80211_scan_request *request,
@@ -1587,14 +1556,6 @@ int wlan_cfg80211_scan(struct wlan_objmgr_vdev *vdev,
 	if (qdf_is_macaddr_zero(&req->scan_req.bssid_list[0]))
 		qdf_set_macaddr_broadcast(&req->scan_req.bssid_list[0]);
 
-	if (params->scan_f_2ghz && !params->scan_f_5ghz) {
-		req->scan_req.scan_f_2ghz = true;
-		req->scan_req.scan_f_5ghz = false;
-	} else if (!params->scan_f_2ghz && params->scan_f_5ghz) {
-		req->scan_req.scan_f_2ghz = false;
-		req->scan_req.scan_f_5ghz = true;
-	}
-
 	if (request->n_channels) {
 #ifdef WLAN_POLICY_MGR_ENABLE
 		bool ap_or_go_present =
@@ -1623,26 +1584,17 @@ int wlan_cfg80211_scan(struct wlan_objmgr_vdev *vdev,
 					continue;
 			}
 #endif
-
-			if ((req->scan_req.scan_f_2ghz &&
-			     WLAN_REG_IS_24GHZ_CH_FREQ(c_freq)) ||
-			    (req->scan_req.scan_f_5ghz &&
-			     (WLAN_REG_IS_5GHZ_CH_FREQ(c_freq) ||
-			      WLAN_REG_IS_49GHZ_FREQ(c_freq) ||
-			      WLAN_REG_IS_6GHZ_CHAN_FREQ(c_freq)))) {
-				req->scan_req.chan_list.chan[num_chan].freq =
-									c_freq;
-				band = util_scan_scm_freq_to_band(c_freq);
-				if (band == WLAN_BAND_2_4_GHZ)
-					req->scan_req.chan_list.chan[num_chan].phymode =
-						SCAN_PHY_MODE_11G;
-				else
-					req->scan_req.chan_list.chan[num_chan].phymode =
-						SCAN_PHY_MODE_11A;
-				num_chan++;
-				if (num_chan >= NUM_CHANNELS)
-					break;
-			}
+			req->scan_req.chan_list.chan[num_chan].freq = c_freq;
+			band = util_scan_scm_freq_to_band(c_freq);
+			if (band == WLAN_BAND_2_4_GHZ)
+				req->scan_req.chan_list.chan[num_chan].phymode =
+					SCAN_PHY_MODE_11G;
+			else
+				req->scan_req.chan_list.chan[num_chan].phymode =
+					SCAN_PHY_MODE_11A;
+			num_chan++;
+			if (num_chan >= NUM_CHANNELS)
+				break;
 		}
 	}
 	if (!num_chan) {
@@ -1704,13 +1656,6 @@ int wlan_cfg80211_scan(struct wlan_objmgr_vdev *vdev,
 
 	if (request->flags & NL80211_SCAN_FLAG_FLUSH)
 		ucfg_scan_flush_results(pdev, NULL);
-
-	if (params->scan_probe_unicast_ra)
-		req->scan_req.scan_ctrl_flags_ext |=
-				SCAN_FLAG_EXT_FORCE_UNICAST_RA;
-
-	osif_debug("scan_ctrl_flags_ext %0x",
-		   req->scan_req.scan_ctrl_flags_ext);
 
 	/*
 	 * Acquire wakelock to handle the case where APP's send scan to connect.
@@ -1928,7 +1873,7 @@ wlan_get_ieee80211_channel(struct wiphy *wiphy,
 
 	chan = ieee80211_get_channel(wiphy, chan_freq);
 	if (!chan)
-		osif_err_rl("chan is NULL, freq: %d", chan_freq);
+		osif_err("chan is NULL, freq: %d", chan_freq);
 
 	return chan;
 }
@@ -2102,10 +2047,10 @@ void wlan_cfg80211_inform_bss_frame(struct wlan_objmgr_pdev *pdev,
 	bss_data.chan = wlan_get_ieee80211_channel(wiphy, pdev,
 		scan_params->channel.chan_freq);
 	if (!bss_data.chan) {
-		osif_err_rl("Channel not found for bss " QDF_MAC_ADDR_FMT " seq %d chan_freq %d",
-			    QDF_MAC_ADDR_REF(bss_data.mgmt->bssid),
-			    scan_params->seq_num,
-			    scan_params->channel.chan_freq);
+		osif_err("Channel not found for bss "QDF_MAC_ADDR_FMT" seq %d chan_freq %d",
+			 QDF_MAC_ADDR_REF(bss_data.mgmt->bssid),
+			 scan_params->seq_num,
+			 scan_params->channel.chan_freq);
 		qdf_mem_free(bss_data.mgmt);
 		return;
 	}

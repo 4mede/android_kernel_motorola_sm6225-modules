@@ -1427,6 +1427,7 @@ lim_send_assoc_rsp_mgmt_frame(struct mac_context *mac_ctx,
 	bool extracted_flag = false;
 	uint8_t retry_int;
 	uint16_t max_retries;
+	struct element_info ie;
 
 	if (!pe_session) {
 		pe_err("pe_session is NULL");
@@ -1766,6 +1767,11 @@ lim_send_assoc_rsp_mgmt_frame(struct mac_context *mac_ctx,
 	    pe_session->opmode == QDF_P2P_CLIENT_MODE ||
 	    pe_session->opmode == QDF_P2P_GO_MODE)
 		tx_flag |= HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME;
+
+	ie.ptr = frame + sizeof(tSirMacMgmtHdr) + WLAN_ASSOC_RSP_IES_OFFSET;
+	ie.len = payload - WLAN_ASSOC_RSP_IES_OFFSET;
+
+	mlme_set_peer_assoc_rsp_ie(mac_ctx->psoc, peer_addr, &ie);
 
 	MTRACE(qdf_trace(QDF_MODULE_ID_PE, TRACE_CODE_TX_MGMT,
 			 pe_session->peSessionId, mac_hdr->fc.subType));
@@ -4661,6 +4667,7 @@ lim_send_extended_chan_switch_action_frame(struct mac_context *mac_ctx,
 	uint8_t                  vdev_id = 0;
 	uint8_t                  ch_spacing;
 	tLimWiderBWChannelSwitchInfo *wide_bw_ie;
+	uint8_t reg_cc[REG_ALPHA2_LEN + 1];
 
 	if (!session_entry) {
 		pe_err("Session entry is NULL!!!");
@@ -4679,9 +4686,9 @@ lim_send_extended_chan_switch_action_frame(struct mac_context *mac_ctx,
 	frm.ext_chan_switch_ann_action.new_channel = new_channel;
 	frm.ext_chan_switch_ann_action.switch_count = count;
 
+	wlan_reg_read_current_country(mac_ctx->psoc, reg_cc);
 	ch_spacing = wlan_reg_dmn_get_chanwidth_from_opclass(
-			mac_ctx->scan.countryCodeCurrent, new_channel,
-			new_op_class);
+			reg_cc, new_channel, new_op_class);
 
 	if ((ch_spacing == 80) || (ch_spacing == 160)) {
 		wide_bw_ie = &session_entry->gLimWiderBWChannelSwitch;
@@ -5692,9 +5699,12 @@ returnAfterError:
 #endif
 
 QDF_STATUS lim_send_addba_response_frame(struct mac_context *mac_ctx,
-		tSirMacAddr peer_mac, uint16_t tid,
-		struct pe_session *session, uint8_t addba_extn_present,
-		uint8_t amsdu_support, uint8_t is_wep, uint16_t calc_buff_size)
+					 tSirMacAddr peer_mac, uint16_t tid,
+					 struct pe_session *session,
+					 uint8_t addba_extn_present,
+					 uint8_t amsdu_support, uint8_t is_wep,
+					 uint16_t calc_buff_size,
+					 tSirMacAddr bssid)
 {
 
 	tDot11faddba_rsp frm;
@@ -5868,7 +5878,8 @@ QDF_STATUS lim_send_addba_response_frame(struct mac_context *mac_ctx,
 
 	/* Update A3 with the BSSID */
 	mgmt_hdr = (tpSirMacMgmtHdr) frame_ptr;
-	sir_copy_mac_addr(mgmt_hdr->bssId, session->bssId);
+
+	sir_copy_mac_addr(mgmt_hdr->bssId, bssid);
 
 	/* ADDBA Response is a robust mgmt action frame,
 	 * set the "protect" (aka WEP) bit in the FC

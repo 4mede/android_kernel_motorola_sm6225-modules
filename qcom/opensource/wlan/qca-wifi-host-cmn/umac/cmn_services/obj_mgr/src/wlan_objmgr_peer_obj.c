@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -93,9 +92,7 @@ static QDF_STATUS wlan_objmgr_peer_obj_free(struct wlan_objmgr_peer *peer)
 	}
 
 	/* Notify peer free only for non self peer*/
-	if (WLAN_ADDR_EQ(wlan_peer_get_macaddr(peer),
-			 wlan_vdev_mlme_get_macaddr(vdev)) ==
-				QDF_STATUS_SUCCESS)
+	if (peer == wlan_vdev_get_selfpeer(vdev))
 		peer_free_notify = false;
 
 	vdev_id = wlan_vdev_get_id(vdev);
@@ -138,7 +135,6 @@ static QDF_STATUS wlan_objmgr_peer_obj_free(struct wlan_objmgr_peer *peer)
 	wlan_objmgr_peer_trace_deinit_lock(peer);
 	qdf_spinlock_destroy(&peer->peer_lock);
 	qdf_mem_free(peer);
-	peer = NULL;
 
 	if (peer_free_notify)
 		wlan_objmgr_vdev_peer_freed_notify(vdev);
@@ -1290,55 +1286,5 @@ wlan_objmgr_peer_get_comp_ref_cnt(struct wlan_objmgr_peer *peer,
 				  enum wlan_umac_comp_id id)
 {
 	return 0;
-}
-#endif
-
-#ifdef WLAN_FEATURE_DYNAMIC_MAC_ADDR_UPDATE
-QDF_STATUS wlan_peer_update_macaddr(struct wlan_objmgr_peer *peer,
-				    uint8_t *new_macaddr)
-{
-	struct wlan_objmgr_psoc *psoc;
-	struct wlan_objmgr_vdev *vdev;
-	uint8_t *macaddr;
-	QDF_STATUS status;
-
-	if (!peer) {
-		obj_mgr_err("PEER is NULL");
-		return QDF_STATUS_E_FAILURE;
-	}
-
-	macaddr = wlan_peer_get_macaddr(peer);
-
-	vdev = wlan_peer_get_vdev(peer);
-	if (!vdev) {
-		obj_mgr_err("VDEV is NULL for peer(" QDF_MAC_ADDR_FMT ")",
-			    QDF_MAC_ADDR_REF(macaddr));
-		return QDF_STATUS_E_FAILURE;
-	}
-
-	/* get PSOC from VDEV, if it is NULL, return */
-	psoc = wlan_vdev_get_psoc(vdev);
-	if (!psoc) {
-		obj_mgr_err("PSOC is NULL for peer(" QDF_MAC_ADDR_FMT ")",
-			    QDF_MAC_ADDR_REF(macaddr));
-		return QDF_STATUS_E_FAILURE;
-	}
-
-	status = wlan_objmgr_psoc_peer_detach(psoc, peer);
-	if (QDF_IS_STATUS_ERROR(status)) {
-		obj_mgr_err("Failed to detach peer(" QDF_MAC_ADDR_FMT ")",
-			    QDF_MAC_ADDR_REF(macaddr));
-		return status;
-	}
-
-	wlan_peer_set_macaddr(peer, new_macaddr);
-
-	status = wlan_objmgr_psoc_peer_attach(psoc, peer);
-	if (QDF_IS_STATUS_ERROR(status)) {
-		obj_mgr_err("Failed to attach peer(" QDF_MAC_ADDR_FMT ")",
-			    QDF_MAC_ADDR_REF(new_macaddr));
-		return status;
-	}
-	return QDF_STATUS_SUCCESS;
 }
 #endif

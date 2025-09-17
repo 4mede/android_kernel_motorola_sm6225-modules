@@ -10,7 +10,7 @@ ifeq ($(KERNEL_BUILD), 1)
 	# These are configurable via Kconfig for kernel-based builds
 	# Need to explicitly configure for Android-based builds
 	ifeq ($(TARGET_SUPPORT), sa525m)
-		AUDIO_ROOT := $(shell pwd)/../../../../sm6225-modules/qcom/opensource/audio-kernel
+		AUDIO_ROOT := $(shell pwd)/../../../../vendor/qcom/opensource/audio-kernel
 	else
 		AUDIO_BLD_DIR := $(shell pwd)/kernel/msm-5.4
 		AUDIO_ROOT := $(AUDIO_BLD_DIR)/techpack/audio
@@ -175,14 +175,6 @@ ifdef CONFIG_SND_SOC_MSM_QDSP6V2_VM
 	Q6_OBJS += q6_init.o
 endif
 
-ifdef CONFIG_AUDIO_ELLIPTIC_ULTRASOUND
-	AUDIO_PRM += gpr_elliptic.o
-	AUDIO_PRM += elliptic/elliptic.o
-	AUDIO_PRM += elliptic/elliptic_sysfs.o
-	AUDIO_PRM += elliptic/elliptic_mixer_controls.o
-	AUDIO_PRM += elliptic/io_modules/msm/elliptic_data_msm_io.o
-endif
-
 ifdef CONFIG_MSM_AVTIMER
 	Q6_OBJS += avtimer.o
 endif
@@ -193,6 +185,10 @@ endif
 
 ifdef CONFIG_MSM_ADSP_LOADER
 ADSP_LOADER_OBJS += adsp-loader.o
+endif
+
+ifdef CONFIG_MSM_COUPLED_SSR
+COUPLED_SSR_OBJS += audio_coupled_ssr.o
 endif
 
 ifdef CONFIG_MSM_QDSP6_PDR
@@ -278,6 +274,9 @@ q6_dlkm-y := $(Q6_OBJS)
 obj-$(CONFIG_MSM_ADSP_LOADER) += adsp_loader_dlkm.o
 adsp_loader_dlkm-y := $(ADSP_LOADER_OBJS)
 
+obj-$(CONFIG_MSM_COUPLED_SSR) += coupled_ssr_dlkm.o
+coupled_ssr_dlkm-y := $(COUPLED_SSR_OBJS)
+
 obj-$(CONFIG_MSM_QDSP6_PDR) += q6_pdr_dlkm.o
 q6_pdr_dlkm-y := $(QDSP6_PDR_OBJS)
 
@@ -295,3 +294,6 @@ audpkt_ion_dlkm-y := $(AUDIO_PKT_ION)
 
 obj-$(CONFIG_VOICE_MHI) += voice_mhi_dlkm.o
 voice_mhi_dlkm-y := $(VOICE_MHI)
+
+# inject some build related information
+DEFINES += -DBUILD_TIMESTAMP=\"$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')\"

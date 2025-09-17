@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -103,79 +102,6 @@ static void wmi_twt_extract_stats_struct(void *tag_buf,
 }
 #endif /* WLAN_SUPPORT_TWT */
 
-#ifdef CONFIG_WLAN_BMISS
-static void
-wmi_extract_ctrl_path_bmiss_stats_tlv(void *tag_buf,
-				      struct bmiss_infra_cp_stats_event *param)
-{
-	int idx = 0;
-
-	wmi_ctrl_path_bmiss_stats_struct *wmi_stats_buf =
-			(wmi_ctrl_path_bmiss_stats_struct *)tag_buf;
-	param->num_pre_bmiss = wmi_stats_buf->num_pre_bmiss;
-	for (idx = 0; idx < BMISS_STATS_RSSI_SAMPLES_MAX; idx++) {
-		param->rssi_samples[idx].rssi =
-				wmi_stats_buf->rssi_samples[idx].rssi;
-		param->rssi_samples[idx].sample_time =
-				wmi_stats_buf->rssi_samples[idx].sample_time;
-	}
-	param->rssi_sample_curr_index = wmi_stats_buf->rssi_sample_curr_index;
-	param->num_first_bmiss = wmi_stats_buf->num_first_bmiss;
-	param->num_final_bmiss = wmi_stats_buf->num_final_bmiss;
-	param->num_null_sent_in_first_bmiss =
-	wmi_stats_buf->num_null_sent_in_first_bmiss;
-	param->num_null_failed_in_first_bmiss =
-	wmi_stats_buf->num_null_failed_in_first_bmiss;
-	param->num_null_failed_in_final_bmiss =
-	wmi_stats_buf->num_null_failed_in_final_bmiss;
-	param->cons_bmiss_stats.num_of_bmiss_sequences =
-	wmi_stats_buf->cons_bmiss_stats.num_of_bmiss_sequences;
-	param->cons_bmiss_stats.num_bitmask_wraparound =
-	wmi_stats_buf->cons_bmiss_stats.num_bitmask_wraparound;
-	param->cons_bmiss_stats.num_bcn_hist_lost =
-	wmi_stats_buf->cons_bmiss_stats.num_bcn_hist_lost;
-	wmi_debug("num_pre_bmiss = %u", wmi_stats_buf->num_pre_bmiss);
-	wmi_debug("num_first_bmiss = %u num_final_bmiss = %u, num_null_sent_in_first_bmiss = %u, num_null_failed_in_first_bmiss = %u",
-		  wmi_stats_buf->num_first_bmiss,
-		  wmi_stats_buf->num_final_bmiss,
-		  wmi_stats_buf->num_null_sent_in_first_bmiss,
-		  wmi_stats_buf->num_null_failed_in_first_bmiss);
-	wmi_debug("num_null_sent_in_final_bmiss %u null_fail_cnt_final_bmiss = %u rssi_sample_curr_index = %u",
-		  wmi_stats_buf->num_null_sent_in_final_bmiss,
-		  wmi_stats_buf->num_null_failed_in_final_bmiss,
-		  wmi_stats_buf->rssi_sample_curr_index);
-	for (idx = 0; idx < BMISS_STATS_RSSI_SAMPLES_MAX; idx++) {
-		wmi_debug("rssi_sample-%u: rssi=%u", idx,
-			  wmi_stats_buf->rssi_samples[idx].rssi);
-		wmi_debug("rssi_sample-%u: sampletime=%u", idx,
-			  wmi_stats_buf->rssi_samples[idx].sample_time);
-	}
-	wmi_debug("num_of_bmiss_sequences %u num_bitmask_wraparound = %u num_bcn_hist_lost = %u",
-		  wmi_stats_buf->cons_bmiss_stats.num_of_bmiss_sequences,
-		  wmi_stats_buf->cons_bmiss_stats.num_bitmask_wraparound,
-		  wmi_stats_buf->cons_bmiss_stats.num_bcn_hist_lost);
-}
-
-static void wmi_bmiss_extract_stats_struct(void *tag_buf,
-					   struct infra_cp_stats_event *params)
-{
-	struct bmiss_infra_cp_stats_event *bmiss_params;
-
-	bmiss_params = params->bmiss_infra_cp_stats;
-	wmi_debug("BMISS stats struct found");
-	wmi_extract_ctrl_path_bmiss_stats_tlv(tag_buf, bmiss_params);
-}
-
-#else /* CONFIG_WLAN_BMISS */
-static inline
-void wmi_bmiss_extract_stats_struct(void *tag_buf,
-				    struct infra_cp_stats_event *params)
-
-{
-}
-
-#endif/* CONFIG_WLAN_BMISS */
-
 /*
  * wmi_stats_extract_tag_struct: function to extract tag structs
  * @tag_type: tag type that is to be printed
@@ -198,10 +124,6 @@ static void wmi_stats_extract_tag_struct(uint32_t tag_type, void *tag_buf,
 
 	case WMITLV_TAG_STRUC_wmi_ctrl_path_twt_stats_struct:
 		wmi_twt_extract_stats_struct(tag_buf, params);
-		break;
-
-	case WMITLV_TAG_STRUC_wmi_ctrl_path_bmiss_stats_struct:
-		wmi_bmiss_extract_stats_struct(tag_buf, params);
 		break;
 
 	default:
@@ -274,10 +196,11 @@ QDF_STATUS wmi_stats_handler(void *buff, int32_t len,
 			wmi_stats_extract_tag_struct(curr_tlv_tag,
 						     (void *)tag_start_ptr,
 						     params);
-			/* Move to next tag */
-			buf_ptr += curr_tlv_len + WMI_TLV_HDR_SIZE;
-			len -= (curr_tlv_len + WMI_TLV_HDR_SIZE);
 		}
+		/* Move to next tag */
+		buf_ptr += curr_tlv_len + WMI_TLV_HDR_SIZE;
+		len -= (curr_tlv_len + WMI_TLV_HDR_SIZE);
+
 		if (len <= 0)
 			break;
 	}
@@ -452,15 +375,6 @@ send_infra_cp_stats_request_cmd_tlv(wmi_unified_t wmi_handle,
 }
 #endif
 
-#ifdef QCA_WIFI_EMULATION
-static QDF_STATUS
-send_stats_request_cmd_tlv(wmi_unified_t wmi_handle,
-			   uint8_t macaddr[QDF_MAC_ADDR_SIZE],
-			   struct stats_request_params *param)
-{
-	return QDF_STATUS_SUCCESS;
-}
-#else
 /**
  * send_stats_request_cmd_tlv() - WMI request stats function
  * @param wmi_handle: handle to WMI.
@@ -514,7 +428,6 @@ send_stats_request_cmd_tlv(wmi_unified_t wmi_handle,
 
 	return qdf_status_from_os_return(ret);
 }
-#endif
 
 #ifdef WLAN_FEATURE_BIG_DATA_STATS
 /**
@@ -792,9 +705,6 @@ extract_pdev_stats_tlv(wmi_unified_t wmi_handle, void *evt_buf, uint32_t index,
 
 	param_buf = (WMI_UPDATE_STATS_EVENTID_param_tlvs *) evt_buf;
 	ev_param = (wmi_stats_event_fixed_param *) param_buf->fixed_param;
-	pdev_stats->pdev_id =
-	     wmi_handle->ops->convert_pdev_id_target_to_host(wmi_handle,
-							     ev_param->pdev_id);
 
 	data = param_buf->data;
 
@@ -1008,45 +918,6 @@ static void wmi_infra_cp_stats_ops_attach_tlv(struct wmi_ops *ops)
 }
 #endif /* WLAN_SUPPORT_INFRA_CTRL_PATH_STATS */
 
-#ifdef WLAN_FEATURE_SON
-/**
- * extract_inst_rssi_stats_resp_tlv() - extract inst rssi stats from event
- * @wmi_handle: wmi handle
- * @evt_buf: pointer to event buffer
- * @inst_rssi_resp: Pointer to hold inst rssi response
- *
- * @Return: QDF_STATUS_SUCCESS for success or error code
- */
-static QDF_STATUS
-extract_inst_rssi_stats_resp_tlv(wmi_unified_t wmi_handle, void *evt_buf,
-			struct wmi_host_inst_rssi_stats_resp *inst_rssi_resp)
-{
-	WMI_INST_RSSI_STATS_EVENTID_param_tlvs *param_buf;
-	wmi_inst_rssi_stats_resp_fixed_param *event;
-
-	param_buf = (WMI_INST_RSSI_STATS_EVENTID_param_tlvs *)evt_buf;
-	event = (wmi_inst_rssi_stats_resp_fixed_param *)param_buf->fixed_param;
-
-	inst_rssi_resp->inst_rssi = event->iRSSI;
-	WMI_CHAR_ARRAY_TO_MAC_ADDR(inst_rssi_resp->peer_macaddr.bytes,
-				   &event->peer_macaddr);
-	inst_rssi_resp->vdev_id = event->vdev_id;
-
-	return QDF_STATUS_SUCCESS;
-}
-
-static void
-wmi_inst_rssi_stats_ops_attach_tlv(struct wmi_ops *ops)
-{
-	ops->extract_inst_rssi_stats_resp = extract_inst_rssi_stats_resp_tlv;
-}
-#else
-static void
-wmi_inst_rssi_stats_ops_attach_tlv(struct wmi_ops *ops)
-{
-}
-#endif
-
 void wmi_cp_stats_attach_tlv(wmi_unified_t wmi_handle)
 {
 	struct wmi_ops *ops = wmi_handle->ops;
@@ -1063,7 +934,6 @@ void wmi_cp_stats_attach_tlv(wmi_unified_t wmi_handle)
 	ops->extract_peer_extd_stats = extract_peer_extd_stats_tlv;
 	wmi_infra_cp_stats_ops_attach_tlv(ops);
 	ops->extract_pmf_bcn_protect_stats = extract_pmf_bcn_protect_stats_tlv,
-	wmi_inst_rssi_stats_ops_attach_tlv(ops);
 
 	wmi_mc_cp_stats_attach_tlv(wmi_handle);
 }

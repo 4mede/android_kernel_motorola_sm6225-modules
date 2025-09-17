@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2013-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -29,7 +28,6 @@
 #include "hif_debug.h"
 #include "hif_napi.h"
 #include "qdf_module.h"
-#include <qdf_tracepoint.h>
 
 #ifdef IPA_OFFLOAD
 #ifdef QCA_WIFI_3_0
@@ -168,68 +166,6 @@ void hif_ce_desc_record_rx_paddr(struct hif_softc *scn,
 }
 #endif /* HIF_RECORD_RX_PADDR */
 
-void hif_display_latest_desc_hist(struct hif_opaque_softc *hif_ctx)
-{
-	struct hif_softc *scn = HIF_GET_SOFTC(hif_ctx);
-	struct ce_desc_hist *ce_hist;
-	struct latest_evt_history *evt;
-	int i;
-
-	if (!scn)
-		return;
-
-	ce_hist = &scn->hif_ce_desc_hist;
-
-	for (i = 0; i < HIF_CE_MAX_LATEST_HIST; i++) {
-		if (!ce_hist->enable[i + HIF_CE_MAX_LATEST_HIST])
-			continue;
-
-		evt = &ce_hist->latest_evt[i];
-		hif_info_high("CE_id:%d cpu_id:%d irq_entry:0x%llx tasklet_entry:0x%llx tasklet_resched:0x%llx tasklet_exit:0x%llx ce_work:0x%llx hp:%x tp:%x",
-			      (i + HIF_CE_MAX_LATEST_HIST), evt->cpu_id,
-			      evt->irq_entry_ts, evt->bh_entry_ts,
-			      evt->bh_resched_ts, evt->bh_exit_ts,
-			      evt->bh_work_ts, evt->ring_hp, evt->ring_tp);
-	}
-}
-
-void hif_record_latest_evt(struct ce_desc_hist *ce_hist,
-			   uint8_t type,
-			   int ce_id, uint64_t time,
-			   uint32_t hp, uint32_t tp)
-{
-	struct latest_evt_history *latest_evt;
-
-	if (ce_id != 2 && ce_id != 3)
-		return;
-
-	latest_evt = &ce_hist->latest_evt[ce_id - HIF_CE_MAX_LATEST_HIST];
-
-	switch (type) {
-	case HIF_IRQ_EVENT:
-		latest_evt->irq_entry_ts = time;
-		latest_evt->cpu_id = qdf_get_cpu();
-		return;
-	case HIF_CE_TASKLET_ENTRY:
-		latest_evt->bh_entry_ts = time;
-		return;
-	case HIF_CE_TASKLET_RESCHEDULE:
-		latest_evt->bh_resched_ts = time;
-		return;
-	case HIF_CE_TASKLET_EXIT:
-		latest_evt->bh_exit_ts = time;
-		return;
-	case HIF_TX_DESC_COMPLETION:
-	case HIF_CE_DEST_STATUS_RING_REAP:
-		latest_evt->bh_work_ts = time;
-		latest_evt->ring_hp = hp;
-		latest_evt->ring_tp = tp;
-		return;
-	default:
-		return;
-	}
-}
-
 /**
  * hif_record_ce_desc_event() - record ce descriptor events
  * @scn: hif_softc
@@ -289,8 +225,6 @@ void hif_record_ce_desc_event(struct hif_softc *scn, int ce_id,
 
 	if (ce_hist->data_enable[ce_id])
 		hif_ce_desc_data_record(event, len);
-
-	hif_record_latest_evt(ce_hist, type, ce_id, event->time, 0, 0);
 }
 qdf_export_symbol(hif_record_ce_desc_event);
 
@@ -368,8 +302,8 @@ bool hif_ce_service_should_yield(struct hif_softc *scn,
 {
 	bool yield, time_limit_reached, rxpkt_thresh_reached = 0;
 
-	time_limit_reached = qdf_time_sched_clock() >
-					ce_state->ce_service_yield_time ? 1 : 0;
+	time_limit_reached =
+		sched_clock() > ce_state->ce_service_yield_time ? 1 : 0;
 
 	if (!time_limit_reached)
 		rxpkt_thresh_reached = hif_max_num_receives_reached
@@ -989,27 +923,6 @@ void ce_per_engine_servicereap(struct hif_softc *scn, unsigned int ce_id)
 
 #endif /*ATH_11AC_TXCOMPACT */
 
-#ifdef ENABLE_CE4_COMP_DISABLE_HTT_HTC_MISC_LIST
-static inline bool check_ce_id_and_epping_enabled(int CE_id, uint32_t mode)
-{
-	// QDF_IS_EPPING_ENABLED is pre lithium feature
-	// CE4 completion is enabled only lithium and later
-	// so no need to check for EPPING
-	return true;
-}
-
-#else /* ENABLE_CE4_COMP_DISABLE_HTT_HTC_MISC_LIST */
-
-static inline bool check_ce_id_and_epping_enabled(int CE_id, uint32_t mode)
-{
-	if (CE_id != CE_HTT_H2T_MSG || QDF_IS_EPPING_ENABLED(mode))
-		return true;
-	else
-		return false;
-}
-
-#endif /* ENABLE_CE4_COMP_DISABLE_HTT_HTC_MISC_LIST */
-
 /*
  * ce_engine_service_reg:
  *
@@ -1093,7 +1006,8 @@ more_completions:
 			 &id, &sw_idx, &hw_idx,
 			 &toeplitz_hash_result) == QDF_STATUS_SUCCESS) {
 
-			if (check_ce_id_and_epping_enabled(CE_id, mode)) {
+			if (CE_id != CE_HTT_H2T_MSG ||
+			    QDF_IS_EPPING_ENABLED(mode)) {
 				qdf_spin_unlock(&CE_state->ce_index_lock);
 				CE_state->send_cb((struct CE_handle *)CE_state,
 						  CE_context, transfer_context,
@@ -1175,9 +1089,8 @@ more_watermarks:
 			goto more_completions;
 		} else {
 			if (!ce_srng_based(scn)) {
-				hif_err_rl(
-					"Potential infinite loop detected during Rx processing id:%u nentries_mask:0x%x sw read_idx:0x%x hw read_idx:0x%x",
-					CE_state->id,
+				hif_err(
+					"Potential infinite loop detected during Rx processing nentries_mask:0x%x sw read_idx:0x%x hw read_idx:0x%x",
 					CE_state->dest_ring->nentries_mask,
 					CE_state->dest_ring->sw_index,
 					CE_DEST_RING_READ_IDX_GET(scn,
@@ -1194,13 +1107,10 @@ more_watermarks:
 			goto more_completions;
 		} else {
 			if (!ce_srng_based(scn)) {
-				hif_err_rl(
-					"Potential infinite loop detected during send completion id:%u mask:0x%x sw read_idx:0x%x hw_index:0x%x write_index: 0x%x hw read_idx:0x%x",
-					CE_state->id,
+				hif_err(
+					"Potential infinite loop detected during send completion nentries_mask:0x%x sw read_idx:0x%x hw read_idx:0x%x",
 					CE_state->src_ring->nentries_mask,
 					CE_state->src_ring->sw_index,
-					CE_state->src_ring->hw_index,
-					CE_state->src_ring->write_index,
 					CE_SRC_RING_READ_IDX_GET(scn,
 							 CE_state->ctrl_addr));
 			}
@@ -1214,28 +1124,6 @@ more_watermarks:
 
 	qdf_atomic_set(&CE_state->rx_pending, 0);
 }
-
-#ifdef WLAN_TRACEPOINTS
-/**
- * ce_trace_tasklet_sched_latency() - Trace ce tasklet scheduling
- *  latency
- * @ce_state: CE context
- *
- * Return: None
- */
-static inline
-void ce_trace_tasklet_sched_latency(struct CE_state *ce_state)
-{
-	qdf_trace_dp_ce_tasklet_sched_latency(ce_state->id,
-					      ce_state->ce_service_start_time -
-					      ce_state->ce_tasklet_sched_time);
-}
-#else
-static inline
-void ce_trace_tasklet_sched_latency(struct CE_state *ce_state)
-{
-}
-#endif
 
 /*
  * Guts of interrupt handler for per-engine interrupts on a particular CE.
@@ -1260,13 +1148,11 @@ int ce_per_engine_service(struct hif_softc *scn, unsigned int CE_id)
 	/* Clear force_break flag and re-initialize receive_count to 0 */
 	CE_state->receive_count = 0;
 	CE_state->force_break = 0;
-	CE_state->ce_service_start_time = qdf_time_sched_clock();
+	CE_state->ce_service_start_time = sched_clock();
 	CE_state->ce_service_yield_time =
 		CE_state->ce_service_start_time +
 		hif_get_ce_service_max_yield_time(
 			(struct hif_opaque_softc *)scn);
-
-	ce_trace_tasklet_sched_latency(CE_state);
 
 	qdf_spin_lock(&CE_state->ce_index_lock);
 

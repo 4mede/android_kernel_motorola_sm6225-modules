@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/debugfs.h>
@@ -135,31 +135,10 @@ static int ipa_nat_ipv4_stringify_entry_v_4_0(const void *entry,
 	length = ipa_nat_ipv4_stringify_entry_v_3_0(entry, buff, buff_size);
 
 	length += scnprintf(buff + length, buff_size - length,
-		"\t\tPDN_Index=%d\n",
-		nat_entry->pdn_index);
+		"\t\tPDN_Index=%d\n", nat_entry->pdn_index);
 
 	return length;
 }
-
-
-static int ipa_nat_ipv4_stringify_entry_v_4_5(const void *entry,
-	char *buff, size_t buff_size)
-{
-	int length;
-	const struct ipa_nat_hw_ipv4_entry *nat_entry =
-		(const struct ipa_nat_hw_ipv4_entry *)entry;
-
-	length = ipa_nat_ipv4_stringify_entry_v_4_0(entry, buff, buff_size);
-
-	length += scnprintf(buff + length, buff_size - length,
-		"\t\tucp=%s address=%s uc_activation_index=%d\n",
-		(nat_entry->ucp) ? "Enabled" : "Disabled",
-		(nat_entry->s) ? "System" : "Local",
-		nat_entry->uc_activation_index);
-
-	return length;
-}
-
 
 static int ipa_nat_ipv4_index_stringify_entry_v_3_0(const void *entry,
 	char *buff, size_t buff_size)
@@ -234,24 +213,6 @@ static int ipa_nat_ipv6ct_stringify_entry_v_4_0(const void *entry,
 		(ipv6ct_entry->out_allowed) ? "Allow" : "Deny",
 		(ipv6ct_entry->in_allowed) ? "Allow" : "Deny",
 		ipv6ct_entry->prev_index);
-
-	return length;
-}
-
-static int ipa_nat_ipv6ct_stringify_entry_v_4_5(const void *entry,
-	char *buff, size_t buff_size)
-{
-	int length;
-	const struct ipa_nat_hw_ipv6ct_entry *ipv6ct_entry =
-		(const struct ipa_nat_hw_ipv6ct_entry *)entry;
-
-	length = ipa_nat_ipv6ct_stringify_entry_v_4_0(entry, buff, buff_size);
-
-	length += scnprintf(buff + length, buff_size - length,
-		"\t\tucp=%s address=%s uc_activation_index=%d\n",
-		(ipv6ct_entry->ucp) ? "Enabled" : "Disabled",
-		(ipv6ct_entry->s) ? "System" : "Local",
-		ipv6ct_entry->uc_activation_index);
 
 	return length;
 }
@@ -350,20 +311,6 @@ static struct ipahal_nat_obj ipahal_nat_objs[IPA_HW_MAX][IPA_NAT_MAX] = {
 			ipa_nat_ipv6ct_is_entry_zeroed_v_4_0,
 			ipa_nat_ipv6ct_is_entry_valid_v_4_0,
 			ipa_nat_ipv6ct_stringify_entry_v_4_0
-		},
-
-	/* IPAv4.5 */
-	[IPA_HW_v4_5][IPAHAL_NAT_IPV4] = {
-			ipa_nat_ipv4_entry_size_v_3_0,
-			ipa_nat_ipv4_is_entry_zeroed_v_3_0,
-			ipa_nat_ipv4_is_entry_valid_v_3_0,
-			ipa_nat_ipv4_stringify_entry_v_4_5
-		},
-	[IPA_HW_v4_5][IPAHAL_NAT_IPV6CT] = {
-			ipa_nat_ipv6ct_entry_size_v_4_0,
-			ipa_nat_ipv6ct_is_entry_zeroed_v_4_0,
-			ipa_nat_ipv6ct_is_entry_valid_v_4_0,
-			ipa_nat_ipv6ct_stringify_entry_v_4_5
 		}
 };
 
@@ -455,7 +402,7 @@ int ipahal_nat_is_entry_zeroed(enum ipahal_nat_type nat_type, void *entry,
 		"requested NAT type %d is invalid\n", nat_type))
 		return -EINVAL;
 
-	IPAHAL_DBG_LOW("Determine whether the entry is zeroed for NAT type=%s\n",
+	IPAHAL_DBG("Determine whether the entry is zeroed for NAT type=%s\n",
 		ipahal_nat_type_str(nat_type));
 
 	nat_ptr =
@@ -463,7 +410,7 @@ int ipahal_nat_is_entry_zeroed(enum ipahal_nat_type nat_type, void *entry,
 
 	*entry_zeroed = nat_ptr->is_entry_zeroed(entry);
 
-	IPAHAL_DBG_LOW("The entry is %szeroed\n", (*entry_zeroed) ? "" : "not ");
+	IPAHAL_DBG("The entry is %szeroed\n", (*entry_zeroed) ? "" : "not ");
 
 	return 0;
 }

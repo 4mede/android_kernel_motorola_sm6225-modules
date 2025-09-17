@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2018-2019, 2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -159,7 +158,7 @@ QDF_STATUS wlan_vdev_allow_connect_n_tx(struct wlan_objmgr_vdev *vdev)
 
 	state = wlan_vdev_mlme_get_state(vdev);
 	substate = wlan_vdev_mlme_get_substate(vdev);
-	if ((state == WLAN_VDEV_S_UP && substate == WLAN_VDEV_SS_UP_ACTIVE) ||
+	if ((state == WLAN_VDEV_S_UP) ||
 	    ((state == WLAN_VDEV_S_SUSPEND) &&
 	     (substate == WLAN_VDEV_SS_SUSPEND_CSA_RESTART)))
 		return QDF_STATUS_SUCCESS;
@@ -210,8 +209,6 @@ QDF_STATUS wlan_vdev_mlme_is_csa_restart(struct wlan_objmgr_vdev *vdev)
 	return QDF_STATUS_E_FAILURE;
 }
 
-qdf_export_symbol(wlan_vdev_mlme_is_csa_restart);
-
 QDF_STATUS wlan_vdev_is_going_down(struct wlan_objmgr_vdev *vdev)
 {
 	enum wlan_vdev_state state;
@@ -222,27 +219,6 @@ QDF_STATUS wlan_vdev_is_going_down(struct wlan_objmgr_vdev *vdev)
 	if ((state == WLAN_VDEV_S_STOP) ||
 	    ((state == WLAN_VDEV_S_SUSPEND) &&
 	     (substate == WLAN_VDEV_SS_SUSPEND_SUSPEND_DOWN)))
-		return QDF_STATUS_SUCCESS;
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS wlan_vdev_is_peer_create_allowed(struct wlan_objmgr_vdev *vdev)
-{
-	enum wlan_vdev_state state;
-	enum wlan_vdev_state substate;
-
-	if (!vdev) {
-		mlme_err("vdev is null");
-		return QDF_STATUS_E_FAILURE;
-	}
-
-	state = wlan_vdev_mlme_get_state(vdev);
-	substate = wlan_vdev_mlme_get_substate(vdev);
-	if (!((state == WLAN_VDEV_S_INIT) ||
-	     (state == WLAN_VDEV_S_STOP) ||
-	     ((state == WLAN_VDEV_S_SUSPEND) &&
-	      (substate == WLAN_VDEV_SS_SUSPEND_SUSPEND_DOWN))))
 		return QDF_STATUS_SUCCESS;
 
 	return QDF_STATUS_E_FAILURE;
@@ -299,12 +275,9 @@ void wlan_vdev_mlme_cmd_unlock(struct wlan_objmgr_vdev *vdev)
 QDF_STATUS wlan_vdev_mlme_is_scan_allowed(struct wlan_objmgr_vdev *vdev)
 {
 	enum wlan_vdev_state state;
-	enum wlan_vdev_state substate;
 
 	state = wlan_vdev_mlme_get_state(vdev);
-	substate = wlan_vdev_mlme_get_substate(vdev);
-	if ((state == WLAN_VDEV_S_INIT) ||
-	    (state == WLAN_VDEV_S_UP && substate == WLAN_VDEV_SS_UP_ACTIVE) ||
+	if ((state == WLAN_VDEV_S_INIT) ||  (state == WLAN_VDEV_S_UP) ||
 	    (state == WLAN_VDEV_S_STOP))
 		return QDF_STATUS_SUCCESS;
 
@@ -321,66 +294,3 @@ QDF_STATUS wlan_vdev_mlme_is_init_state(struct wlan_objmgr_vdev *vdev)
 
 	return QDF_STATUS_E_FAILURE;
 }
-
-QDF_STATUS wlan_vdev_is_up_active_state(struct wlan_objmgr_vdev *vdev)
-{
-	enum wlan_vdev_state state;
-	enum wlan_vdev_state substate;
-
-	state = wlan_vdev_mlme_get_state(vdev);
-	substate = wlan_vdev_mlme_get_substate(vdev);
-	if (state == WLAN_VDEV_S_UP && substate == WLAN_VDEV_SS_UP_ACTIVE)
-		return QDF_STATUS_SUCCESS;
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-qdf_export_symbol(wlan_vdev_is_up_active_state);
-
-#ifdef WLAN_FEATURE_11BE_MLO
-bool
-wlan_vdev_mlme_get_is_mlo_link(struct wlan_objmgr_psoc *psoc,
-			       uint8_t vdev_id)
-{
-	struct wlan_objmgr_vdev *vdev;
-	bool is_link = false;
-
-	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
-						    WLAN_MLME_OBJMGR_ID);
-	if (!vdev) {
-		mlme_err("vdev object is NULL for vdev %d", vdev_id);
-		return is_link;
-	}
-
-	if (wlan_vdev_mlme_is_mlo_vdev(vdev) &&
-	    wlan_vdev_mlme_is_mlo_link_vdev(vdev))
-		is_link = true;
-
-	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_OBJMGR_ID);
-
-	return is_link;
-}
-
-bool
-wlan_vdev_mlme_get_is_mlo_vdev(struct wlan_objmgr_psoc *psoc,
-			       uint8_t vdev_id)
-{
-	struct wlan_objmgr_vdev *vdev;
-	bool is_mlo_vdev = false;
-
-	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
-						    WLAN_MLME_OBJMGR_ID);
-	if (!vdev) {
-		mlme_err("vdev object is NULL for vdev %d", vdev_id);
-		return is_mlo_vdev;
-	}
-
-	if (wlan_vdev_mlme_is_mlo_vdev(vdev) &&
-	    !wlan_vdev_mlme_is_mlo_link_vdev(vdev))
-		is_mlo_vdev = true;
-
-	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_OBJMGR_ID);
-
-	return is_mlo_vdev;
-}
-#endif

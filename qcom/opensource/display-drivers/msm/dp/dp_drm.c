@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -97,6 +98,7 @@ static void dp_bridge_pre_enable(struct drm_bridge *drm_bridge)
 		return;
 	}
 
+	DP_INFO("##\n");
 	/* By this point mode should have been validated through mode_fixup */
 	rc = dp->set_mode(dp, bridge->dp_panel, &bridge->dp_mode);
 	if (rc) {
@@ -119,6 +121,7 @@ static void dp_bridge_pre_enable(struct drm_bridge *drm_bridge)
 	if (rc)
 		DP_ERR("[%d] DP display enable failed, rc=%d\n",
 		       bridge->id, rc);
+	DP_INFO("==\n");
 }
 
 static void dp_bridge_enable(struct drm_bridge *drm_bridge)
@@ -145,6 +148,7 @@ static void dp_bridge_enable(struct drm_bridge *drm_bridge)
 
 	dp = bridge->display;
 
+	DP_INFO("call dp_display_post_enable\n");
 	rc = dp->post_enable(dp, bridge->dp_panel);
 	if (rc)
 		DP_ERR("[%d] DP display post enable failed, rc=%d\n",
@@ -180,6 +184,7 @@ static void dp_bridge_disable(struct drm_bridge *drm_bridge)
 		return;
 	}
 
+	DP_INFO("call dp_display_pre_disable\n");
 	if (dp)
 		sde_connector_helper_bridge_disable(bridge->connector);
 
@@ -214,6 +219,7 @@ static void dp_bridge_post_disable(struct drm_bridge *drm_bridge)
 
 	dp = bridge->display;
 
+	DP_INFO("call dp_display_disable\n");
 	rc = dp->disable(dp, bridge->dp_panel);
 	if (rc) {
 		DP_ERR("[%d] DP display disable failed, rc=%d\n",
@@ -256,6 +262,8 @@ static void dp_bridge_mode_set(struct drm_bridge *drm_bridge,
 
 	dp->convert_to_dp_mode(dp, bridge->dp_panel, adjusted_mode,
 			&bridge->dp_mode);
+
+	dp->clear_reservation(dp, bridge->dp_panel);
 }
 
 static bool dp_bridge_mode_fixup(struct drm_bridge *drm_bridge,
@@ -289,6 +297,7 @@ static bool dp_bridge_mode_fixup(struct drm_bridge *drm_bridge,
 	dp = bridge->display;
 
 	dp->convert_to_dp_mode(dp, bridge->dp_panel, mode, &dp_mode);
+	dp->clear_reservation(dp, bridge->dp_panel);
 	convert_to_drm_mode(&dp_mode, adjusted_mode);
 end:
 	return ret;
@@ -419,6 +428,11 @@ int dp_connector_get_mode_info(struct drm_connector *connector,
 		DP_ERR("error getting mixer count. rc:%d\n", rc);
 		return rc;
 	}
+	/* reset dp connector lm_mask for every connection event and
+	 * this will get re-populated in resource manager based on
+	 * resolution and topology of dp display.
+	 */
+	sde_conn->lm_mask = 0;
 
 	topology->num_enc = no_enc;
 	topology->num_intf = single_intf;
@@ -586,6 +600,9 @@ int dp_connector_get_modes(struct drm_connector *connector,
 			}
 			m->width_mm = connector->display_info.width_mm;
 			m->height_mm = connector->display_info.height_mm;
+			DP_INFO("add drm_display_mode %ux%u mm %ux%u\n",
+				       drm_mode.hdisplay, drm_mode.vdisplay,
+				       m->width_mm, m->height_mm);
 			drm_mode_probed_add(connector, m);
 		}
 	} else {

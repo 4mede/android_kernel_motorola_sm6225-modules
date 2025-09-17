@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -30,7 +30,6 @@
 
 #include "wlan_objmgr_cmn.h"
 #include "qdf_nbuf.h"
-#include "wlan_mgmt_txrx_rx_reo_public_structs.h"
 
 #define mgmt_txrx_alert(params...) \
 	QDF_TRACE_FATAL(QDF_MODULE_ID_MGMT_TXRX, params)
@@ -799,11 +798,7 @@ enum mgmt_frame_type {
  * @rate: Rate kbps
  * @phy_mode: rx phy mode
  * @buf_len: length of the frame
- * @status: rx status. It is a bitfield being used based on below defines
- *          WMI_HOST_RXERR_CRC = 0x01
- *          WMI_HOST_RXERR_DECRYPT = 0x08
- *          WMI_HOST_RXERR_MIC = 0x10
- *          WMI_HOST_RXERR_KEY_CACHE_MISS = 0x20
+ * @status: rx status
  * @flags: information about the management frame e.g. can give a
  *         scan source for a scan result mgmt frame
  * @rssi: combined RSSI, i.e. the sum of the snr + noise floor (dBm units)
@@ -812,7 +807,6 @@ enum mgmt_frame_type {
  * @pdev_id: pdev id
  * @rx_params: pointer to other rx params
  *             (win specific, will be removed in phase 4)
- * @reo_params: Pointer to MGMT Rx REO params
  */
 struct mgmt_rx_event_params {
 	uint32_t    chan_freq;
@@ -822,62 +816,14 @@ struct mgmt_rx_event_params {
 	uint32_t    rate;
 	enum wlan_phymode    phy_mode;
 	uint32_t    buf_len;
-	uint8_t     status;
+	QDF_STATUS  status;
 	uint32_t    flags;
 	int32_t     rssi;
 	uint32_t    tsf_delta;
 	uint32_t    tsf_l32;
 	uint8_t     pdev_id;
 	void        *rx_params;
-#ifdef WLAN_MGMT_RX_REO_SUPPORT
-	struct mgmt_rx_reo_params *reo_params;
-#endif
 };
-
-#ifdef WLAN_MGMT_RX_REO_SUPPORT
-static inline
-struct mgmt_rx_event_params *alloc_mgmt_rx_event_params(void)
-{
-	struct mgmt_rx_event_params *rx_params;
-
-	rx_params = qdf_mem_malloc(sizeof(struct mgmt_rx_event_params));
-	if (!rx_params)
-		return NULL;
-
-	rx_params->reo_params =
-		qdf_mem_malloc(sizeof(struct mgmt_rx_reo_params));
-
-	if (!rx_params->reo_params) {
-		qdf_mem_free(rx_params);
-		return NULL;
-	}
-
-	return rx_params;
-}
-
-static inline void
-free_mgmt_rx_event_params(struct mgmt_rx_event_params *rx_params)
-{
-	if (rx_params)
-		qdf_mem_free(rx_params->reo_params);
-
-	qdf_mem_free(rx_params);
-}
-#else
-static inline
-struct mgmt_rx_event_params *alloc_mgmt_rx_event_params(void)
-{
-	struct mgmt_rx_event_params *rx_params;
-
-	rx_params = qdf_mem_malloc(sizeof(struct mgmt_rx_event_params));
-	if (!rx_params)
-		return NULL;
-
-	return rx_params;
-}
-
-#define free_mgmt_rx_event_params(rx_params) qdf_mem_free((rx_params))
-#endif
 
 /**
  * mgmt_tx_download_comp_cb - function pointer for tx download completions.
@@ -1116,22 +1062,6 @@ QDF_STATUS wlan_mgmt_txrx_pdev_open(struct wlan_objmgr_pdev *pdev);
  * Return: QDF_STATUS_SUCCESS - in case of success
  */
 QDF_STATUS wlan_mgmt_txrx_pdev_close(struct wlan_objmgr_pdev *pdev);
-
-/**
- * wlan_mgmt_txrx_psoc_enable() - mgmt txrx module psoc enable API
- * @psoc: psoc context
- *
- * Return: QDF_STATUS_SUCCESS - in case of success
- */
-QDF_STATUS wlan_mgmt_txrx_psoc_enable(struct wlan_objmgr_psoc *psoc);
-
-/**
- * wlan_mgmt_txrx_psoc_disable() - mgmt txrx module psoc disable API
- * @psoc: psoc context
- *
- * Return: QDF_STATUS_SUCCESS - in case of success
- */
-QDF_STATUS wlan_mgmt_txrx_psoc_disable(struct wlan_objmgr_psoc *psoc);
 #endif
 
 

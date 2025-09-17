@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -153,9 +153,6 @@ struct scan_req {
  * inapplicable.
  * @dwell_time_passive_6g: 6 GHz specific passive dwell time. Ignored if zero or
  * inapplicable.
- * @scan_probe_unicast_ra: Use BSSID in probe request frame RA.
- * @scan_f_2ghz: Scan only 2GHz channels
- * @scan_f_5ghz: Scan only 5+6GHz channels
  */
 struct scan_params {
 	uint8_t source;
@@ -170,9 +167,6 @@ struct scan_params {
 	uint32_t dwell_time_passive;
 	uint32_t dwell_time_active_6g;
 	uint32_t dwell_time_passive_6g;
-	bool scan_probe_unicast_ra;
-	bool scan_f_2ghz;
-	bool scan_f_5ghz;
 };
 
 /**
@@ -451,14 +445,4 @@ void wlan_config_sched_scan_plans_to_wiphy(struct wiphy *wiphy,
 void wlan_cfg80211_scan_done(struct net_device *netdev,
 			     struct cfg80211_scan_request *req,
 			     bool aborted);
-
-/**
- * convert_nl_scan_priority_to_internal() - Convert NL80211 based scan prioirty
- * value to internal scan priority value
- * @nl_scan_priority : Scan priority value received in vendor attribute
- *
- * Return: Internal scan priority value
- */
-enum scan_priority convert_nl_scan_priority_to_internal(
-	enum qca_wlan_vendor_scan_priority nl_scan_priority);
 #endif

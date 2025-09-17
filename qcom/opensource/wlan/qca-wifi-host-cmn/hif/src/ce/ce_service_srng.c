@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -78,26 +77,6 @@
 			(uint32_t)(((dma_addr) >> 32) & 0xFF);\
 	} while (0)
 
-void hif_display_ctrl_traffic_pipes_state(struct hif_opaque_softc *hif_ctx)
-{
-	struct hif_softc *scn = HIF_GET_SOFTC(hif_ctx);
-	struct CE_state *CE_state;
-	uint32_t hp = 0, tp = 0;
-
-	CE_state = scn->ce_id_to_state[2];
-	hal_get_sw_hptp(scn->hal_soc,
-			CE_state->status_ring->srng_ctx,
-			&tp, &hp);
-	hif_info_high("CE-2 Dest status ring current snapshot HP:%u TP:%u",
-		      hp, tp);
-
-	hp = 0;
-	tp = 0;
-	CE_state = scn->ce_id_to_state[3];
-	hal_get_sw_hptp(scn->hal_soc, CE_state->src_ring->srng_ctx, &tp, &hp);
-	hif_info_high("CE-3 Source ring current snapshot HP:%u TP:%u", hp, tp);
-}
-
 #if defined(HIF_CONFIG_SLUB_DEBUG_ON) || defined(HIF_CE_DEBUG_DATA_BUF)
 void hif_record_ce_srng_desc_event(struct hif_softc *scn, int ce_id,
 				   enum hif_ce_event_type type,
@@ -151,9 +130,6 @@ void hif_record_ce_srng_desc_event(struct hif_softc *scn, int ce_id,
 
 	if (ce_hist->data_enable[ce_id])
 		hif_ce_desc_data_record(event, len);
-
-	hif_record_latest_evt(ce_hist, type, ce_id, event->time,
-			      event->current_hp, event->current_tp);
 }
 #endif /* HIF_CONFIG_SLUB_DEBUG_ON || HIF_CE_DEBUG_DATA_BUF */
 
@@ -474,8 +450,8 @@ ce_completed_recv_next_nolock_srng(struct CE_state *CE_state,
 		 * as a descriptor that is not yet done.
 		 */
 		hal_get_sw_hptp(scn->hal_soc, status_ring->srng_ctx,
-				&tp, &hp);
-		hif_info_rl("No data to reap, hp %d tp %d", hp, tp);
+				&hp, &tp);
+		hif_info("No data to reap, hp %d tp %d", hp, tp);
 		status = QDF_STATUS_E_FAILURE;
 		hal_srng_access_end_reap(scn->hal_soc, status_ring->srng_ctx);
 		goto done;
@@ -743,7 +719,6 @@ static void ce_srng_msi_ring_params_setup(struct hif_softc *scn, uint32_t ce_id,
 	uint32_t msi_data_count;
 	uint32_t msi_irq_start;
 	int ret;
-	int irq_id;
 
 	ret = pld_get_user_msi_assignment(scn->qdf_dev->dev, "CE",
 					  &msi_data_count, &msi_data_start,
@@ -753,16 +728,15 @@ static void ce_srng_msi_ring_params_setup(struct hif_softc *scn, uint32_t ce_id,
 	if (ret)
 		return;
 
-	irq_id = scn->int_assignment->msi_idx[ce_id];
 	pld_get_msi_address(scn->qdf_dev->dev, &addr_low, &addr_high);
 
 	ring_params->msi_addr = addr_low;
 	ring_params->msi_addr |= (qdf_dma_addr_t)(((uint64_t)addr_high) << 32);
-	ring_params->msi_data =  irq_id + msi_data_start;
+	ring_params->msi_data = (ce_id % msi_data_count) + msi_data_start;
 	ring_params->flags |= HAL_SRNG_MSI_INTR;
 
-	hif_debug("ce_id %d irq_id %d, msi_addr %pK, msi_data %d", ce_id,
-		  irq_id, (void *)ring_params->msi_addr, ring_params->msi_data);
+	hif_debug("ce_id %d, msi_addr %pK, msi_data %d", ce_id,
+		  (void *)ring_params->msi_addr, ring_params->msi_data);
 }
 
 static void ce_srng_src_ring_setup(struct hif_softc *scn, uint32_t ce_id,
@@ -794,40 +768,6 @@ static void ce_srng_src_ring_setup(struct hif_softc *scn, uint32_t ce_id,
 	src_ring->srng_ctx = hal_srng_setup(scn->hal_soc, CE_SRC, ce_id, 0,
 			&ring_params);
 }
-
-#ifdef WLAN_WAR_CE_DISABLE_SRNG_TIMER_IRQ
-static void
-ce_srng_initialize_dest_ring_thresh(struct CE_ring_state *dest_ring,
-				    struct hal_srng_params *ring_params)
-{
-	ring_params->low_threshold = dest_ring->nentries >> 3;
-	ring_params->intr_timer_thres_us = 0;
-	ring_params->intr_batch_cntr_thres_entries = 1;
-	ring_params->flags |= HAL_SRNG_LOW_THRES_INTR_ENABLE;
-}
-#else
-static void
-ce_srng_initialize_dest_ring_thresh(struct CE_ring_state *dest_ring,
-				    struct hal_srng_params *ring_params)
-{
-	ring_params->low_threshold = dest_ring->nentries >> 3;
-	ring_params->intr_timer_thres_us = 100000;
-	ring_params->intr_batch_cntr_thres_entries = 0;
-	ring_params->flags |= HAL_SRNG_LOW_THRES_INTR_ENABLE;
-}
-#endif
-
-#ifdef WLAN_DISABLE_STATUS_RING_TIMER_WAR
-static inline bool ce_is_status_ring_timer_thresh_war_needed(void)
-{
-	return false;
-}
-#else
-static inline bool ce_is_status_ring_timer_thresh_war_needed(void)
-{
-	return true;
-}
-#endif
 
 /**
  * ce_srng_initialize_dest_timer_interrupt_war() - war initialization
@@ -865,6 +805,7 @@ static void ce_srng_dest_ring_setup(struct hif_softc *scn,
 				    struct CE_attr *attr)
 {
 	struct hal_srng_params ring_params = {0};
+	bool status_ring_timer_thresh_work_arround = true;
 
 	hif_debug("ce_id: %d", ce_id);
 
@@ -875,13 +816,15 @@ static void ce_srng_dest_ring_setup(struct hif_softc *scn,
 
 	if (!(CE_ATTR_DISABLE_INTR & attr->flags)) {
 		ce_srng_msi_ring_params_setup(scn, ce_id, &ring_params);
-		if (ce_is_status_ring_timer_thresh_war_needed()) {
+		if (status_ring_timer_thresh_work_arround) {
 			ce_srng_initialize_dest_timer_interrupt_war(
 					dest_ring, &ring_params);
 		} else {
 			/* normal behavior for future chips */
-			ce_srng_initialize_dest_ring_thresh(dest_ring,
-							    &ring_params);
+			ring_params.low_threshold = dest_ring->nentries >> 3;
+			ring_params.intr_timer_thres_us = 100000;
+			ring_params.intr_batch_cntr_thres_entries = 0;
+			ring_params.flags |= HAL_SRNG_LOW_THRES_INTR_ENABLE;
 		}
 		ring_params.prefetch_timer = HAL_SRNG_PREFETCH_TIMER;
 	}
@@ -960,28 +903,6 @@ static int ce_ring_setup_srng(struct hif_softc *scn, uint8_t ring_type,
 	}
 
 	return 0;
-}
-
-static void ce_ring_cleanup_srng(struct hif_softc *scn,
-				 struct CE_state *CE_state,
-				 uint8_t ring_type)
-{
-	hal_ring_handle_t hal_srng = NULL;
-
-	switch (ring_type) {
-	case CE_RING_SRC:
-		hal_srng = (hal_ring_handle_t)CE_state->src_ring->srng_ctx;
-	break;
-	case CE_RING_DEST:
-		hal_srng = (hal_ring_handle_t)CE_state->dest_ring->srng_ctx;
-	break;
-	case CE_RING_STATUS:
-		hal_srng = (hal_ring_handle_t)CE_state->status_ring->srng_ctx;
-	break;
-	}
-
-	if (hal_srng)
-		hal_srng_cleanup(scn->hal_soc, hal_srng);
 }
 
 static void ce_construct_shadow_config_srng(struct hif_softc *scn)
@@ -1071,7 +992,6 @@ int ce_get_index_info_srng(struct hif_softc *scn, void *ce_state,
 static struct ce_ops ce_service_srng = {
 	.ce_get_desc_size = ce_get_desc_size_srng,
 	.ce_ring_setup = ce_ring_setup_srng,
-	.ce_srng_cleanup = ce_ring_cleanup_srng,
 	.ce_sendlist_send = ce_sendlist_send_srng,
 	.ce_completed_recv_next_nolock = ce_completed_recv_next_nolock_srng,
 	.ce_revoke_recv_next = ce_revoke_recv_next_srng,

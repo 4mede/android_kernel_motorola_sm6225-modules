@@ -10,7 +10,6 @@
 #define IPA_FLT_STATUS_OF_ADD_FAILED		(-1)
 #define IPA_FLT_STATUS_OF_DEL_FAILED		(-1)
 #define IPA_FLT_STATUS_OF_MDFY_FAILED		(-1)
-#define IPA_FLT_MAX_IMM_CMD_CHAIN_LENGTH	(10)
 
 #define IPA_FLT_GET_RULE_TYPE(__entry) \
 	( \
@@ -65,9 +64,14 @@ static int ipa3_generate_flt_hw_rule(enum ipa_ip_type ip,
 	}
 
 	gen_params.ipt = ip;
-	if (entry->rt_tbl && (!ipa3_check_idr_if_freed(entry->rt_tbl)))
-		gen_params.rt_tbl_idx = entry->rt_tbl->idx;
-	else
+	if (entry->rt_tbl) {
+		if (ipa3_check_idr_if_freed(entry->rt_tbl)) {
+			IPAERR_RL("Routing table already freed\n");
+			return -EPERM;
+		} else {
+			gen_params.rt_tbl_idx = entry->rt_tbl->idx;
+		}
+	} else
 		gen_params.rt_tbl_idx = entry->rule.rt_tbl_idx;
 
 	gen_params.priority = entry->prio;
@@ -219,7 +223,7 @@ static int ipa_translate_flt_tbl_to_hw_fmt(enum ipa_ip_type ip,
 			hdr_idx++;
 			continue;
 		}
-		if (tbl->in_sys[rlt] || tbl->force_sys[rlt]) {
+		if (tbl->in_sys[rlt]) {
 			/* only body (no header) */
 			tbl_mem.size = tbl->sz[rlt] -
 				ipahal_get_hw_tbl_hdr_width();
@@ -264,7 +268,7 @@ static int ipa_translate_flt_tbl_to_hw_fmt(enum ipa_ip_type ip,
 
 			/* update the hdr at the right index */
 			if (ipahal_fltrt_write_addr_to_hdr(offset, hdr,
-				hdr_idx, false)) {
+				hdr_idx, true)) {
 				IPAERR("fail to wrt lcl tbl ofst to hdr\n");
 				goto hdr_update_fail;
 			}
@@ -370,14 +374,18 @@ allocate_failed:
  * tbl bodies at the sram is enough for the commit
  * @ipt: the ip address family type
  * @rlt: the rule type (hashable or non-hashable)
- * @aligned_sz_lcl_tbls: calculated required aligned size
  *
  * Return: true if enough space available or false in other cases
  */
 static bool ipa_flt_valid_lcl_tbl_size(enum ipa_ip_type ipt,
-	enum ipa_rule_type rlt, u32 aligned_sz_lcl_tbls)
+	enum ipa_rule_type rlt, struct ipa_mem_buffer *bdy)
 {
 	u16 avail;
+
+	if (!bdy) {
+		IPAERR("Bad parameters, bdy = NULL\n");
+		return false;
+	}
 
 	if (ipt == IPA_IP_v4)
 		avail = (rlt == IPA_RULE_HASHABLE) ?
@@ -388,11 +396,11 @@ static bool ipa_flt_valid_lcl_tbl_size(enum ipa_ip_type ipt,
 			IPA_MEM_PART(apps_v6_flt_hash_size) :
 			IPA_MEM_PART(apps_v6_flt_nhash_size);
 
-	if (aligned_sz_lcl_tbls <= avail)
+	if (bdy->size <= avail)
 		return true;
 
-	IPADBG("tbl too big, needed %d avail %d ipt %d rlt %d\n",
-	       aligned_sz_lcl_tbls, avail, ipt, rlt);
+	IPAERR("tbl too big, needed %d avail %d ipt %d rlt %d\n",
+	       bdy->size, avail, ipt, rlt);
 	return false;
 }
 
@@ -460,13 +468,6 @@ static bool ipa_flt_skip_pipe_config(int pipe)
 		return true;
 	}
 
-	if ((ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_LOW_LAT_DATA_PROD) == pipe
-		&& ipa3_ctx->modem_cfg_emb_pipe_flt)
-		&& ep->client == IPA_CLIENT_APPS_WAN_LOW_LAT_DATA_PROD) {
-		IPADBG_LOW("skip %d\n", pipe);
-		return true;
-	}
-
 	return false;
 }
 
@@ -483,20 +484,20 @@ int __ipa_commit_flt_v3(enum ipa_ip_type ip)
 {
 	struct ipahal_fltrt_alloc_imgs_params alloc_params;
 	int rc = 0;
-	struct ipa3_desc *desc, *desc_to_send;
+	struct ipa3_desc *desc;
 	struct ipahal_imm_cmd_register_write reg_write_cmd = {0};
 	struct ipahal_imm_cmd_dma_shared_mem mem_cmd = {0};
 	struct ipahal_imm_cmd_pyld **cmd_pyld;
-	int num_cmd = 0, remaining_num_cmd = 0, num_cmd_to_send = 0;
+	int num_cmd = 0;
 	int i;
 	int hdr_idx;
 	u32 lcl_hash_hdr, lcl_nhash_hdr;
 	u32 lcl_hash_bdy, lcl_nhash_bdy;
 	bool lcl_hash, lcl_nhash;
+	struct ipahal_reg_fltrt_hash_flush flush;
 	struct ipahal_reg_valmask valmask;
 	u32 tbl_hdr_width;
 	struct ipa3_flt_tbl *tbl;
-	struct ipa3_flt_tbl_nhash_lcl *lcl_tbl;
 	u16 entries;
 	struct ipahal_imm_cmd_register_write reg_write_coal_close;
 
@@ -516,8 +517,8 @@ int __ipa_commit_flt_v3(enum ipa_ip_type ip)
 			IPA_MEM_PART(apps_v4_flt_hash_ofst);
 		lcl_nhash_bdy = ipa3_ctx->smem_restricted_bytes +
 			IPA_MEM_PART(apps_v4_flt_nhash_ofst);
-		lcl_hash = ipa3_ctx->flt_tbl_hash_lcl[IPA_IP_v4];
-		lcl_nhash = ipa3_ctx->flt_tbl_nhash_lcl[IPA_IP_v4];
+		lcl_hash = ipa3_ctx->ip4_flt_tbl_hash_lcl;
+		lcl_nhash = ipa3_ctx->ip4_flt_tbl_nhash_lcl;
 	} else {
 		lcl_hash_hdr = ipa3_ctx->smem_restricted_bytes +
 			IPA_MEM_PART(v6_flt_hash_ofst) +
@@ -529,8 +530,8 @@ int __ipa_commit_flt_v3(enum ipa_ip_type ip)
 			IPA_MEM_PART(apps_v6_flt_hash_ofst);
 		lcl_nhash_bdy = ipa3_ctx->smem_restricted_bytes +
 			IPA_MEM_PART(apps_v6_flt_nhash_ofst);
-		lcl_hash = ipa3_ctx->flt_tbl_hash_lcl[IPA_IP_v6];
-		lcl_nhash = ipa3_ctx->flt_tbl_nhash_lcl[IPA_IP_v6];
+		lcl_hash = ipa3_ctx->ip6_flt_tbl_hash_lcl;
+		lcl_nhash = ipa3_ctx->ip6_flt_tbl_nhash_lcl;
 	}
 
 	for (i = 0; i < ipa3_ctx->ipa_num_pipes; i++) {
@@ -541,10 +542,6 @@ int __ipa_commit_flt_v3(enum ipa_ip_type ip)
 			rc = -EPERM;
 			goto prep_failed;
 		}
-
-		/* First try fitting tables in lcl memory if allowed */
-		tbl->force_sys[IPA_RULE_NON_HASHABLE] = false;
-
 		if (!tbl->in_sys[IPA_RULE_HASHABLE] &&
 			tbl->sz[IPA_RULE_HASHABLE]) {
 			alloc_params.num_lcl_hash_tbls++;
@@ -562,39 +559,21 @@ int __ipa_commit_flt_v3(enum ipa_ip_type ip)
 		}
 	}
 
-	if (!ipa_flt_valid_lcl_tbl_size(ip, IPA_RULE_HASHABLE,
-		ipa_fltrt_get_aligned_lcl_bdy_size(alloc_params.num_lcl_hash_tbls,
-			alloc_params.total_sz_lcl_hash_tbls))) {
-		IPAERR_RL("Hash filter table for IP:%d too big to fit in lcl memory\n",
-			ip);
-		rc = -EFAULT;
-		goto fail_size_valid;
-	}
-
-	/* Check Non-Hash filter tables fits in SRAM, if it is not - move some tables to DDR */
-	list_for_each_entry(lcl_tbl, &ipa3_ctx->flt_tbl_nhash_lcl_list[ip], link) {
-		if (ipa_flt_valid_lcl_tbl_size(ip, IPA_RULE_NON_HASHABLE,
-			ipa_fltrt_get_aligned_lcl_bdy_size(alloc_params.num_lcl_nhash_tbls,
-				alloc_params.total_sz_lcl_nhash_tbls)) ||
-			alloc_params.num_lcl_nhash_tbls == 0)
-			break;
-
-		IPADBG("SRAM partition is too small, move one non-hash table in DDR. "
-			"IP:%d alloc_params.total_sz_lcl_nhash_tbls = %u\n",
-			ip, alloc_params.total_sz_lcl_nhash_tbls);
-
-		/* Move lowest priority Eth client to DDR */
-		lcl_tbl->tbl->force_sys[IPA_RULE_NON_HASHABLE] = true;
-
-		alloc_params.num_lcl_nhash_tbls--;
-		alloc_params.total_sz_lcl_nhash_tbls -= lcl_tbl->tbl->sz[IPA_RULE_NON_HASHABLE];
-		alloc_params.total_sz_lcl_nhash_tbls += tbl_hdr_width;
-	}
-
 	if (ipa_generate_flt_hw_tbl_img(ip, &alloc_params)) {
 		IPAERR_RL("fail to generate FLT HW TBL image. IP %d\n", ip);
 		rc = -EFAULT;
 		goto prep_failed;
+	}
+
+	if (!ipa_flt_valid_lcl_tbl_size(ip, IPA_RULE_HASHABLE,
+		&alloc_params.hash_bdy)) {
+		rc = -EFAULT;
+		goto fail_size_valid;
+	}
+	if (!ipa_flt_valid_lcl_tbl_size(ip, IPA_RULE_NON_HASHABLE,
+		&alloc_params.nhash_bdy)) {
+		rc = -EFAULT;
+		goto fail_size_valid;
 	}
 
 	/* +4: 2 for bodies (hashable and non-hashable), 1 for flushing and 1
@@ -608,20 +587,12 @@ int __ipa_commit_flt_v3(enum ipa_ip_type ip)
 	}
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
-	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
-		&& !ipa3_ctx->ulso_wa) {
-		u32 offset = 0;
-
+	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1) {
 		i = ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
 		reg_write_coal_close.skip_pipeline_clear = false;
 		reg_write_coal_close.pipeline_clear_options = IPAHAL_HPS_CLEAR;
-		if (ipa3_ctx->ipa_hw_type < IPA_HW_v5_0)
-			offset = ipahal_get_reg_ofst(
-				IPA_AGGR_FORCE_CLOSE);
-		else
-			offset = ipahal_get_ep_reg_offset(
-				IPA_AGGR_FORCE_CLOSE_n, i);
-		reg_write_coal_close.offset = offset;
+		reg_write_coal_close.offset = ipahal_get_reg_ofst(
+			IPA_AGGR_FORCE_CLOSE);
 		ipahal_get_aggr_force_close_valmask(i, &valmask);
 		reg_write_coal_close.value = valmask.val;
 		reg_write_coal_close.value_mask = valmask.mask;
@@ -643,30 +614,16 @@ int __ipa_commit_flt_v3(enum ipa_ip_type ip)
 	 */
 	if (!ipa3_ctx->ipa_fltrt_not_hashable) {
 		/* flushing ipa internal hashable flt rules cache */
-		if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_0) {
-			struct ipahal_reg_fltrt_cache_flush flush_cache;
-
-			memset(&flush_cache, 0, sizeof(flush_cache));
-			flush_cache.flt = true;
-			ipahal_get_fltrt_cache_flush_valmask(
-				&flush_cache, &valmask);
-			reg_write_cmd.offset = ipahal_get_reg_ofst(
-				IPA_FILT_ROUT_CACHE_FLUSH);
-		} else {
-			struct ipahal_reg_fltrt_hash_flush flush_hash;
-
-			memset(&flush_hash, 0, sizeof(flush_hash));
-			if (ip == IPA_IP_v4)
-				flush_hash.v4_flt = true;
-			else
-				flush_hash.v6_flt = true;
-			ipahal_get_fltrt_hash_flush_valmask(
-				&flush_hash, &valmask);
-			reg_write_cmd.offset = ipahal_get_reg_ofst(
-				IPA_FILT_ROUT_HASH_FLUSH);
-		}
+		memset(&flush, 0, sizeof(flush));
+		if (ip == IPA_IP_v4)
+			flush.v4_flt = true;
+		else
+			flush.v6_flt = true;
+		ipahal_get_fltrt_hash_flush_valmask(&flush, &valmask);
 		reg_write_cmd.skip_pipeline_clear = false;
 		reg_write_cmd.pipeline_clear_options = IPAHAL_HPS_CLEAR;
+		reg_write_cmd.offset = ipahal_get_reg_ofst(
+					IPA_FILT_ROUT_HASH_FLUSH);
 		reg_write_cmd.value = valmask.val;
 		reg_write_cmd.value_mask = valmask.mask;
 		cmd_pyld[num_cmd] = ipahal_construct_imm_cmd(
@@ -753,7 +710,7 @@ int __ipa_commit_flt_v3(enum ipa_ip_type ip)
 		++hdr_idx;
 	}
 
-	if (lcl_nhash && alloc_params.num_lcl_nhash_tbls > 0) {
+	if (lcl_nhash) {
 		if (num_cmd >= entries) {
 			IPAERR("number of commands is out of range: IP = %d\n",
 				ip);
@@ -804,25 +761,10 @@ int __ipa_commit_flt_v3(enum ipa_ip_type ip)
 		++num_cmd;
 	}
 
-	remaining_num_cmd = num_cmd;
-	desc_to_send = desc;
-
-	/*
-	 * Avoid sending longs chain that may surpass number of TLVs available
-	 * for the system pipe.
-	 */
-	while (remaining_num_cmd > 0) {
-		num_cmd_to_send =
-			remaining_num_cmd > IPA_FLT_MAX_IMM_CMD_CHAIN_LENGTH ?
-			IPA_FLT_MAX_IMM_CMD_CHAIN_LENGTH : remaining_num_cmd;
-		remaining_num_cmd -= num_cmd_to_send;
-
-		if (ipa3_send_cmd(num_cmd_to_send, desc_to_send)) {
-			IPAERR("fail to send immediate command batch\n");
-			rc = -EFAULT;
-			goto fail_imm_cmd_construct;
-		}
-		desc_to_send += num_cmd_to_send;
+	if (ipa3_send_cmd(num_cmd, desc)) {
+		IPAERR("fail to send immediate command\n");
+		rc = -EFAULT;
+		goto fail_imm_cmd_construct;
 	}
 
 	IPADBG_LOW("Hashable HEAD\n");
@@ -1197,15 +1139,15 @@ error:
 static int __ipa_add_flt_get_ep_idx(enum ipa_client_type ep, int *ipa_ep_idx)
 {
 	*ipa_ep_idx = ipa3_get_ep_mapping(ep);
-	if (*ipa_ep_idx < 0 || *ipa_ep_idx >= ipa3_get_max_num_pipes()) {
+	if (*ipa_ep_idx < 0) {
 		IPAERR_RL("ep not valid ep=%d\n", ep);
 		return -EINVAL;
 	}
 	if (ipa3_ctx->ep[*ipa_ep_idx].valid == 0)
-		IPAERR_RL("ep not connected ep_idx=%d\n", *ipa_ep_idx);
+		IPADBG("ep not connected ep_idx=%d\n", *ipa_ep_idx);
 
 	if (!ipa_is_ep_support_flt(*ipa_ep_idx)) {
-		IPAERR_RL("ep do not support filtering ep=%d\n", ep);
+		IPAERR("ep do not support filtering ep=%d\n", ep);
 		return -EINVAL;
 	}
 
@@ -1228,7 +1170,7 @@ static int __ipa_add_ep_flt_rule(enum ipa_ip_type ip, enum ipa_client_type ep,
 	if (__ipa_add_flt_get_ep_idx(ep, &ipa_ep_idx))
 		return -EINVAL;
 
-	if (ipa_ep_idx >= ipa3_get_max_num_pipes()) {
+	if (ipa_ep_idx >= IPA3_MAX_NUM_PIPES) {
 		IPAERR_RL("invalid ipa_ep_idx=%d\n", ipa_ep_idx);
 		return -EINVAL;
 	}
@@ -1504,7 +1446,7 @@ int ipa3_add_flt_rule_after(struct ipa_ioc_add_flt_rule_after *rules)
 		goto bail;
 	}
 
-	if (ipa_ep_idx >= ipa3_get_max_num_pipes() || ipa_ep_idx < 0) {
+	if (ipa_ep_idx >= IPA3_MAX_NUM_PIPES || ipa_ep_idx < 0) {
 		IPAERR_RL("invalid ipa_ep_idx=%u\n", ipa_ep_idx);
 		result = -EINVAL;
 		goto bail;
@@ -1622,7 +1564,7 @@ int ipa3_add_flt_rule_after_v2(struct ipa_ioc_add_flt_rule_after_v2
 		goto bail;
 	}
 
-	if (ipa_ep_idx >= ipa3_get_max_num_pipes() ||
+	if (ipa_ep_idx >= IPA3_MAX_NUM_PIPES ||
 		ipa_ep_idx < 0) {
 		IPAERR_RL("invalid ipa_ep_idx=%u\n", ipa_ep_idx);
 		result = -EINVAL;
@@ -1954,7 +1896,7 @@ void ipa3_install_dflt_flt_rules(u32 ipa_ep_idx)
 	struct ipa3_ep_context *ep;
 	struct ipa_flt_rule_i rule;
 
-	if (ipa_ep_idx >= ipa3_get_max_num_pipes()) {
+	if (ipa_ep_idx >= IPA3_MAX_NUM_PIPES) {
 		IPAERR("invalid ipa_ep_idx=%u\n", ipa_ep_idx);
 		ipa_assert();
 		return;
@@ -2024,6 +1966,8 @@ void ipa3_delete_dflt_flt_rules(u32 ipa_ep_idx)
  */
 int ipa3_set_flt_tuple_mask(int pipe_idx, struct ipahal_reg_hash_tuple *tuple)
 {
+	struct ipahal_reg_fltrt_hash_tuple fltrt_tuple;
+
 	if (!tuple) {
 		IPAERR_RL("bad tuple\n");
 		return -EINVAL;
@@ -2044,23 +1988,11 @@ int ipa3_set_flt_tuple_mask(int pipe_idx, struct ipahal_reg_hash_tuple *tuple)
 		return -EINVAL;
 	}
 
-	if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_0) {
-		struct ipahal_reg_fltrt_cache_tuple cache_tuple;
-
-		ipahal_read_reg_n_fields(IPA_FILTER_CACHE_CFG_n,
-			pipe_idx, &cache_tuple);
-		cache_tuple.tuple = *tuple;
-		ipahal_write_reg_n_fields(IPA_FILTER_CACHE_CFG_n,
-			pipe_idx, &cache_tuple);
-	} else {
-		struct ipahal_reg_fltrt_hash_tuple hash_tuple;
-
-		ipahal_read_reg_n_fields(IPA_ENDP_FILTER_ROUTER_HSH_CFG_n,
-			pipe_idx, &hash_tuple);
-		hash_tuple.flt = *tuple;
-		ipahal_write_reg_n_fields(IPA_ENDP_FILTER_ROUTER_HSH_CFG_n,
-			pipe_idx, &hash_tuple);
-	}
+	ipahal_read_reg_n_fields(IPA_ENDP_FILTER_ROUTER_HSH_CFG_n,
+		pipe_idx, &fltrt_tuple);
+	fltrt_tuple.flt = *tuple;
+	ipahal_write_reg_n_fields(IPA_ENDP_FILTER_ROUTER_HSH_CFG_n,
+		pipe_idx, &fltrt_tuple);
 
 	return 0;
 }
@@ -2111,7 +2043,7 @@ int ipa3_flt_read_tbl_from_hw(u32 pipe_idx, enum ipa_ip_type ip_type,
 	}
 
 	if (pipe_idx >= ipa3_ctx->ipa_num_pipes ||
-		pipe_idx >= ipa3_get_max_num_pipes() || ip_type >= IPA_IP_MAX ||
+		pipe_idx >= IPA3_MAX_NUM_PIPES || ip_type >= IPA_IP_MAX ||
 		!entry || !num_entry) {
 		IPAERR_RL("Invalid pipe_idx=%u\n", pipe_idx);
 		return -EFAULT;
@@ -2220,42 +2152,3 @@ bail:
 	iounmap(ipa_sram_mmio);
 	return 0;
 }
-
-int ipa_flt_sram_set_client_prio_high(enum ipa_client_type client)
-{
-	int ipa_ep_idx = IPA_EP_NOT_ALLOCATED;
-	enum ipa_ip_type ip;
-
-	/* allow setting high priority only to ETH clients */
-	if (!IPA_CLIENT_IS_ETH_PROD(client)) {
-		IPAERR("Operation not permitted for non ETH clients\n");
-		return -EINVAL;
-	}
-
-	ipa_ep_idx = ipa_get_ep_mapping(client);
-	if (ipa_ep_idx == IPA_EP_NOT_ALLOCATED)
-		return -EINVAL;
-
-	if (!ipa_is_ep_support_flt(ipa_ep_idx))
-		return -EINVAL;
-
-	mutex_lock(&ipa3_ctx->lock);
-	for (ip = IPA_IP_v4; ip < IPA_IP_MAX; ip++) {
-		struct ipa3_flt_tbl_nhash_lcl *lcl_tbl, *tmp;
-		struct ipa3_flt_tbl *flt_tbl = &ipa3_ctx->flt_tbl[ipa_ep_idx][ip];
-		/* Position filtering table last in the list so, it will have first SRAM priority */
-		list_for_each_entry_safe(
-			lcl_tbl, tmp, &ipa3_ctx->flt_tbl_nhash_lcl_list[ip], link) {
-			if (lcl_tbl->tbl == flt_tbl) {
-				list_del(&lcl_tbl->link);
-				list_add_tail(&lcl_tbl->link,
-					&ipa3_ctx->flt_tbl_nhash_lcl_list[ip]);
-				break;
-			}
-		}
-	}
-	mutex_unlock(&ipa3_ctx->lock);
-
-	return 0;
-}
-

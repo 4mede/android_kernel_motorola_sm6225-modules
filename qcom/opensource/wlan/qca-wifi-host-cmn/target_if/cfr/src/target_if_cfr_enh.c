@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -26,7 +25,9 @@
 #include <wlan_osif_priv.h>
 #include <init_deinit_lmac.h>
 #include <wlan_cfr_utils_api.h>
+#ifdef DIRECT_BUF_RX_ENABLE
 #include <target_if_direct_buf_rx_api.h>
+#endif
 #include <target_if_cfr_enh.h>
 #include "cdp_txrx_ctrl.h"
 
@@ -43,7 +44,7 @@ static u_int32_t end_magic = 0xBEAFDEAD;
  *
  * Return: signal strength in dBm
  */
-#if defined(QCA_WIFI_QCA6490) || defined(QCA_WIFI_KIWI)
+#if defined(QCA_WIFI_QCA6490) || defined(QCA_WIFI_WCN7850)
 static inline
 u_int32_t snr_to_signal_strength(uint8_t snr)
 {
@@ -291,57 +292,6 @@ static void dump_freeze_tlv_v3(void *freeze_tlv, uint32_t cookie)
 }
 
 /**
- * dump_freeze_tlv_v5() - Dump freeze TLV sent in enhanced DMA header
- * @freeze_tlv: Freeze TLV sent from MAC to PHY
- * @cookie: Index into lookup table
- *
- * Return: none
- */
-static void dump_freeze_tlv_v5(void *freeze_tlv, uint32_t cookie)
-{
-	struct macrx_freeze_capture_channel_v5 *freeze =
-		(struct macrx_freeze_capture_channel_v5 *)freeze_tlv;
-
-	cfr_debug("<DBRCOMP><FREEZE><%u>\n"
-		  "freeze: %d capture_reason: %d packet_type: 0x%x\n"
-		  "packet_subtype: 0x%x sw_peer_id_valid: %d sw_peer_id: %d\n"
-		  "phy_ppdu_id: 0x%04x packet_ta_lower_16: 0x%04x\n"
-		  "packet_ta_mid_16: 0x%04x packet_ta_upper_16: 0x%04x\n"
-		  "packet_ra_lower_16: 0x%04x packet_ra_mid_16: 0x%04x\n"
-		  "packet_ra_upper_16: 0x%04x\n"
-		  "tsf_timestamp_15_0: 0x%04x\n"
-		  "tsf_timestamp_31_16: 0x%04x\n"
-		  "tsf_timestamp_47_32: 0x%04x\n"
-		  "tsf_timestamp_63_48: 0x%04x\n"
-		  "user_index_or_user_mask_5_0: 0x%04x\n"
-		  "directed: %d\n"
-		  "user_mask_21_6: 0x%04x\n"
-		  "user_mask_36_22: 0x%04x\n",
-		  cookie,
-		  freeze->freeze,
-		  freeze->capture_reason,
-		  freeze->packet_type,
-		  freeze->packet_sub_type,
-		  freeze->sw_peer_id_valid,
-		  freeze->sw_peer_id,
-		  freeze->phy_ppdu_id,
-		  freeze->packet_ta_lower_16,
-		  freeze->packet_ta_mid_16,
-		  freeze->packet_ta_upper_16,
-		  freeze->packet_ra_lower_16,
-		  freeze->packet_ra_mid_16,
-		  freeze->packet_ra_upper_16,
-		  freeze->tsf_timestamp_15_0,
-		  freeze->tsf_timestamp_31_16,
-		  freeze->tsf_timestamp_47_32,
-		  freeze->tsf_timestamp_63_48,
-		  freeze->user_index_or_user_mask_5_0,
-		  freeze->directed,
-		  freeze->user_mask_21_6,
-		  freeze->user_mask_36_22);
-}
-
-/**
  * dump_mu_rx_info() - Dump MU info in enhanced DMA header
  * @mu_rx_user_info: MU info sent by ucode
  * @mu_rx_num_users: Number of MU users in UL-MU-PPDU
@@ -381,61 +331,6 @@ static void dump_mu_rx_info(void *mu_rx_user_info,
 			  ul_mu_user_info->sta_coding,
 			  ul_mu_user_info->ru_start_index);
 		ul_mu_user_info += sizeof(struct uplink_user_setup_info);
-	}
-}
-
-/**
- * dump_mu_rx_info_v2() - Dump MU info in enhanced DMA header
- * @mu_rx_user_info: MU info sent by ucode
- * @mu_rx_num_users: Number of MU users in UL-MU-PPDU
- * @cookie: Index into lookup table
- *
- * Return: none
- */
-static void dump_mu_rx_info_v2(void *mu_rx_user_info,
-			       uint8_t mu_rx_num_users,
-			       uint32_t cookie)
-{
-	uint8_t i;
-	struct uplink_user_setup_info_v2 *ul_mu_user_info =
-		(struct uplink_user_setup_info_v2 *)mu_rx_user_info;
-
-	for (i = 0 ; i < mu_rx_num_users; i++) {
-		cfr_debug("<DBRCOMP><MU><%u>\n"
-			  "<user_id:%d>\n"
-			  "bw_info_valid = %d\n"
-			  "uplink_receive_type = %d\n"
-			  "uplink_11ax_mcs = %d\n"
-			  "nss = %d\n"
-			  "stream_offset = %d\n"
-			  "sta_dcm = %d\n"
-			  "sta_coding = %d\n"
-			  "ru_type_80_0 = %d\n"
-			  "ru_type_80_1 = %d\n"
-			  "ru_type_80_2 = %d\n"
-			  "ru_type_80_3 = %d\n"
-			  "ru_start_index_80_0 = %d\n"
-			  "ru_start_index_80_1 = %d\n"
-			  "ru_start_index_80_2 = %d\n"
-			  "ru_start_index_80_3 = %d\n",
-			  cookie,
-			  i,
-			  ul_mu_user_info->bw_info_valid,
-			  ul_mu_user_info->uplink_receive_type,
-			  ul_mu_user_info->uplink_11ax_mcs,
-			  ul_mu_user_info->nss,
-			  ul_mu_user_info->stream_offset,
-			  ul_mu_user_info->sta_dcm,
-			  ul_mu_user_info->sta_coding,
-			  ul_mu_user_info->ru_type_80_0,
-			  ul_mu_user_info->ru_type_80_1,
-			  ul_mu_user_info->ru_type_80_2,
-			  ul_mu_user_info->ru_type_80_3,
-			  ul_mu_user_info->ru_start_index_80_0,
-			  ul_mu_user_info->ru_start_index_80_1,
-			  ul_mu_user_info->ru_start_index_80_2,
-			  ul_mu_user_info->ru_start_index_80_3);
-		ul_mu_user_info += sizeof(struct uplink_user_setup_info_v2);
 	}
 }
 
@@ -524,9 +419,6 @@ static void dump_metadata(struct csi_cfr_header *header, uint32_t cookie)
 			cfr_debug("agc_gain[%d] = %d\n",
 				  chain_id,
 				  meta->agc_gain[chain_id]);
-			cfr_debug("agc_gain_tbl_idx[%d] = %d\n",
-				  chain_id,
-				  meta->agc_gain_tbl_index[chain_id]);
 		}
 
 		cfr_debug("mcs_rate = %u\n", meta->mcs_rate);
@@ -551,98 +443,49 @@ static void dump_enh_dma_hdr(struct whal_cfir_enhanced_hdr *dma_hdr,
 			     uint32_t cookie)
 {
 	if (!error) {
-		if (dma_hdr->header_version == UPLOAD_HEADER_VERSION_9) {
-			cfr_debug("<DBRCOMP><%u>\n"
-				  "Tag: 0x%02x Length: %d udone: %d\n"
-				  "ctype: %d preamble: %d Nss: %d\n"
-				  "num_chains: %d bw: %d peervalid: %d\n"
-				  "peer_id: %d ppdu_id: 0x%04x\n"
-				  "total_bytes: %d header_version: %d\n"
-				  "target_id: %d cfr_fmt: %d\n"
-				  "mu_rx_data_incl: %d freeze_data_incl: %d\n"
-				  "mu_rx_num_users: %d decimation_factor: %d\n"
-				  "freeze_tlv_version: %d\n"
-				  "he_ltf_type: %u ext_preamble_type = %u\n",
-				  cookie,
-				  dma_hdr->tag,
-				  dma_hdr->length,
-				  dma_hdr->upload_done,
-				  dma_hdr->capture_type,
-				  dma_hdr->preamble_type,
-				  dma_hdr->nss,
-				  dma_hdr->num_chains,
-				  dma_hdr->upload_pkt_bw,
-				  dma_hdr->sw_peer_id_valid,
-				  dma_hdr->sw_peer_id,
-				  dma_hdr->phy_ppdu_id,
-				  dma_hdr->total_bytes,
-				  dma_hdr->header_version,
-				  dma_hdr->target_id,
-				  dma_hdr->cfr_fmt,
-				  dma_hdr->mu_rx_data_incl,
-				  dma_hdr->freeze_data_incl,
-				  dma_hdr->mu_rx_num_users,
-				  dma_hdr->decimation_factor,
-				  dma_hdr->freeze_tlv_version,
-				  dma_hdr->rsvd3,
-				  dma_hdr->rsvd4);
-
-		} else {
-			cfr_debug("<DBRCOMP><%u>\n"
-				  "Tag: 0x%02x Length: %d udone: %d\n"
-				  "ctype: %d preamble: %d Nss: %d\n"
-				  "num_chains: %d bw: %d peervalid: %d\n"
-				  "peer_id: %d ppdu_id: 0x%04x\n"
-				  "total_bytes: %d header_version: %d\n"
-				  "target_id: %d cfr_fmt: %d\n"
-				  "mu_rx_data_incl: %d freeze_data_incl: %d\n"
-				  "mu_rx_num_users: %d decimation_factor: %d\n"
-				  "freeze_tlv_version: %d\n",
-				  cookie,
-				  dma_hdr->tag,
-				  dma_hdr->length,
-				  dma_hdr->upload_done,
-				  dma_hdr->capture_type,
-				  dma_hdr->preamble_type,
-				  dma_hdr->nss,
-				  dma_hdr->num_chains,
-				  dma_hdr->upload_pkt_bw,
-				  dma_hdr->sw_peer_id_valid,
-				  dma_hdr->sw_peer_id,
-				  dma_hdr->phy_ppdu_id,
-				  dma_hdr->total_bytes,
-				  dma_hdr->header_version,
-				  dma_hdr->target_id,
-				  dma_hdr->cfr_fmt,
-				  dma_hdr->mu_rx_data_incl,
-				  dma_hdr->freeze_data_incl,
-				  dma_hdr->mu_rx_num_users,
-				  dma_hdr->decimation_factor,
-				  dma_hdr->freeze_tlv_version);
-		}
+		cfr_debug("<DBRCOMP><%u>\n"
+			  "Tag: 0x%02x Length: %d udone: %d\n"
+			  "ctype: %d preamble: %d Nss: %d\n"
+			  "num_chains: %d bw: %d peervalid: %d\n"
+			  "peer_id: %d ppdu_id: 0x%04x total_bytes: %d\n"
+			  "header_version: %d target_id: %d cfr_fmt: %d\n"
+			  "mu_rx_data_incl: %d freeze_data_incl: %d\n"
+			  "mu_rx_num_users: %d decimation_factor: %d\n"
+			  "freeze_tlv_version: %d\n",
+			  cookie,
+			  dma_hdr->tag,
+			  dma_hdr->length,
+			  dma_hdr->upload_done,
+			  dma_hdr->capture_type,
+			  dma_hdr->preamble_type,
+			  dma_hdr->nss,
+			  dma_hdr->num_chains,
+			  dma_hdr->upload_pkt_bw,
+			  dma_hdr->sw_peer_id_valid,
+			  dma_hdr->sw_peer_id,
+			  dma_hdr->phy_ppdu_id,
+			  dma_hdr->total_bytes,
+			  dma_hdr->header_version,
+			  dma_hdr->target_id,
+			  dma_hdr->cfr_fmt,
+			  dma_hdr->mu_rx_data_incl,
+			  dma_hdr->freeze_data_incl,
+			  dma_hdr->mu_rx_num_users,
+			  dma_hdr->decimation_factor,
+			  dma_hdr->freeze_tlv_version);
 
 		if (dma_hdr->freeze_data_incl) {
 			if (dma_hdr->freeze_tlv_version ==
 					MACRX_FREEZE_TLV_VERSION_3)
 				dump_freeze_tlv_v3(freeze_tlv, cookie);
-			else if (dma_hdr->freeze_tlv_version ==
-					MACRX_FREEZE_TLV_VERSION_5)
-				dump_freeze_tlv_v5(freeze_tlv, cookie);
 			else
 				dump_freeze_tlv(freeze_tlv, cookie);
 		}
 
-		if ((dma_hdr->mu_rx_data_incl) &&
-		    (dma_hdr->freeze_tlv_version ==
-		     MACRX_FREEZE_TLV_VERSION_5)) {
-			dump_mu_rx_info_v2(mu_rx_user_info,
-					   dma_hdr->mu_rx_num_users,
-					   cookie);
-		} else if (dma_hdr->mu_rx_data_incl) {
+		if (dma_hdr->mu_rx_data_incl)
 			dump_mu_rx_info(mu_rx_user_info,
 					dma_hdr->mu_rx_num_users,
 					cookie);
-		}
 	} else {
 		cfr_err("<DBRCOMP><%u>\n"
 			"Tag: 0x%02x Length: %d udone: %d\n"
@@ -714,21 +557,6 @@ static QDF_STATUS check_dma_length(struct look_up_table *lut,
 	if (target_type == TARGET_TYPE_QCN9000) {
 		if (lut->header_length <= PINE_MAX_HEADER_LENGTH_WORDS &&
 		    lut->payload_length <= PINE_MAX_DATA_LENGTH_BYTES) {
-			return QDF_STATUS_SUCCESS;
-		}
-	} else if (target_type == TARGET_TYPE_QCN6122) {
-		if (lut->header_length <= SPRUCE_MAX_HEADER_LENGTH_WORDS &&
-		    lut->payload_length <= SPRUCE_MAX_DATA_LENGTH_BYTES) {
-			return QDF_STATUS_SUCCESS;
-		}
-	} else if (target_type == TARGET_TYPE_QCA5018) {
-		if (lut->header_length <= MAPLE_MAX_HEADER_LENGTH_WORDS &&
-		    lut->payload_length <= MAPLE_MAX_DATA_LENGTH_BYTES) {
-			return QDF_STATUS_SUCCESS;
-		}
-	} else if (target_type == TARGET_TYPE_QCN9224) {
-		if (lut->header_length <= WAIKIKI_MAX_HEADER_LENGTH_WORDS &&
-		    lut->payload_length <= WAIKIKI_MAX_DATA_LENGTH_BYTES) {
 			return QDF_STATUS_SUCCESS;
 		}
 	} else {
@@ -897,9 +725,6 @@ void target_if_cfr_rx_tlv_process(struct wlan_objmgr_pdev *pdev, void *nbuf)
 	uint8_t srng_id = 0;
 	struct wlan_lmac_if_rx_ops *rx_ops;
 	uint32_t target_type;
-	uint16_t pdelta, gain;
-	uint16_t gain_info[HOST_MAX_CHAINS];
-	bool invalid_gain_table_idx = false;
 
 	if (qdf_unlikely(!pdev)) {
 		cfr_err("pdev is null\n");
@@ -1017,72 +842,14 @@ void target_if_cfr_rx_tlv_process(struct wlan_objmgr_pdev *pdev, void *nbuf)
 	meta->rtt_cfo_measurement = cfr_info->rtt_cfo_measurement;
 	meta->rx_start_ts = cfr_info->rx_start_ts;
 
-	gain_info[0] = get_u16_lsb(cfr_info->agc_gain_info0);
-	gain_info[1] = get_u16_msb(cfr_info->agc_gain_info0);
-	gain_info[2] = get_u16_lsb(cfr_info->agc_gain_info1);
-	gain_info[3] = get_u16_msb(cfr_info->agc_gain_info1);
-	gain_info[4] = get_u16_lsb(cfr_info->agc_gain_info2);
-	gain_info[5] = get_u16_msb(cfr_info->agc_gain_info2);
-	gain_info[6] = get_u16_lsb(cfr_info->agc_gain_info3);
-	gain_info[7] = get_u16_msb(cfr_info->agc_gain_info3);
-
-	for (i = 0; i < HOST_MAX_CHAINS; i++) {
-		meta->agc_gain[i] = get_gain_db(gain_info[i]);
-		meta->agc_gain_tbl_index[i] = get_gain_table_idx(gain_info[i]);
-
-		if (pcfr->is_aoa_for_rcc_support &&
-		    (i < pcfr->max_aoa_chains) &&
-		    (meta->agc_gain_tbl_index[i] != 0)) {
-			cfr_debug("Invalid gain table index reported");
-			invalid_gain_table_idx = true;
-		}
-
-		if (meta->agc_gain[i] > MAX_AGC_GAIN)
-			meta->agc_gain[i] = MAX_AGC_GAIN;
-	}
-
-	/**
-	 * Do not derive the chain phase when capability is not set Or
-	 * when an invalid gain table index is reported by Hardware.
-	 */
-	if (pcfr->is_aoa_for_rcc_support && !invalid_gain_table_idx) {
-		for (i = 0; i < pcfr->max_aoa_chains; i++) {
-			/**
-			 * phase delta stored in reverse order by FW.
-			 * Hence, index accordingly
-			 */
-			gain = meta->agc_gain[i];
-			if (gain < MAX_AGC_GAIN) {
-				pdelta = pcfr->phase_delta[i][MAX_AGC_GAIN -
-							      1 -
-							      gain];
-			} else {
-				pdelta = 0;
-			}
-			/**
-			 * FW sets 0xFFFF as invalid phase delta in
-			 * invalid cases. Retain same in HOST as well.
-			 * In case of valid phase, add the ibf cal value
-			 * to the delta & ensure the derived phase value
-			 * is in the range of 0 - 1024 indicating 0 - 360
-			 * degrees
-			 */
-			if (pdelta == INVALID_PHASE_DELTA)
-				meta->chain_phase[i] = INVALID_PHASE_DELTA;
-			else
-				meta->chain_phase[i] = ((pcfr->ibf_cal_val[i] +
-							pdelta) & 0x3FF);
-		}
-	} else if (pcfr->is_aoa_for_rcc_support) {
-		/**
-		 * When AoA is enabled but invalid gain table index is reported
-		 * by HW, it indicates the AoA result is not reliable. Hence,
-		 * set the chain_phase to 0xFFFF indicating an error.
-		 */
-		for (i = 0; i < pcfr->max_aoa_chains; i++) {
-			meta->chain_phase[i] = INVALID_PHASE_DELTA;
-		}
-	}
+	meta->agc_gain[0] = get_gain_db(get_u16_lsb(cfr_info->agc_gain_info0));
+	meta->agc_gain[1] = get_gain_db(get_u16_msb(cfr_info->agc_gain_info0));
+	meta->agc_gain[2] = get_gain_db(get_u16_lsb(cfr_info->agc_gain_info1));
+	meta->agc_gain[3] = get_gain_db(get_u16_msb(cfr_info->agc_gain_info1));
+	meta->agc_gain[4] = get_gain_db(get_u16_lsb(cfr_info->agc_gain_info2));
+	meta->agc_gain[5] = get_gain_db(get_u16_msb(cfr_info->agc_gain_info2));
+	meta->agc_gain[6] = get_gain_db(get_u16_lsb(cfr_info->agc_gain_info3));
+	meta->agc_gain[7] = get_gain_db(get_u16_msb(cfr_info->agc_gain_info3));
 
 	meta->mcs_rate = cfr_info->mcs_rate;
 	meta->gi_type = cfr_info->gi_type;
@@ -1238,10 +1005,6 @@ static bool enh_cfr_dbr_event_handler(struct wlan_objmgr_pdev *pdev,
 		if (dma_hdr.freeze_tlv_version == MACRX_FREEZE_TLV_VERSION_3) {
 			freeze_tlv_len =
 				sizeof(struct macrx_freeze_capture_channel_v3);
-		} else if (dma_hdr.freeze_tlv_version ==
-				MACRX_FREEZE_TLV_VERSION_5) {
-			freeze_tlv_len =
-				sizeof(struct macrx_freeze_capture_channel_v5);
 		} else {
 			freeze_tlv_len =
 				sizeof(struct macrx_freeze_capture_channel);
@@ -1420,110 +1183,6 @@ static void dump_cfr_peer_tx_event_enh(wmi_cfr_peer_tx_event_param *event,
 		  cookie,
 		  event->status, event->timestamp_us, event->counter,
 		  event->chain_rssi[0]);
-}
-
-static void
-populate_phase_delta(struct pdev_cfr *pcfr,
-		     struct wmi_cfr_phase_delta_param param)
-{
-	int c, g, pc, pg;
-	uint32_t c_mask = param.chain_phase_mask;
-
-	pc = 0;
-
-	/* populate phase delta for max chains indicated by target */
-	for (c = 0; c < pcfr->max_aoa_chains; c++) {
-		pg = 0;
-		if (((0x1 << c) & c_mask) && (pc < WMI_MAX_CHAINS_PHASE)) {
-			pcfr->ibf_cal_val[c] = param.ibf_cal_val[pc];
-			for (g = 0; g < MAX_AGC_GAIN; g = g + 2) {
-				if (pg < WMI_MAX_AOA_PHASE_DELTA) {
-					pcfr->phase_delta[c][g] = get_u16_lsb
-						(param.phase_delta[pc][pg]);
-					pcfr->phase_delta[c][g + 1] = get_u16_msb
-						(param.phase_delta[pc][pg]);
-					pg++;
-				}
-			}
-			pc++;
-		}
-	}
-}
-
-static int
-target_if_pdev_aoa_phasedaelta_event_handler(ol_scn_t sc,
-					     uint8_t *data,
-					     uint32_t datalen)
-{
-	struct wmi_unified *wmi_handle;
-	struct wlan_objmgr_psoc *psoc;
-	struct wlan_objmgr_pdev *pdev;
-	struct pdev_cfr *pcfr;
-	QDF_STATUS retval = 0;
-	struct wmi_cfr_phase_delta_param param = {0};
-
-	if (!sc || !data) {
-		cfr_err("sc or data is null");
-		return -EINVAL;
-	}
-
-	psoc = target_if_get_psoc_from_scn_hdl(sc);
-	if (!psoc) {
-		cfr_err("psoc is null");
-		return -EINVAL;
-	}
-
-	retval = wlan_objmgr_psoc_try_get_ref(psoc, WLAN_CFR_ID);
-	if (QDF_IS_STATUS_ERROR(retval)) {
-		cfr_err("unable to get psoc reference");
-		return -EINVAL;
-	}
-
-	wmi_handle = GET_WMI_HDL_FROM_PSOC(psoc);
-	if (!wmi_handle) {
-		cfr_err("wmi_handle is null");
-		wlan_objmgr_psoc_release_ref(psoc, WLAN_CFR_ID);
-		return -EINVAL;
-	}
-
-	retval = wmi_extract_cfr_pdev_phase_delta_event
-			(wmi_handle, data, &param);
-
-	if (QDF_IS_STATUS_ERROR(retval)) {
-		cfr_err("Failed to extract phase params");
-		wlan_objmgr_psoc_release_ref(psoc, WLAN_CFR_ID);
-		return -EINVAL;
-	}
-
-	pdev = wlan_objmgr_get_pdev_by_id(psoc, param.pdev_id, WLAN_CFR_ID);
-	if (!pdev) {
-		cfr_err("pdev is null");
-		wlan_objmgr_psoc_release_ref(psoc, WLAN_CFR_ID);
-		return -EINVAL;
-	}
-
-	pcfr = wlan_objmgr_pdev_get_comp_private_obj(pdev, WLAN_UMAC_COMP_CFR);
-	if (!pcfr) {
-		cfr_err("pdev object for CFR is NULL");
-		wlan_objmgr_psoc_release_ref(psoc, WLAN_CFR_ID);
-		wlan_objmgr_pdev_release_ref(pdev, WLAN_CFR_ID);
-		return -EINVAL;
-	}
-
-	if (!pcfr->is_aoa_for_rcc_support) {
-		cfr_err("AoA data event from unsupported target");
-	}
-
-	pcfr->freq = param.freq;
-	pcfr->max_aoa_chains = (param.max_chains <= HOST_MAX_CHAINS) ?
-				param.max_chains : HOST_MAX_CHAINS;
-
-	populate_phase_delta(pcfr, param);
-
-	wlan_objmgr_psoc_release_ref(psoc, WLAN_CFR_ID);
-	wlan_objmgr_pdev_release_ref(pdev, WLAN_CFR_ID);
-
-	return retval;
 }
 
 #ifdef DIRECT_BUF_RX_ENABLE
@@ -1760,11 +1419,6 @@ target_if_peer_capture_event(ol_scn_t sc, uint8_t *data, uint32_t datalen)
 	qdf_mem_copy(&header->u.meta_enh.agc_gain[0],
 		     &tx_evt_param.agc_gain[0],
 		     HOST_MAX_CHAINS * sizeof(tx_evt_param.agc_gain[0]));
-	qdf_mem_copy(&header->u.meta_enh.agc_gain_tbl_index[0],
-		     &tx_evt_param.agc_gain_tbl_index[0],
-		     (HOST_MAX_CHAINS *
-		      sizeof(tx_evt_param.agc_gain_tbl_index[0])));
-
 	header->u.meta_enh.rtt_cfo_measurement = tx_evt_param.cfo_measurement;
 	header->u.meta_enh.rx_start_ts = tx_evt_param.rx_start_ts;
 	header->u.meta_enh.mcs_rate    = tx_evt_param.mcs_rate;
@@ -1809,85 +1463,24 @@ target_if_peer_capture_event(ol_scn_t sc, uint8_t *data, uint32_t datalen)
 #endif
 
 /**
- * target_if_register_phase_delta_for_rcc_event_handler() - Register callback
- * for WMI phase delta event
- * @psoc: PSOC object
- *
- * Return: Success/Failure status
- */
-static QDF_STATUS
-target_if_register_phase_delta_for_rcc_event_handler(struct wlan_objmgr_psoc
-						     *psoc)
-{
-	wmi_unified_t wmi_hdl;
-	QDF_STATUS ret = QDF_STATUS_SUCCESS;
-
-	wmi_hdl = get_wmi_unified_hdl_from_psoc(psoc);
-	if (!wmi_hdl) {
-		cfr_err("Unable to get wmi handle");
-		return QDF_STATUS_E_NULL_VALUE;
-	}
-
-	ret = wmi_unified_register_event_handler
-		(wmi_hdl, wmi_pdev_aoa_phasedelta_event_id,
-		 target_if_pdev_aoa_phasedaelta_event_handler,
-		 WMI_RX_UMAC_CTX);
-
-	/*
-	 * Event registration is called per pdev
-	 * Ignore erorr if event is alreday registred.
-	 */
-	if (ret == QDF_STATUS_E_FAILURE)
-		ret = QDF_STATUS_SUCCESS;
-
-	return ret;
-}
-
-/**
- * target_if_unregister_phase_delta_for_rcc_event_handler() - Unregister
- * call back for WMI phase delta for rcc event
- * @psoc: PSOC object
- *
- * Return Success/Failure status
- */
-static QDF_STATUS
-target_if_unregister_phase_delta_for_rcc_event_handler(struct wlan_objmgr_psoc
-						       *psoc)
-{
-	wmi_unified_t wmi_hdl;
-	QDF_STATUS status = QDF_STATUS_SUCCESS;
-
-	wmi_hdl = get_wmi_unified_hdl_from_psoc(psoc);
-	if (!wmi_hdl) {
-		cfr_err("Unable to get wmi handle");
-		return QDF_STATUS_E_NULL_VALUE;
-	}
-
-	status = wmi_unified_unregister_event
-		(wmi_hdl, wmi_pdev_aoa_phasedelta_event_id);
-
-	return status;
-}
-
-/**
  * target_if_register_tx_completion_enh_event_handler() - Register callback for
  * WMI TX completion event
  * @psoc: PSOC object
  *
  * Return: Success/Failure status
  */
-static QDF_STATUS
+static int
 target_if_register_tx_completion_enh_event_handler(struct wlan_objmgr_psoc
 						   *psoc)
 {
 	/* Register completion handler here */
 	wmi_unified_t wmi_hdl;
-	QDF_STATUS ret = QDF_STATUS_SUCCESS;
+	int ret = 0;
 
 	wmi_hdl = get_wmi_unified_hdl_from_psoc(psoc);
 	if (!wmi_hdl) {
 		cfr_err("Unable to get wmi handle");
-		return QDF_STATUS_E_NULL_VALUE;
+		return -EINVAL;
 	}
 
 	ret = wmi_unified_register_event_handler(wmi_hdl,
@@ -1911,18 +1504,18 @@ target_if_register_tx_completion_enh_event_handler(struct wlan_objmgr_psoc
  *
  * Return: Success/Failure status
  */
-static QDF_STATUS
+static int
 target_if_unregister_tx_completion_enh_event_handler(struct wlan_objmgr_psoc
 						     *psoc)
 {
 	/* Unregister completion handler here */
 	wmi_unified_t wmi_hdl;
-	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	int status = 0;
 
 	wmi_hdl = get_wmi_unified_hdl_from_psoc(psoc);
 	if (!wmi_hdl) {
 		cfr_err("Unable to get wmi handle");
-		return QDF_STATUS_E_NULL_VALUE;
+		return -EINVAL;
 	}
 
 	status = wmi_unified_unregister_event(wmi_hdl,
@@ -2147,12 +1740,6 @@ QDF_STATUS cfr_enh_init_pdev(struct wlan_objmgr_psoc *psoc,
 		return status;
 	}
 
-	status = target_if_register_phase_delta_for_rcc_event_handler(psoc);
-	if (status != QDF_STATUS_SUCCESS) {
-		cfr_err("Failed to register with phase delta event handler");
-		return status;
-	}
-
 	pcfr->is_cfr_rcc_capable = 1;
 	pcfr->rcc_param.pdev_id = wlan_objmgr_pdev_get_pdev_id(pdev);
 	pcfr->rcc_param.modified_in_curr_session = MAX_RESET_CFG_ENTRY;
@@ -2162,17 +1749,6 @@ QDF_STATUS cfr_enh_init_pdev(struct wlan_objmgr_psoc *psoc,
 	pcfr->is_cap_interval_mode_sel_support =
 				cfr_sc->is_cap_interval_mode_sel_support;
 	pcfr->is_mo_marking_support = cfr_sc->is_mo_marking_support;
-	pcfr->is_aoa_for_rcc_support = cfr_sc->is_aoa_for_rcc_support;
-
-	if (pcfr->is_aoa_for_rcc_support) {
-		qdf_mem_set(pcfr->ibf_cal_val,
-			    sizeof(uint32_t) * HOST_MAX_CHAINS,
-			    0);
-		qdf_mem_set(pcfr->phase_delta,
-			    sizeof(uint16_t) * HOST_MAX_CHAINS * MAX_AGC_GAIN,
-			    0);
-		pcfr->max_aoa_chains = 0;
-	}
 
 	target_if_cfr_default_ta_ra_config(&pcfr->rcc_param,
 					   true, MAX_RESET_CFG_ENTRY);
@@ -2200,16 +1776,6 @@ QDF_STATUS cfr_enh_init_pdev(struct wlan_objmgr_psoc *psoc,
 		pcfr->num_subbufs = STREAMFS_NUM_SUBBUF_MAPLE;
 		pcfr->chip_type = CFR_CAPTURE_RADIO_MAPLE;
 		pcfr->max_mu_users = MAPLE_CFR_MU_USERS;
-	} else if (target_type == TARGET_TYPE_QCN6122) {
-		pcfr->subbuf_size = STREAMFS_MAX_SUBBUF_SPRUCE;
-		pcfr->num_subbufs = STREAMFS_NUM_SUBBUF_SPRUCE;
-		pcfr->chip_type = CFR_CAPTURE_RADIO_SPRUCE;
-		pcfr->max_mu_users = SPRUCE_CFR_MU_USERS;
-	} else if (target_type == TARGET_TYPE_QCN9224) {
-		pcfr->subbuf_size = STREAMFS_MAX_SUBBUF_WAIKIKI;
-		pcfr->num_subbufs = STREAMFS_NUM_SUBBUF_WAIKIKI;
-		pcfr->chip_type = CFR_CAPTURE_RADIO_WAIKIKI;
-		pcfr->max_mu_users = WAIKIKI_CFR_MU_USERS;
 	} else {
 		pcfr->subbuf_size = STREAMFS_MAX_SUBBUF_CYP;
 		pcfr->num_subbufs = STREAMFS_NUM_SUBBUF_CYP;
@@ -2240,14 +1806,14 @@ QDF_STATUS cfr_enh_init_pdev(struct wlan_objmgr_psoc *psoc,
 QDF_STATUS cfr_enh_deinit_pdev(struct wlan_objmgr_psoc *psoc,
 			       struct wlan_objmgr_pdev *pdev)
 {
-	QDF_STATUS status;
+	int status;
 	struct pdev_cfr *pcfr;
 
 	pcfr = wlan_objmgr_pdev_get_comp_private_obj(pdev,
 						     WLAN_UMAC_COMP_CFR);
 	if (!pcfr) {
 		cfr_err("pcfr is NULL");
-		return QDF_STATUS_E_NULL_VALUE;
+		return -EINVAL;
 	}
 
 	if (pcfr->lut_timer_init) {
@@ -2283,10 +1849,6 @@ QDF_STATUS cfr_enh_deinit_pdev(struct wlan_objmgr_psoc *psoc,
 	status = target_if_unregister_tx_completion_enh_event_handler(psoc);
 	if (status != QDF_STATUS_SUCCESS)
 		cfr_err("Failed to register with dbr");
-
-	status = target_if_unregister_phase_delta_for_rcc_event_handler(psoc);
-	if (status != QDF_STATUS_SUCCESS)
-		cfr_err("Failed to unregister phase delta handler");
 
 	qdf_spinlock_destroy(&pcfr->lut_lock);
 

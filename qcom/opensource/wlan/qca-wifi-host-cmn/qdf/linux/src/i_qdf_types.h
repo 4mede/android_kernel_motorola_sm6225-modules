@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -180,7 +179,7 @@ typedef __be16 __qdf_be16_t;
 typedef __be32 __qdf_be32_t;
 typedef __be64 __qdf_be64_t;
 
-#if defined(IPA_OFFLOAD) && defined(__KERNEL__)
+#ifdef IPA_OFFLOAD
 typedef struct ipa_wdi_buffer_info __qdf_mem_info_t;
 #else
 /**
@@ -401,12 +400,6 @@ enum __qdf_net_wireless_evcode {
 
 #else
 #error "Compiling with an unknown compiler!!"
-#endif
-
-#ifndef fallthrough
-
-#define fallthrough do {} while (0) /* fallthrough */
-
 #endif
 
 #endif /* __I_QDF_TYPES_H */

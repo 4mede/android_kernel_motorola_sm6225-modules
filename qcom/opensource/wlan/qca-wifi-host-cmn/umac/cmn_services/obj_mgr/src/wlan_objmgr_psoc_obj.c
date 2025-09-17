@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -105,6 +104,7 @@ static QDF_STATUS wlan_objmgr_psoc_obj_free(struct wlan_objmgr_psoc *psoc)
 	wlan_objmgr_psoc_peer_list_deinit(&psoc->soc_objmgr.peer_list);
 
 	qdf_spinlock_destroy(&psoc->psoc_lock);
+	wlan_minidump_remove(psoc);
 	qdf_mem_free(psoc);
 
 	return QDF_STATUS_SUCCESS;
@@ -214,9 +214,6 @@ static QDF_STATUS wlan_objmgr_psoc_obj_destroy(struct wlan_objmgr_psoc *psoc)
 			    psoc->obj_state);
 		WLAN_OBJMGR_BUG(0);
 	}
-
-	wlan_minidump_remove(psoc, sizeof(*psoc), psoc,
-			     WLAN_MD_OBJMGR_PSOC, "wlan_objmgr_psoc");
 
 	/* Invoke registered create handlers */
 	for (id = 0; id < WLAN_UMAC_MAX_COMPONENTS; id++) {
@@ -1045,64 +1042,6 @@ struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_id_from_psoc_no_state(
 }
 
 qdf_export_symbol(wlan_objmgr_get_vdev_by_id_from_psoc_no_state);
-#endif
-
-#ifdef WLAN_OBJMGR_REF_ID_TRACE
-struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_id_from_psoc_not_log_del_debug(
-			struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
-			wlan_objmgr_ref_dbgid dbg_id,
-			const char *func, int line)
-{
-	struct wlan_objmgr_vdev *vdev;
-
-	/* if PSOC is NULL, return */
-	if (!psoc)
-		return NULL;
-	/* vdev id is invalid */
-	if (vdev_id >= wlan_psoc_get_max_vdev_count(psoc))
-		return NULL;
-
-	wlan_psoc_obj_lock(psoc);
-	/* retrieve vdev pointer from vdev list */
-	vdev = psoc->soc_objmgr.wlan_vdev_list[vdev_id];
-	if (vdev && vdev->obj_state != WLAN_OBJ_STATE_LOGICALLY_DELETED)
-		wlan_objmgr_vdev_get_ref_debug(vdev, dbg_id, func, line);
-	else
-		vdev = NULL;
-	wlan_psoc_obj_unlock(psoc);
-
-	return vdev;
-}
-
-qdf_export_symbol(wlan_objmgr_get_vdev_by_id_from_psoc_not_log_del_debug);
-#else
-struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_id_from_psoc_not_log_del(
-			struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
-			wlan_objmgr_ref_dbgid dbg_id)
-{
-	struct wlan_objmgr_vdev *vdev;
-
-	/* if PSOC is NULL, return */
-	if (!psoc)
-		return NULL;
-	/* vdev id is invalid */
-	if (vdev_id >= wlan_psoc_get_max_vdev_count(psoc))
-		return NULL;
-
-	wlan_psoc_obj_lock(psoc);
-	/* retrieve vdev pointer from vdev list */
-	vdev = psoc->soc_objmgr.wlan_vdev_list[vdev_id];
-
-	if (vdev && vdev->obj_state != WLAN_OBJ_STATE_LOGICALLY_DELETED)
-		wlan_objmgr_vdev_get_ref(vdev, dbg_id);
-	else
-		vdev = NULL;
-	wlan_psoc_obj_unlock(psoc);
-
-	return vdev;
-}
-
-qdf_export_symbol(wlan_objmgr_get_vdev_by_id_from_psoc_not_log_del);
 #endif
 
 #ifdef WLAN_OBJMGR_REF_ID_TRACE
@@ -1995,8 +1934,7 @@ QDF_STATUS wlan_objmgr_psoc_peer_attach(struct wlan_objmgr_psoc *psoc,
 	wlan_psoc_obj_lock(psoc);
 	objmgr = &psoc->soc_objmgr;
 	/* Max temporary peer limit is reached, return failure */
-	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP ||
-	    peer->peer_mlme.peer_type == WLAN_PEER_MLO_TEMP) {
+	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP) {
 		if (objmgr->temp_peer_count >= WLAN_MAX_PSOC_TEMP_PEERS) {
 			wlan_psoc_obj_unlock(psoc);
 			return QDF_STATUS_E_FAILURE;
@@ -2021,8 +1959,7 @@ QDF_STATUS wlan_objmgr_psoc_peer_attach(struct wlan_objmgr_psoc *psoc,
 							peer);
 	qdf_spin_unlock_bh(&peer_list->peer_list_lock);
 	/* Increment peer count */
-	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP ||
-	    peer->peer_mlme.peer_type == WLAN_PEER_MLO_TEMP)
+	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP)
 		objmgr->temp_peer_count++;
 	else
 		objmgr->wlan_peer_count++;
@@ -2063,8 +2000,7 @@ QDF_STATUS wlan_objmgr_psoc_peer_detach(struct wlan_objmgr_psoc *psoc,
 	}
 	qdf_spin_unlock_bh(&peer_list->peer_list_lock);
 	/* Decrement peer count */
-	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP ||
-	    peer->peer_mlme.peer_type == WLAN_PEER_MLO_TEMP)
+	if (peer->peer_mlme.peer_type == WLAN_PEER_STA_TEMP)
 		objmgr->temp_peer_count--;
 	else
 		objmgr->wlan_peer_count--;
@@ -2876,9 +2812,9 @@ uint32_t wlan_objmgr_psoc_check_for_pdev_leaks(struct wlan_objmgr_psoc *psoc)
 		ref_id_dbg = pdev->pdev_objmgr.ref_id_dbg;
 		wlan_objmgr_for_each_refs(ref_id_dbg, ref_id, refs) {
 			leaks++;
-			obj_mgr_alert("%7u   %4u   %s(%d)",
+			obj_mgr_alert("%7u   %4u   %s",
 				      pdev_id, refs,
-				      string_from_dbgid(ref_id), ref_id);
+				      string_from_dbgid(ref_id));
 		}
 		wlan_pdev_obj_unlock(pdev);
 	}
@@ -2921,9 +2857,8 @@ uint32_t wlan_objmgr_psoc_check_for_vdev_leaks(struct wlan_objmgr_psoc *psoc)
 		ref_id_dbg = vdev->vdev_objmgr.ref_id_dbg;
 		wlan_objmgr_for_each_refs(ref_id_dbg, ref_id, refs) {
 			leaks++;
-			obj_mgr_alert("%7u   %4u   %s(%d)",
-				      vdev_id, refs, string_from_dbgid(ref_id),
-				      ref_id);
+			obj_mgr_alert("%7u   %4u   %s",
+				      vdev_id, refs, string_from_dbgid(ref_id));
 		}
 		wlan_vdev_obj_unlock(vdev);
 	}
@@ -2943,11 +2878,11 @@ wlan_objmgr_print_peer_ref_leaks(struct wlan_objmgr_peer *peer, int vdev_id)
 
 	ref_id_dbg = peer->peer_objmgr.ref_id_dbg;
 	wlan_objmgr_for_each_refs(ref_id_dbg, ref_id, refs) {
-		obj_mgr_alert(QDF_MAC_ADDR_FMT " %7u   %4u   %s(%d)",
+		obj_mgr_alert(QDF_MAC_ADDR_FMT " %7u   %4u   %s",
 			      QDF_MAC_ADDR_REF(peer->macaddr),
 			      vdev_id,
 			      refs,
-			      string_from_dbgid(ref_id), ref_id);
+			      string_from_dbgid(ref_id));
 	}
 }
 #else

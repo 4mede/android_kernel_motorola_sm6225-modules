@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/atomic.h>
@@ -11,7 +11,6 @@
 #include <linux/in.h>
 #include <linux/stddef.h>
 #include <linux/ip.h>
-#include <linux/ipv6.h>
 #include <linux/fs.h>
 #include <linux/module.h>
 #include <linux/msm_ipa.h>
@@ -21,7 +20,6 @@
 #include <linux/ipa.h>
 #include <linux/random.h>
 #include <linux/workqueue.h>
-#include <linux/version.h>
 #include "rndis_ipa.h"
 #include "ipa_common_i.h"
 #include "ipa_pm.h"
@@ -35,8 +33,6 @@
 #define NETDEV_NAME "rndis"
 #define IPV4_HDR_NAME "rndis_eth_ipv4"
 #define IPV6_HDR_NAME "rndis_eth_ipv6"
-#define RNDIS_HDR_NAME "rndis"
-#define ULSO_MAX_SIZE 64000
 #define IPA_TO_USB_CLIENT IPA_CLIENT_USB_CONS
 #define INACTIVITY_MSEC_DELAY 100
 #define DEFAULT_OUTSTANDING_HIGH 64
@@ -112,13 +108,6 @@ static void *ipa_rndis_logbuf;
 #define RNDIS_HDR_OFST(field) offsetof(struct rndis_pkt_hdr, field)
 #define RNDIS_IPA_LOG_ENTRY() RNDIS_IPA_DEBUG("begin\n")
 #define RNDIS_IPA_LOG_EXIT()  RNDIS_IPA_DEBUG("end\n")
-
-#define IPV4_IS_TCP(iph) ((iph)->protocol == IPPROTO_TCP)
-#define IPV4_IS_UDP(iph) ((iph)->protocol == IPPROTO_UDP)
-#define IPV6_IS_TCP(iph) (((struct ipv6hdr *)iph)->nexthdr == IPPROTO_TCP)
-#define IPV6_IS_UDP(iph) (((struct ipv6hdr *)iph)->nexthdr == IPPROTO_UDP)
-#define IPV4_DELTA 40
-#define IPV6_DELTA 60
 
 /**
  * enum rndis_ipa_state - specify the current driver internal state
@@ -205,8 +194,6 @@ enum rndis_ipa_operation {
  * @pm_hdl: handle for IPA PM framework
  * @is_vlan_mode: should driver work in vlan mode?
  * @netif_rx_function: holds the correct network stack API, needed for NAPI
- * @is_ulso_mode: indicator for ulso support
- * @rndis_hdr_hdl: hdr handle of rndis header
  */
 struct rndis_ipa_dev {
 	struct net_device *net;
@@ -237,8 +224,6 @@ struct rndis_ipa_dev {
 	u32 pm_hdl;
 	bool is_vlan_mode;
 	int (*netif_rx_function)(struct sk_buff *skb);
-	bool is_ulso_mode;
-	u32 rndis_hdr_hdl;
 };
 
 /**
@@ -262,14 +247,7 @@ static void rndis_ipa_packet_receive_notify
 	(void *private, enum ipa_dp_evt_type evt, unsigned long data);
 static void rndis_ipa_tx_complete_notify
 	(void *private, enum ipa_dp_evt_type evt, unsigned long data);
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0))
-static void rndis_ipa_tx_timeout(struct net_device *net,
-	unsigned int txqueue);
-#else /* Legacy API. */
 static void rndis_ipa_tx_timeout(struct net_device *net);
-#endif
-
 static int rndis_ipa_stop(struct net_device *net);
 static void rndis_ipa_enable_data_path(struct rndis_ipa_dev *rndis_ipa_ctx);
 static struct sk_buff *rndis_encapsulate_skb(struct sk_buff *skb,
@@ -280,9 +258,9 @@ static void rndis_ipa_prepare_header_insertion
 	(int eth_type,
 	const char *hdr_name, struct ipa_hdr_add *add_hdr,
 	const void *dst_mac, const void *src_mac, bool is_vlan_mode);
-static int rndis_ipa_hdrs_cfg(struct rndis_ipa_dev *rndis_ipa_ctx,
+static int rndis_ipa_hdrs_cfg
+	(struct rndis_ipa_dev *rndis_ipa_ctx,
 	const void *dst_mac, const void *src_mac);
-static int rndis_ipa_hdrs_hpc_cfg(struct rndis_ipa_dev *rndis_ipa_ctx);
 static int rndis_ipa_hdrs_destroy(struct rndis_ipa_dev *rndis_ipa_ctx);
 static struct net_device_stats *rndis_ipa_get_stats(struct net_device *net);
 static int rndis_ipa_register_properties(char *netdev_name, bool is_vlan_mode);
@@ -344,7 +322,7 @@ static const struct file_operations rndis_ipa_aggr_ops = {
 static struct ipa_ep_cfg ipa_to_usb_ep_cfg = {
 	.mode = {
 		.mode = IPA_BASIC,
-		.dst = IPA_CLIENT_APPS_LAN_CONS,
+		.dst  = IPA_CLIENT_APPS_LAN_CONS,
 	},
 	.hdr = {
 		.hdr_len = ETH_HLEN + sizeof(struct rndis_pkt_hdr),
@@ -352,14 +330,14 @@ static struct ipa_ep_cfg ipa_to_usb_ep_cfg = {
 		.hdr_ofst_metadata = 0,
 		.hdr_additional_const_len = ETH_HLEN,
 		.hdr_ofst_pkt_size_valid = true,
-		.hdr_ofst_pkt_size = offsetof(struct rndis_pkt_hdr, data_len),
+		.hdr_ofst_pkt_size = 3 * sizeof(u32),
 		.hdr_a5_mux = false,
 		.hdr_remove_additional = false,
 		.hdr_metadata_reg_valid = false,
 	},
 	.hdr_ext = {
 		.hdr_pad_to_alignment = 0,
-		.hdr_total_len_or_pad_offset = offsetof(struct rndis_pkt_hdr, msg_len),
+		.hdr_total_len_or_pad_offset = 1 * sizeof(u32),
 		.hdr_payload_len_inc_padding = false,
 		.hdr_total_len_or_pad = IPA_HDR_TOTAL_LEN,
 		.hdr_total_len_or_pad_valid = true,
@@ -498,35 +476,6 @@ static struct rndis_pkt_hdr rndis_template_hdr = {
 	.zeroes = {0},
 };
 
-/**
- * qmap_template_hdr - QMAP template structure for RNDIS_IPA SW insertion
- * @pad: Set to 0
- * @next_hdr: extension header exists - 1
- * @cd: Data packet - 0
- * @mux_id: Always 0
- * @packet_len_with_pad: Set dynamically
- * @ext_next_hdr: Always 0
- * @hdr_type: Set to ULSO - 0x3
- * @additional_hdr_size: - Set to VLAN tag size
- * @zero_checksum: Always compute checksum - 0
- * @ip_id_cfg: Always run up ip id per segment - 0
- * @segment_size: Set dynamically
- */
-static struct qmap_hdr qmap_template_hdr = {
-	.pad = 0,
-	.next_hdr = 1,
-	.cd = 0,
-	.mux_id = 0,
-	.packet_len_with_pad = 0,
-	.ext_next_hdr = 0,
-	.hdr_type = 0x3,
-	.additional_hdr_size = 0,
-	.reserved = 0,
-	.zero_checksum = 0,
-	.ip_id_cfg = 0,
-	.segment_size = 0,
-};
-
 static void rndis_ipa_msg_free_cb(void *buff, u32 len, u32 type)
 {
 	kfree(buff);
@@ -653,36 +602,18 @@ int rndis_ipa_init(struct ipa_usb_init_params *params)
 		RNDIS_IPA_ERROR_RL("couldn't acquire vlan mode, is ipa ready?\n");
 		goto fail_get_vlan_mode;
 	}
+
 	RNDIS_IPA_DEBUG("is_vlan_mode %d\n", rndis_ipa_ctx->is_vlan_mode);
 
-	rndis_ipa_ctx->is_ulso_mode = ipa3_is_ulso_supported();
-	RNDIS_IPA_DEBUG("is_ulso_mode=%d\n", rndis_ipa_ctx->is_ulso_mode);
-
-	result = rndis_ipa_hdrs_cfg(rndis_ipa_ctx, params->host_ethaddr,
+	result = rndis_ipa_hdrs_cfg
+			(rndis_ipa_ctx,
+			params->host_ethaddr,
 			params->device_ethaddr);
 	if (result) {
 		RNDIS_IPA_ERROR("fail on ipa hdrs set\n");
 		goto fail_hdrs_cfg;
 	}
-	RNDIS_IPA_DEBUG("IPA header-insertion configured for Ethernet\n");
-
-	if (rndis_ipa_ctx->is_ulso_mode) {
-		result = rndis_ipa_hdrs_hpc_cfg(rndis_ipa_ctx);
-		if (result) {
-			RNDIS_IPA_ERROR("fail on ipa hdrs hpc set\n");
-			goto fail_add_hdrs_hpc;
-		}
-		RNDIS_IPA_DEBUG("IPA header-insertion configured for RNDIS\n");
-
-		rndis_ipa_ctx->net->hw_features = NETIF_F_RXCSUM;
-		rndis_ipa_ctx->net->hw_features |=
-		    NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM;
-		rndis_ipa_ctx->net->hw_features |= NETIF_F_SG;
-		rndis_ipa_ctx->net->hw_features |= NETIF_F_GRO_HW;
-		rndis_ipa_ctx->net->hw_features |= NETIF_F_GSO_UDP_L4;
-		rndis_ipa_ctx->net->hw_features |= NETIF_F_ALL_TSO;
-		rndis_ipa_ctx->net->gso_max_size = ULSO_MAX_SIZE;
-	}
+	RNDIS_IPA_DEBUG("IPA header-insertion configed for Ethernet+RNDIS\n");
 
 	result = rndis_ipa_register_properties(net->name,
 		rndis_ipa_ctx->is_vlan_mode);
@@ -712,10 +643,6 @@ int rndis_ipa_init(struct ipa_usb_init_params *params)
 		RNDIS_IPA_DEBUG("LAN RX NAPI enabled = False");
 	}
 
-	if (rndis_ipa_ctx->is_vlan_mode)
-		qmap_template_hdr.additional_hdr_size =
-			VLAN_ETH_HLEN - ETH_HLEN;
-
 	rndis_ipa = rndis_ipa_ctx;
 	params->ipa_rx_notify = rndis_ipa_packet_receive_notify;
 	params->ipa_tx_notify = rndis_ipa_tx_complete_notify;
@@ -732,9 +659,6 @@ int rndis_ipa_init(struct ipa_usb_init_params *params)
 fail_register_netdev:
 	rndis_ipa_deregister_properties(net->name);
 fail_register_tx:
-	if (rndis_ipa_ctx->is_ulso_mode)
-		ipa_hdrs_hpc_destroy(rndis_ipa_ctx->rndis_hdr_hdl);
-fail_add_hdrs_hpc:
 	rndis_ipa_hdrs_destroy(rndis_ipa_ctx);
 fail_hdrs_cfg:
 fail_get_vlan_mode:
@@ -1006,7 +930,6 @@ static netdev_tx_t rndis_ipa_start_xmit(struct sk_buff *skb,
 	int ret;
 	netdev_tx_t status = NETDEV_TX_BUSY;
 	struct rndis_ipa_dev *rndis_ipa_ctx = netdev_priv(net);
-	unsigned int skb_len = skb->len;
 
 	netif_trans_update(net);
 
@@ -1053,41 +976,7 @@ static netdev_tx_t rndis_ipa_start_xmit(struct sk_buff *skb,
 		goto out;
 	}
 
-	if (rndis_ipa_ctx->is_ulso_mode &&
-		(net->features & (NETIF_F_ALL_TSO | NETIF_F_GSO_UDP_L4))){
-		struct iphdr *iph = NULL;
-		/*
-		 * gso_size must be set here because tx feature must be on
-		 * meanning that in case of a small packet its checksum will
-		 * not be computed and we must compute it using the hardware
-		 * and thus marking it as gso packet, and the way to do it is to
-		 * set gso_size to non 0 value. It is only used internally by
-		 * the ipa driver so, there is no significance which non-0 value
-		 * is set.
-		 */
-		if (ntohs(skb->protocol) == ETH_P_IP) {
-			iph = ip_hdr(skb);
-			if (IPV4_IS_TCP(iph) || IPV4_IS_UDP(iph)) {
-				skb = qmap_encapsulate_skb(skb, &qmap_template_hdr);
-				skb_shinfo(skb)->gso_size =
-					net->mtu - IPV4_DELTA;
-			}
-		} else if (ntohs(skb->protocol) == ETH_P_IPV6) {
-			iph = ip_hdr(skb);
-			if (IPV6_IS_TCP(iph) || IPV6_IS_UDP(iph)) {
-				skb = qmap_encapsulate_skb(skb, &qmap_template_hdr);
-				skb_shinfo(skb)->gso_size =
-					net->mtu - IPV6_DELTA;
-			}
-		}
-	} else {
-		skb = rndis_encapsulate_skb(skb, rndis_ipa_ctx);
-	}
-	/* This indicates no encapsulation was done - ulso mode with bad skb*/
-	if (unlikely(skb_len == skb->len)) {
-		skb_shinfo(skb)->gso_size = 0;
-		skb = rndis_encapsulate_skb(skb, rndis_ipa_ctx);
-	}
+	skb = rndis_encapsulate_skb(skb, rndis_ipa_ctx);
 	trace_rndis_tx_dp(skb->protocol);
 	ret = ipa_tx_dp(IPA_TO_USB_CLIENT, skb, NULL);
 	if (ret) {
@@ -1186,12 +1075,7 @@ out:
 	dev_kfree_skb_any(skb);
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0))
-static void rndis_ipa_tx_timeout(struct net_device *net,
-	unsigned int txqueue)
-#else /* Legacy API. */
 static void rndis_ipa_tx_timeout(struct net_device *net)
-#endif
 {
 	struct rndis_ipa_dev *rndis_ipa_ctx = netdev_priv(net);
 	int outstanding = atomic_read(&rndis_ipa_ctx->outstanding_pkts);
@@ -1507,14 +1391,6 @@ void rndis_ipa_cleanup(void *private)
 	}
 	RNDIS_IPA_DEBUG("deregister Tx/Rx properties was successful\n");
 
-	if (rndis_ipa_ctx->is_ulso_mode) {
-		ret = ipa_hdrs_hpc_destroy(rndis_ipa_ctx->rndis_hdr_hdl);
-		if (ret)
-			RNDIS_IPA_ERROR("ipa_hdrs_hpc_destroy failed\n");
-		else
-			RNDIS_IPA_DEBUG("ipa_hdrs_hpc_destroy success\n");
-	}
-
 	ret = rndis_ipa_hdrs_destroy(rndis_ipa_ctx);
 	if (ret)
 		RNDIS_IPA_ERROR(
@@ -1525,8 +1401,9 @@ void rndis_ipa_cleanup(void *private)
 	rndis_ipa_debugfs_destroy(rndis_ipa_ctx);
 	RNDIS_IPA_DEBUG("debugfs remove was done\n");
 
+	RNDIS_IPA_DEBUG("RNDIS_IPA netdev unregister started\n");
 	unregister_netdev(rndis_ipa_ctx->net);
-	RNDIS_IPA_DEBUG("netdev unregistered\n");
+	RNDIS_IPA_DEBUG("RNDIS_IPA netdev unregister completed\n");
 
 	spin_lock_irqsave(&rndis_ipa_ctx->state_lock, flags);
 	next_state = rndis_ipa_next_state(rndis_ipa_ctx->state,
@@ -1554,8 +1431,6 @@ static void rndis_ipa_enable_data_path(struct rndis_ipa_dev *rndis_ipa_ctx)
 		RNDIS_IPA_DEBUG("device_ready_notify() not supplied\n");
 	}
 
-	qmap_template_hdr.segment_size = htons(rndis_ipa_ctx->net->mtu -
-		sizeof(qmap_template_hdr));
 	netif_start_queue(rndis_ipa_ctx->net);
 	RNDIS_IPA_DEBUG("netif_start_queue() was called\n");
 }
@@ -1684,65 +1559,6 @@ static void rndis_ipa_prepare_header_insertion(
 }
 
 /**
- * rndis_ipa_hdrs_hpc_cfg() - configure hpc header insertion in IPA core
- * @rndis_ipa_ctx: main driver context
- *
- * This function adds headers that are used by the hpc header insertion
- * mechanism.
- *
- * Returns negative errno, or zero on success
- */
-static int rndis_ipa_hdrs_hpc_cfg(struct rndis_ipa_dev *rndis_ipa_ctx)
-{
-	struct ipa_ioc_add_hdr *hdrs;
-	struct ipa_hdr_add *rndis_hdr;
-	struct ipa_pkt_init_ex_hdr_ofst_set lookup;
-	int result = 0;
-
-	RNDIS_IPA_LOG_ENTRY();
-
-	hdrs = kzalloc(sizeof(*hdrs) + sizeof(*rndis_hdr), GFP_KERNEL);
-	if (!hdrs) {
-		result = -ENOMEM;
-		goto fail_mem;
-	}
-	rndis_hdr = &hdrs->hdr[0];
-	strlcpy(rndis_hdr->name, RNDIS_HDR_NAME, sizeof(rndis_hdr->name));
-	memcpy(rndis_hdr->hdr, &rndis_template_hdr, sizeof(rndis_template_hdr));
-	rndis_hdr->hdr_len = sizeof(rndis_template_hdr);
-	rndis_hdr->hdr_hdl = -1;
-	rndis_hdr->is_partial = false;
-	rndis_hdr->status = -1;
-	hdrs->num_hdrs = 1;
-	hdrs->commit = 1;
-
-	result = ipa3_add_hdr_hpc(hdrs);
-	if (result) {
-		RNDIS_IPA_ERROR("Fail on Header-Insertion(%d)\n", result);
-		goto fail_add_hdr;
-	}
-	if (rndis_hdr->status) {
-		RNDIS_IPA_ERROR("Fail on Header-Insertion rndis(%d)\n",
-			rndis_hdr->status);
-		result = rndis_hdr->status;
-		goto fail_add_hdr;
-	}
-
-	rndis_ipa_ctx->rndis_hdr_hdl = rndis_hdr->hdr_hdl;
-	lookup.ep = IPA_TO_USB_CLIENT;
-	strlcpy(lookup.name, RNDIS_HDR_NAME, sizeof(lookup.name));
-	if (ipa_set_pkt_init_ex_hdr_ofst(&lookup, true))
-		goto fail_add_hdr;
-
-	RNDIS_IPA_LOG_EXIT();
-
-fail_add_hdr:
-	kfree(hdrs);
-fail_mem:
-	return result;
-}
-
-/**
  * rndis_ipa_hdrs_cfg() - configure header insertion block in IPA core
  *  to allow HW bridging
  * @rndis_ipa_ctx: main driver context
@@ -1768,8 +1584,9 @@ static int rndis_ipa_hdrs_cfg(
 
 	RNDIS_IPA_LOG_ENTRY();
 
-	hdrs = kzalloc(sizeof(*hdrs) + sizeof(*ipv4_hdr) + sizeof(*ipv6_hdr),
-	GFP_KERNEL);
+	hdrs = kzalloc
+		(sizeof(*hdrs) + sizeof(*ipv4_hdr) + sizeof(*ipv6_hdr),
+		GFP_KERNEL);
 	if (!hdrs) {
 		result = -ENOMEM;
 		goto fail_mem;
@@ -1777,13 +1594,15 @@ static int rndis_ipa_hdrs_cfg(
 
 	ipv4_hdr = &hdrs->hdr[0];
 	ipv6_hdr = &hdrs->hdr[1];
-	rndis_ipa_prepare_header_insertion(ETH_P_IP, IPV4_HDR_NAME,
+	rndis_ipa_prepare_header_insertion
+		(ETH_P_IP, IPV4_HDR_NAME,
 		ipv4_hdr, dst_mac, src_mac, rndis_ipa_ctx->is_vlan_mode);
-	rndis_ipa_prepare_header_insertion(ETH_P_IPV6, IPV6_HDR_NAME,
+	rndis_ipa_prepare_header_insertion
+		(ETH_P_IPV6, IPV6_HDR_NAME,
 		ipv6_hdr, dst_mac, src_mac, rndis_ipa_ctx->is_vlan_mode);
 
-	hdrs->num_hdrs = 2;
 	hdrs->commit = 1;
+	hdrs->num_hdrs = 2;
 	result = ipa3_add_hdr(hdrs);
 	if (result) {
 		RNDIS_IPA_ERROR("Fail on Header-Insertion(%d)\n", result);
@@ -1834,6 +1653,7 @@ static int rndis_ipa_hdrs_destroy(struct rndis_ipa_dev *rndis_ipa_ctx)
 
 	del_hdr->commit = 1;
 	del_hdr->num_hdls = 2;
+
 	ipv4 = &del_hdr->hdl[0];
 	ipv4->hdl = rndis_ipa_ctx->eth_ipv4_hdr_hdl;
 	ipv6 = &del_hdr->hdl[1];
@@ -2008,6 +1828,7 @@ static int rndis_ipa_deregister_pm_client(struct rndis_ipa_dev *rndis_ipa_ctx)
 	return 0;
 }
 
+
 /**
  * rndis_encapsulate_skb() - encapsulate the given Ethernet skb with
  *  an RNDIS header
@@ -2016,7 +1837,7 @@ static int rndis_ipa_deregister_pm_client(struct rndis_ipa_dev *rndis_ipa_ctx)
  *
  * Shall use a template header for RNDIS and update it with the given
  * skb values.
- * Ethernet 2 header should already be encapsulated in the packet.
+ * Ethernet is expected to be already encapsulate the packet.
  */
 static struct sk_buff *rndis_encapsulate_skb(struct sk_buff *skb,
 	struct rndis_ipa_dev *rndis_ipa_ctx)
@@ -2028,7 +1849,6 @@ static struct sk_buff *rndis_encapsulate_skb(struct sk_buff *skb,
 	if (unlikely(skb_headroom(skb) < sizeof(rndis_template_hdr))) {
 		struct sk_buff *new_skb = skb_copy_expand(skb,
 			sizeof(rndis_template_hdr), 0, GFP_ATOMIC);
-
 		if (!new_skb) {
 			RNDIS_IPA_ERROR_RL("no memory for skb expand\n");
 			return skb;
@@ -2144,21 +1964,20 @@ static int rndis_ipa_ep_registers_cfg(
 	}
 
 	if (is_vlan_mode) {
-		usb_to_ipa_ep_cfg->hdr.hdr_len = VLAN_ETH_HLEN + add;
+		usb_to_ipa_ep_cfg->hdr.hdr_len =
+			VLAN_ETH_HLEN + add;
 		ipa_to_usb_ep_cfg.hdr.hdr_len =
 			VLAN_ETH_HLEN + sizeof(struct rndis_pkt_hdr);
 		ipa_to_usb_ep_cfg.hdr.hdr_additional_const_len = VLAN_ETH_HLEN;
-		qmap_template_hdr.additional_hdr_size =
-				VLAN_ETH_HLEN - ETH_HLEN;
 	} else {
-		usb_to_ipa_ep_cfg->hdr.hdr_len = ETH_HLEN + add;
+		usb_to_ipa_ep_cfg->hdr.hdr_len =
+			ETH_HLEN + add;
 		ipa_to_usb_ep_cfg.hdr.hdr_len =
 			ETH_HLEN + sizeof(struct rndis_pkt_hdr);
 		ipa_to_usb_ep_cfg.hdr.hdr_additional_const_len = ETH_HLEN;
 	}
 
 	usb_to_ipa_ep_cfg->deaggr.max_packet_len = max_xfer_size_bytes_to_dev;
-
 	result = ipa3_cfg_ep(usb_to_ipa_hdl, usb_to_ipa_ep_cfg);
 	if (result) {
 		pr_err("failed to configure USB to IPA point\n");
@@ -2175,7 +1994,8 @@ static int rndis_ipa_ep_registers_cfg(
 	} else {
 		ipa_to_usb_ep_cfg.aggr.aggr_time_limit =
 			DEFAULT_AGGR_TIME_LIMIT;
-		ipa_to_usb_ep_cfg.aggr.aggr_pkt_limit = DEFAULT_AGGR_PKT_LIMIT;
+		ipa_to_usb_ep_cfg.aggr.aggr_pkt_limit =
+			DEFAULT_AGGR_PKT_LIMIT;
 	}
 
 	RNDIS_IPA_DEBUG(
@@ -2187,17 +2007,6 @@ static int rndis_ipa_ep_registers_cfg(
 
 	/* enable hdr_metadata_reg_valid */
 	usb_to_ipa_ep_cfg->hdr.hdr_metadata_reg_valid = true;
-
-	if (ipa3_is_ulso_supported())
-		ipa_to_usb_ep_cfg.ulso.is_ulso_pipe = true;
-
-	/*xlat config in vlan mode */
-	if (is_vlan_mode) {
-		usb_to_ipa_ep_cfg->hdr.hdr_ofst_metadata_valid = 1;
-		usb_to_ipa_ep_cfg->hdr.hdr_ofst_metadata =
-			sizeof(struct rndis_pkt_hdr) + ETH_HLEN;
-		usb_to_ipa_ep_cfg->hdr.hdr_metadata_reg_valid = false;
-	}
 
 	result = ipa3_cfg_ep(ipa_to_usb_hdl, &ipa_to_usb_ep_cfg);
 	if (result) {
@@ -2357,27 +2166,47 @@ static void rndis_ipa_debugfs_init(struct rndis_ipa_dev *rndis_ipa_ctx)
 		goto fail_directory;
 	}
 
-	debugfs_create_bool
+	file = debugfs_create_bool
 		("tx_filter", flags_read_write,
 		rndis_ipa_ctx->directory, &rndis_ipa_ctx->tx_filter);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create debugfs tx_filter file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_bool
+	file = debugfs_create_bool
 		("rx_filter", flags_read_write,
 		rndis_ipa_ctx->directory, &rndis_ipa_ctx->rx_filter);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create debugfs rx_filter file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_bool
+	file = debugfs_create_bool
 		("icmp_filter", flags_read_write,
 		rndis_ipa_ctx->directory, &rndis_ipa_ctx->icmp_filter);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create debugfs icmp_filter file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_u32
+	file = debugfs_create_u32
 		("outstanding_high", flags_read_write,
 		rndis_ipa_ctx->directory,
 		&rndis_ipa_ctx->outstanding_high);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create outstanding_high file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_u32
+	file = debugfs_create_u32
 		("outstanding_low", flags_read_write,
 		rndis_ipa_ctx->directory,
 		&rndis_ipa_ctx->outstanding_low);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create outstanding_low file\n");
+		goto fail_file;
+	}
 
 	file = debugfs_create_file
 		("outstanding", flags_read_only,
@@ -2388,17 +2217,29 @@ static void rndis_ipa_debugfs_init(struct rndis_ipa_dev *rndis_ipa_ctx)
 		goto fail_file;
 	}
 
-	debugfs_create_u8
+	file = debugfs_create_u8
 		("state", flags_read_only,
 		rndis_ipa_ctx->directory, (u8 *)&rndis_ipa_ctx->state);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create state file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_u32
+	file = debugfs_create_u32
 		("tx_dropped", flags_read_only,
 		rndis_ipa_ctx->directory, &rndis_ipa_ctx->tx_dropped);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create tx_dropped file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_u32
+	file = debugfs_create_u32
 		("rx_dropped", flags_read_only,
 		rndis_ipa_ctx->directory, &rndis_ipa_ctx->rx_dropped);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create rx_dropped file\n");
+		goto fail_file;
+	}
 
 	aggr_directory = debugfs_create_dir
 		(DEBUGFS_AGGR_DIR_NAME,
@@ -2417,57 +2258,101 @@ static void rndis_ipa_debugfs_init(struct rndis_ipa_dev *rndis_ipa_ctx)
 		goto fail_file;
 	}
 
-	debugfs_create_u8
+	file = debugfs_create_u8
 		("aggr_enable", flags_read_write,
 		aggr_directory, (u8 *)&ipa_to_usb_ep_cfg.aggr.aggr_en);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create aggr_enable file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_u8
+	file = debugfs_create_u8
 		("aggr_type", flags_read_write,
 		aggr_directory, (u8 *)&ipa_to_usb_ep_cfg.aggr.aggr);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create aggr_type file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_u32
+	file = debugfs_create_u32
 		("aggr_byte_limit", flags_read_write,
 		aggr_directory,
 		&ipa_to_usb_ep_cfg.aggr.aggr_byte_limit);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create aggr_byte_limit file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_u32
+	file = debugfs_create_u32
 		("aggr_time_limit", flags_read_write,
 		aggr_directory,
 		&ipa_to_usb_ep_cfg.aggr.aggr_time_limit);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create aggr_time_limit file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_u32
+	file = debugfs_create_u32
 		("aggr_pkt_limit", flags_read_write,
 		aggr_directory,
 		&ipa_to_usb_ep_cfg.aggr.aggr_pkt_limit);
+	if (!file) {
+		RNDIS_IPA_ERROR("could not create aggr_pkt_limit file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_bool
+	file = debugfs_create_bool
 		("tx_dump_enable", flags_read_write,
 		rndis_ipa_ctx->directory,
 		&rndis_ipa_ctx->tx_dump_enable);
+	if (!file) {
+		RNDIS_IPA_ERROR("fail to create tx_dump_enable file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_bool
+	file = debugfs_create_bool
 		("rx_dump_enable", flags_read_write,
 		rndis_ipa_ctx->directory,
 		&rndis_ipa_ctx->rx_dump_enable);
+	if (!file) {
+		RNDIS_IPA_ERROR("fail to create rx_dump_enable file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_bool
+	file = debugfs_create_bool
 		("deaggregation_enable", flags_read_write,
 		rndis_ipa_ctx->directory,
 		&rndis_ipa_ctx->deaggregation_enable);
+	if (!file) {
+		RNDIS_IPA_ERROR("fail to create deaggregation_enable file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_u32
+	file = debugfs_create_u32
 		("error_msec_sleep_time", flags_read_write,
 		rndis_ipa_ctx->directory,
 		&rndis_ipa_ctx->error_msec_sleep_time);
+	if (!file) {
+		RNDIS_IPA_ERROR("fail to create error_msec_sleep_time file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_bool
+	file = debugfs_create_bool
 		("during_xmit_error", flags_read_only,
 		rndis_ipa_ctx->directory,
 		&rndis_ipa_ctx->during_xmit_error);
+	if (!file) {
+		RNDIS_IPA_ERROR("fail to create during_xmit_error file\n");
+		goto fail_file;
+	}
 
-	debugfs_create_bool("is_vlan_mode", flags_read_only,
+	file = debugfs_create_bool("is_vlan_mode", flags_read_only,
 		rndis_ipa_ctx->directory,
 		&rndis_ipa_ctx->is_vlan_mode);
+	if (!file) {
+		RNDIS_IPA_ERROR("fail to create is_vlan_mode file\n");
+		goto fail_file;
+	}
 
 	RNDIS_IPA_DEBUG("debugfs entries were created\n");
 	RNDIS_IPA_LOG_EXIT();
@@ -2558,7 +2443,7 @@ static ssize_t rndis_ipa_debugfs_atomic_read
 static int __init rndis_ipa_init_module(void)
 {
 	ipa_rndis_logbuf = ipc_log_context_create(IPA_RNDIS_IPC_LOG_PAGES,
-		"ipa_rndis", MINIDUMP_MASK);
+		"ipa_rndis", 0);
 	if (ipa_rndis_logbuf == NULL)
 		RNDIS_IPA_ERROR("failed to create IPC log, continue...\n");
 

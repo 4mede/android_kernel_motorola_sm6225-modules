@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2018, 2020-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -62,14 +62,8 @@ static void hif_initialize_default_ops(struct hif_softc *hif_sc)
 	bus_ops->hif_grp_irq_deconfigure = &hif_dummy_grp_irq_deconfigure;
 	bus_ops->hif_config_irq_affinity =
 		&hif_dummy_config_irq_affinity;
-	bus_ops->hif_config_irq_by_ceid = &hif_dummy_config_irq_by_ceid;
 	bus_ops->hif_enable_grp_irqs = &hif_dummy_enable_grp_irqs;
 	bus_ops->hif_disable_grp_irqs = &hif_dummy_enable_grp_irqs;
-	bus_ops->hif_config_irq_clear_cpu_affinity =
-		&hif_dummy_config_irq_clear_cpu_affinity;
-#ifdef FEATURE_IRQ_AFFINITY
-	bus_ops->hif_set_grp_intr_affinity = &hif_dummy_set_grp_intr_affinity;
-#endif
 }
 
 #define NUM_OPS (sizeof(struct hif_bus_ops) / sizeof(void *))
@@ -622,32 +616,12 @@ void hif_config_irq_affinity(struct hif_softc *hif_sc)
 	hif_sc->bus_ops.hif_config_irq_affinity(hif_sc);
 }
 
-int hif_config_irq_by_ceid(struct hif_softc *hif_sc, int ce_id)
-{
-	return hif_sc->bus_ops.hif_config_irq_by_ceid(hif_sc, ce_id);
-}
-
-#ifdef HIF_CPU_CLEAR_AFFINITY
-void hif_config_irq_clear_cpu_affinity(struct hif_opaque_softc *scn,
-				       int intr_ctxt_id, int cpu)
-{
-	struct hif_softc *hif_sc = HIF_GET_SOFTC(scn);
-
-	hif_sc->bus_ops.hif_config_irq_clear_cpu_affinity(hif_sc,
-							  intr_ctxt_id, cpu);
-}
-
-qdf_export_symbol(hif_config_irq_clear_affinity);
-#endif
-
 #ifdef HIF_BUS_LOG_INFO
-bool hif_log_bus_info(struct hif_softc *hif_sc, uint8_t *data,
+void hif_log_bus_info(struct hif_softc *hif_sc, uint8_t *data,
 		      unsigned int *offset)
 {
 	if (hif_sc->bus_ops.hif_log_bus_info)
-		return hif_sc->bus_ops.hif_log_bus_info(hif_sc, data, offset);
-
-	return false;
+		hif_sc->bus_ops.hif_log_bus_info(hif_sc, data, offset);
 }
 #endif
 
@@ -712,17 +686,3 @@ int hif_enable_grp_irqs(struct hif_opaque_softc *scn)
 
 	return hif_sc->bus_ops.hif_enable_grp_irqs(hif_sc);
 }
-
-#ifdef FEATURE_IRQ_AFFINITY
-void hif_set_grp_intr_affinity(struct hif_opaque_softc *scn,
-			       uint32_t grp_intr_bitmask, bool perf)
-{
-	struct hif_softc *hif_sc = HIF_GET_SOFTC(scn);
-
-	if (!hif_sc)
-		return;
-
-	hif_sc->bus_ops.hif_set_grp_intr_affinity(hif_sc, grp_intr_bitmask,
-						  perf);
-}
-#endif

@@ -338,6 +338,13 @@ static int dsi_ctrl_debugfs_deinit(struct dsi_ctrl *dsi_ctrl)
 #else
 static int dsi_ctrl_debugfs_init(struct dsi_ctrl *dsi_ctrl, struct dentry *parent)
 {
+	char dbg_name[DSI_DEBUG_NAME_LEN];
+
+	snprintf(dbg_name, DSI_DEBUG_NAME_LEN, "dsi%d_ctrl",
+						dsi_ctrl->cell_index);
+	sde_dbg_reg_register_base(dbg_name,
+				dsi_ctrl->hw.base,
+				msm_iomap_size(dsi_ctrl->pdev, "dsi_ctrl"));
 	return 0;
 }
 static int dsi_ctrl_debugfs_deinit(struct dsi_ctrl *dsi_ctrl)
@@ -1258,7 +1265,7 @@ int dsi_message_validate_tx_mode(struct dsi_ctrl *dsi_ctrl,
 	if (*flags & DSI_CTRL_CMD_FIFO_STORE) {
 		/* if command size plus header is greater than fifo size */
 		if ((cmd_len + 4) > DSI_CTRL_MAX_CMD_FIFO_STORE_SIZE) {
-			DSI_CTRL_DEBUG(dsi_ctrl, "Cannot transfer Cmd in FIFO config\n");
+			DSI_CTRL_ERR(dsi_ctrl, "Cannot transfer Cmd in FIFO config\n");
 			return -ENOTSUPP;
 		}
 		if (!dsi_ctrl->hw.ops.kickoff_fifo_command) {
@@ -1383,6 +1390,10 @@ static void dsi_kickoff_msg_tx(struct dsi_ctrl *dsi_ctrl,
 		dsi_hw_ops.splitlink_cmd_setup(&dsi_ctrl->hw,
 				&dsi_ctrl->host_config.common_config, flags);
 
+	if (dsi_hw_ops.init_cmddma_trig_ctrl)
+		dsi_hw_ops.init_cmddma_trig_ctrl(&dsi_ctrl->hw,
+				&dsi_ctrl->host_config.common_config);
+
 	/*
 	 * Always enable DMA scheduling for video mode panel.
 	 *
@@ -1497,7 +1508,7 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl, struct dsi_cmd_desc *cmd_de
 	/* Validate the mode before sending the command */
 	rc = dsi_message_validate_tx_mode(dsi_ctrl, msg->tx_len, flags);
 	if (rc) {
-		DSI_CTRL_DEBUG(dsi_ctrl,
+		DSI_CTRL_ERR(dsi_ctrl,
 			"Cmd tx validation failed, cannot transfer cmd\n");
 		rc = -ENOTSUPP;
 		goto error;
@@ -1568,11 +1579,11 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl, struct dsi_cmd_desc *cmd_de
 
 		cmdbuf = (u8 *)(dsi_ctrl->vaddr);
 
+		msm_gem_sync(dsi_ctrl->tx_cmd_buf);
 		for (cnt = 0; cnt < length; cnt++)
 			cmdbuf[dsi_ctrl->cmd_len + cnt] = buffer[cnt];
 
 		dsi_ctrl->cmd_len += length;
-		msm_gem_sync(dsi_ctrl->tx_cmd_buf);
 
 		if (*flags & DSI_CTRL_CMD_LAST_COMMAND) {
 			cmd_mem.length = dsi_ctrl->cmd_len;
@@ -2959,6 +2970,20 @@ void dsi_ctrl_enable_status_interrupt(struct dsi_ctrl *dsi_ctrl,
 
 	spin_lock_irqsave(&dsi_ctrl->irq_info.irq_lock, flags);
 
+	if (intr_idx == DSI_SINT_CMD_MODE_DMA_DONE) {
+		if (dsi_ctrl->irq_info.irq_stat_refcount[intr_idx]) {
+			dsi_ctrl->refcount_non_zero++;
+			SDE_EVT32(dsi_ctrl->refcount_non_zero);
+			if (dsi_ctrl->refcount_non_zero == 3) {
+				DSI_CTRL_ERR(dsi_ctrl, "refcount_non_zero %d\n",
+					dsi_ctrl->refcount_non_zero);
+				SDE_DBG_DUMP(SDE_DBG_BUILT_IN_ALL, "panic");
+			}
+		} else {
+			dsi_ctrl->refcount_non_zero = 0;
+		}
+	}
+
 	if (dsi_ctrl->irq_info.irq_stat_refcount[intr_idx] == 0) {
 		/* enable irq on first request */
 		if (dsi_ctrl->irq_info.irq_stat_mask == 0)
@@ -3741,7 +3766,9 @@ error:
  *
  * Return: error code.
  */
-int dsi_ctrl_set_tpg_state(struct dsi_ctrl *dsi_ctrl, bool on)
+int dsi_ctrl_set_tpg_state(struct dsi_ctrl *dsi_ctrl, bool on,
+			enum dsi_test_pattern type, u32 init_val,
+			enum dsi_ctrl_tpg_pattern pattern)
 {
 	int rc = 0;
 
@@ -3760,25 +3787,43 @@ int dsi_ctrl_set_tpg_state(struct dsi_ctrl *dsi_ctrl, bool on)
 	}
 
 	if (on) {
-		if (dsi_ctrl->host_config.panel_mode == DSI_OP_VIDEO_MODE) {
-			dsi_ctrl->hw.ops.video_test_pattern_setup(&dsi_ctrl->hw,
-							  DSI_TEST_PATTERN_INC,
-							  0xFFFF);
-		} else {
-			dsi_ctrl->hw.ops.cmd_test_pattern_setup(
-							&dsi_ctrl->hw,
-							DSI_TEST_PATTERN_INC,
-							0xFFFF,
-							0x0);
-		}
+		if (dsi_ctrl->host_config.panel_mode == DSI_OP_VIDEO_MODE)
+			dsi_ctrl->hw.ops.video_test_pattern_setup(&dsi_ctrl->hw, type, init_val);
+		else
+			dsi_ctrl->hw.ops.cmd_test_pattern_setup(&dsi_ctrl->hw, type, init_val, 0x0);
 	}
-	dsi_ctrl->hw.ops.test_pattern_enable(&dsi_ctrl->hw, on);
+	dsi_ctrl->hw.ops.test_pattern_enable(&dsi_ctrl->hw, on, pattern,
+			dsi_ctrl->host_config.panel_mode);
 
 	DSI_CTRL_DEBUG(dsi_ctrl, "Set test pattern state=%d\n", on);
 	dsi_ctrl_update_state(dsi_ctrl, DSI_CTRL_OP_TPG, on);
 error:
 	mutex_unlock(&dsi_ctrl->ctrl_lock);
 	return rc;
+}
+
+/**
+ * dsi_ctrl_trigger_test_pattern() - trigger a command mode frame update with test pattern
+ * @dsi_ctrl:           DSI controller handle.
+ *
+ * Trigger a command mode frame update with chosen test pattern.
+ *
+ * Return: error code.
+ */
+int dsi_ctrl_trigger_test_pattern(struct dsi_ctrl *dsi_ctrl)
+{
+	int ret = 0;
+
+	if (!dsi_ctrl) {
+		DSI_CTRL_ERR(dsi_ctrl, "Invalid params\n");
+		return -EINVAL;
+	}
+
+	mutex_lock(&dsi_ctrl->ctrl_lock);
+	dsi_ctrl->hw.ops.trigger_cmd_test_pattern(&dsi_ctrl->hw, 0);
+	mutex_unlock(&dsi_ctrl->ctrl_lock);
+
+	return ret;
 }
 
 /**

@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -44,11 +43,7 @@
 #endif
 
 /* 1 additional MCS is for invalid values */
-#ifdef WLAN_FEATURE_11BE
-#define MAX_MCS (16 + 1)
-#else
 #define MAX_MCS (14 + 1)
-#endif
 #define MAX_MCS_11A 8
 #define MAX_MCS_11B 7
 #define MAX_MCS_11AC 12
@@ -62,12 +57,7 @@
 
 #define MAX_USER_POS		8
 #define MAX_MU_GROUP_ID		64
-
-#ifdef WLAN_FEATURE_11BE
-#define MAX_RU_LOCATIONS	16
-#else
 #define MAX_RU_LOCATIONS	6
-#endif
 #define RU_26			1
 #define RU_52			2
 #define RU_106			4
@@ -82,14 +72,10 @@
 #define WME_AC_VO    3    /* voice */
 #define WME_AC_MAX   4    /* MAX AC Value */
 
-#define CDP_MAX_RX_RINGS 8  /* max rx rings */
-#define CDP_MAX_TX_COMP_RINGS 5 /* max tx/completion rings */
-
+#define CDP_MAX_RX_RINGS 4  /* max rx rings */
+#define CDP_MAX_TX_COMP_RINGS 3  /* max tx completion rings */
 #define CDP_MAX_TX_TQM_STATUS 9  /* max tx tqm completion status */
 #define CDP_MAX_TX_HTT_STATUS 7  /* max tx htt completion status */
-
-#define CDP_DMA_CODE_MAX 14 /* max rxdma error */
-#define CDP_REO_CODE_MAX 15 /* max reo error */
 
 /*
  * Max of TxRx context
@@ -127,9 +113,6 @@
  */
 #define CDP_PPDU_STATS_MAX_TAG 14
 #define CDP_MAX_DATA_TIDS 9
-#define CDP_MAX_VOW_TID 4
-
-#define CDP_MAX_TIDS 17
 
 #define CDP_WDI_NUM_EVENTS WDI_NUM_EVENTS
 
@@ -137,18 +120,18 @@
 #define CDP_FC_IS_RETRY_SET(_fc) \
 	((_fc) & qdf_cpu_to_le16(CDP_FCTL_RETRY))
 
-#define CDP_INVALID_SNR 255
+#define INVALID_RSSI 255
 
-#define CDP_SNR_MULTIPLIER BIT(8)
-#define CDP_SNR_MUL(x, mul) ((x) * (mul))
-#define CDP_SNR_RND(x, mul) ((((x) % (mul)) >= ((mul) / 2)) ?\
+#define CDP_RSSI_MULTIPLIER BIT(8)
+#define CDP_RSSI_MUL(x, mul) ((x) * (mul))
+#define CDP_RSSI_RND(x, mul) ((((x) % (mul)) >= ((mul) / 2)) ?\
 	((x) + ((mul) - 1)) / (mul) : (x) / (mul))
 
-#define CDP_SNR_OUT(x) (CDP_SNR_RND((x), CDP_SNR_MULTIPLIER))
-#define CDP_SNR_IN(x)  (CDP_SNR_MUL((x), CDP_SNR_MULTIPLIER))
-#define CDP_SNR_AVG(x, y) ((((x) << 2) + (y) - (x)) >> 2)
+#define CDP_RSSI_OUT(x) (CDP_RSSI_RND((x), CDP_RSSI_MULTIPLIER))
+#define CDP_RSSI_IN(x)  (CDP_RSSI_MUL((x), CDP_RSSI_MULTIPLIER))
+#define CDP_RSSI_AVG(x, y) ((((x) << 2) + (y) - (x)) >> 2)
 
-#define CDP_SNR_UPDATE_AVG(x, y) x = CDP_SNR_AVG((x), CDP_SNR_IN((y)))
+#define CDP_RSSI_UPDATE_AVG(x, y) x = CDP_RSSI_AVG((x), CDP_RSSI_IN((y)))
 
 /*Max SU EVM count */
 #define DP_RX_MAX_SU_EVM_COUNT 32
@@ -168,16 +151,12 @@
  * 40          3dBm
  * 80          6dBm
  * 160/80P80   9dBm
- * 320         12dBm
  */
 
 #define PKT_BW_GAIN_20MHZ 0
 #define PKT_BW_GAIN_40MHZ 3
 #define PKT_BW_GAIN_80MHZ 6
 #define PKT_BW_GAIN_160MHZ 9
-#ifdef WLAN_FEATURE_11BE
-#define PKT_BW_GAIN_320MHZ 12
-#endif
 
 /*
  * cdp_tx_transmit_type: Transmit type index
@@ -198,43 +177,11 @@ enum cdp_tx_transmit_type {
  *
  * RU_26_INDEX : 26-tone Resource Unit index
  * RU_52_INDEX : 52-tone Resource Unit index
- * RU_52_26_INDEX : 52_26-tone Resource Unit index
  * RU_106_INDEX: 106-tone Resource Unit index
- * RU_106_26_INDEX: 106_26-tone Resource Unit index
  * RU_242_INDEX: 242-tone Resource Unit index
  * RU_484_INDEX: 484-tone Resource Unit index
- * RU_484_242_INDEX: 484_242-tone Resource Unit index
  * RU_996_INDEX: 996-tone Resource Unit index
- * RU_996_484_INDEX: 996_484-tone Resource Unit index
- * RU_996_484_242_INDEX: 996_484_242-tone Resource Unit index
- * RU_2X996_INDEX: 2X996-tone Resource Unit index
- * RU_2X996_484_INDEX: 2X996_484-tone Resource Unit index
- * RU_3X996_INDEX: 3X996-tone Resource Unit index
- * RU_3X996_484_INDEX: 3X996_484-tone Resource Unit index
- * RU_4X996_INDEX: 4X996-tone Resource Unit index
  */
-
-#ifdef WLAN_FEATURE_11BE
-enum cdp_ru_index {
-	RU_26_INDEX = 0,
-	RU_52_INDEX,
-	RU_52_26_INDEX,
-	RU_106_INDEX,
-	RU_106_26_INDEX,
-	RU_242_INDEX,
-	RU_484_INDEX,
-	RU_484_242_INDEX,
-	RU_996_INDEX,
-	RU_996_484_INDEX,
-	RU_996_484_242_INDEX,
-	RU_2X996_INDEX,
-	RU_2X996_484_INDEX,
-	RU_3X996_INDEX,
-	RU_3X996_484_INDEX,
-	RU_4X996_INDEX,
-	RU_INDEX_MAX,
-};
-#else
 enum cdp_ru_index {
 	RU_26_INDEX = 0,
 	RU_52_INDEX,
@@ -244,32 +191,11 @@ enum cdp_ru_index {
 	RU_996_INDEX,
 	RU_INDEX_MAX,
 };
-#endif
 
 struct cdp_ru_debug {
 	char *ru_type;
 };
 
-#ifdef WLAN_FEATURE_11BE
-static const struct cdp_ru_debug cdp_ru_string[RU_INDEX_MAX] = {
-	{ "RU_26" },
-	{ "RU_52" },
-	{ "RU_52_26" },
-	{ "RU_106" },
-	{ "RU_106_26" },
-	{ "RU_242" },
-	{ "RU_484" },
-	{ "RU_484_242" },
-	{ "RU_996" },
-	{ "RU_996_484" },
-	{ "RU_996_484_242" },
-	{ "RU_2x996" },
-	{ "RU_2x996_484" },
-	{ "RU_3x996" },
-	{ "RU_3x996_484" },
-	{ "RU_4x996" },
-};
-#else
 static const struct cdp_ru_debug cdp_ru_string[RU_INDEX_MAX] = {
 	{ "RU_26" },
 	{ "RU_52" },
@@ -278,7 +204,6 @@ static const struct cdp_ru_debug cdp_ru_string[RU_INDEX_MAX] = {
 	{ "RU_484" },
 	{ "RU_996" }
 };
-#endif
 
 #ifdef FEATURE_TSO_STATS
 /* Number of TSO Packet Statistics captured */
@@ -296,10 +221,7 @@ enum cdp_packet_type {
 	DOT11_N = 2,
 	DOT11_AC = 3,
 	DOT11_AX = 4,
-#ifdef WLAN_FEATURE_11BE
-	DOT11_BE = 5,
-#endif
-	DOT11_MAX,
+	DOT11_MAX = 5,
 };
 
 #define MCS_VALID 1
@@ -317,123 +239,6 @@ struct cdp_rate_debug {
 	uint8_t valid;
 };
 
-#ifdef WLAN_FEATURE_11BE
-static const struct cdp_rate_debug cdp_rate_string[DOT11_MAX][MAX_MCS] = {
-	{
-		{"OFDM 48 Mbps", MCS_VALID},
-		{"OFDM 24 Mbps", MCS_VALID},
-		{"OFDM 12 Mbps", MCS_VALID},
-		{"OFDM 6 Mbps ", MCS_VALID},
-		{"OFDM 54 Mbps", MCS_VALID},
-		{"OFDM 36 Mbps", MCS_VALID},
-		{"OFDM 18 Mbps", MCS_VALID},
-		{"OFDM 9 Mbps ", MCS_VALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-	},
-	{
-		{"CCK 11 Mbps Long  ", MCS_VALID},
-		{"CCK 5.5 Mbps Long ", MCS_VALID},
-		{"CCK 2 Mbps Long   ", MCS_VALID},
-		{"CCK 1 Mbps Long   ", MCS_VALID},
-		{"CCK 11 Mbps Short ", MCS_VALID},
-		{"CCK 5.5 Mbps Short", MCS_VALID},
-		{"CCK 2 Mbps Short  ", MCS_VALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-	},
-	{
-		{"HT MCS 0 (BPSK 1/2)  ", MCS_VALID},
-		{"HT MCS 1 (QPSK 1/2)  ", MCS_VALID},
-		{"HT MCS 2 (QPSK 3/4)  ", MCS_VALID},
-		{"HT MCS 3 (16-QAM 1/2)", MCS_VALID},
-		{"HT MCS 4 (16-QAM 3/4)", MCS_VALID},
-		{"HT MCS 5 (64-QAM 2/3)", MCS_VALID},
-		{"HT MCS 6 (64-QAM 3/4)", MCS_VALID},
-		{"HT MCS 7 (64-QAM 5/6)", MCS_VALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-	},
-	{
-		{"VHT MCS 0 (BPSK 1/2)     ", MCS_VALID},
-		{"VHT MCS 1 (QPSK 1/2)     ", MCS_VALID},
-		{"VHT MCS 2 (QPSK 3/4)     ", MCS_VALID},
-		{"VHT MCS 3 (16-QAM 1/2)   ", MCS_VALID},
-		{"VHT MCS 4 (16-QAM 3/4)   ", MCS_VALID},
-		{"VHT MCS 5 (64-QAM 2/3)   ", MCS_VALID},
-		{"VHT MCS 6 (64-QAM 3/4)   ", MCS_VALID},
-		{"VHT MCS 7 (64-QAM 5/6)   ", MCS_VALID},
-		{"VHT MCS 8 (256-QAM 3/4)  ", MCS_VALID},
-		{"VHT MCS 9 (256-QAM 5/6)  ", MCS_VALID},
-		{"VHT MCS 10 (1024-QAM 3/4)", MCS_VALID},
-		{"VHT MCS 11 (1024-QAM 5/6)", MCS_VALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-	},
-	{
-		{"HE MCS 0 (BPSK 1/2)     ", MCS_VALID},
-		{"HE MCS 1 (QPSK 1/2)     ", MCS_VALID},
-		{"HE MCS 2 (QPSK 3/4)     ", MCS_VALID},
-		{"HE MCS 3 (16-QAM 1/2)   ", MCS_VALID},
-		{"HE MCS 4 (16-QAM 3/4)   ", MCS_VALID},
-		{"HE MCS 5 (64-QAM 2/3)   ", MCS_VALID},
-		{"HE MCS 6 (64-QAM 3/4)   ", MCS_VALID},
-		{"HE MCS 7 (64-QAM 5/6)   ", MCS_VALID},
-		{"HE MCS 8 (256-QAM 3/4)  ", MCS_VALID},
-		{"HE MCS 9 (256-QAM 5/6)  ", MCS_VALID},
-		{"HE MCS 10 (1024-QAM 3/4)", MCS_VALID},
-		{"HE MCS 11 (1024-QAM 5/6)", MCS_VALID},
-		{"HE MCS 12 (4096-QAM 3/4)", MCS_VALID},
-		{"HE MCS 13 (4096-QAM 5/6)", MCS_VALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-		{"INVALID ", MCS_INVALID},
-	},
-	{
-		{"EHT MCS 0 (BPSK 1/2)     ", MCS_VALID},
-		{"EHT MCS 1 (QPSK 1/2)     ", MCS_VALID},
-		{"EHT MCS 2 (QPSK 3/4)     ", MCS_VALID},
-		{"EHT MCS 3 (16-QAM 1/2)   ", MCS_VALID},
-		{"EHT MCS 4 (16-QAM 3/4)   ", MCS_VALID},
-		{"EHT MCS 5 (64-QAM 2/3)   ", MCS_VALID},
-		{"EHT MCS 6 (64-QAM 3/4)   ", MCS_VALID},
-		{"EHT MCS 7 (64-QAM 5/6)   ", MCS_VALID},
-		{"EHT MCS 8 (256-QAM 3/4)  ", MCS_VALID},
-		{"EHT MCS 9 (256-QAM 5/6)  ", MCS_VALID},
-		{"EHT MCS 10 (1024-QAM 3/4)", MCS_VALID},
-		{"EHT MCS 11 (1024-QAM 5/6)", MCS_VALID},
-		{"EHT MCS 12 (4096-QAM 3/4)", MCS_VALID},
-		{"EHT MCS 13 (4096-QAM 5/6)", MCS_VALID},
-		{"EHT MCS 14 (BPSK-DCM 1/2)", MCS_VALID},
-		{"EHT MCS 15 (BPSK-DCM 1/2)", MCS_VALID},
-		{"INVALID ", MCS_INVALID},
-	}
-};
-#else
 static const struct cdp_rate_debug cdp_rate_string[DOT11_MAX][MAX_MCS] = {
 	{
 		{"OFDM 48 Mbps", MCS_VALID},
@@ -513,7 +318,6 @@ static const struct cdp_rate_debug cdp_rate_string[DOT11_MAX][MAX_MCS] = {
 		{"INVALID ", MCS_INVALID},
 	}
 };
-#endif
 
 /*
  * cdp_mu_packet_type: MU Rx type index
@@ -546,7 +350,6 @@ enum WDI_EVENT {
 	WDI_EVENT_TX_DATA,
 	WDI_EVENT_RX_DATA,
 	WDI_EVENT_TX_MGMT_CTRL,
-	WDI_EVENT_TX_PKT_CAPTURE,
 	WDI_EVENT_HTT_STATS,
 	WDI_EVENT_TX_BEACON,
 	WDI_EVENT_PEER_STATS,
@@ -564,15 +367,7 @@ enum WDI_EVENT {
 	WDI_EVENT_PKT_CAPTURE_RX_DATA,
 	WDI_EVENT_PKT_CAPTURE_RX_DATA_NO_PEER,
 	WDI_EVENT_PKT_CAPTURE_OFFLOAD_TX_DATA,
-	WDI_EVENT_RX_CBF,
 	WDI_EVENT_PKT_CAPTURE_PPDU_STATS,
-	WDI_EVENT_HOST_SW_EVENT,
-#ifdef QCA_WIFI_QCN9224
-	WDI_EVENT_HYBRID_TX,
-#endif
-#ifdef WLAN_FEATURE_11BE_MLO
-	WDI_EVENT_MLO_TSTMP,
-#endif
 	/* End of new event items */
 	WDI_EVENT_LAST
 };
@@ -845,26 +640,6 @@ struct cdp_tid_tx_stats {
 };
 
 /*
- * cdp_reo_error_stats
- * @err_src_reo_code_inv: Wireless Buffer Manager source receive reorder ring reason unknown
- * @err_reo_codes: Receive reoder error codes
- */
-struct cdp_reo_error_stats {
-	uint64_t err_src_reo_code_inv;
-	uint64_t err_reo_codes[CDP_REO_CODE_MAX];
-};
-
-/*
- * cdp_rxdma_error_stats
- * @err_src_rxdma_code_inv: DMA reason unknown count
- * @err_reo_codes: Receive reoder error codes count
- */
-struct cdp_rxdma_error_stats {
-	uint64_t err_src_rxdma_code_inv;
-	uint64_t err_dma_codes[CDP_DMA_CODE_MAX];
-};
-
-/*
  * struct cdp_tid_tx_stats
  * @to_stack_delay: Time taken between ring reap to indication to network stack
  * @intfrm_delay: Interframe rx delay
@@ -874,8 +649,6 @@ struct cdp_rxdma_error_stats {
  * @mcast_msdu_cnt: Num Mcast Msdus received from HW in Rx
  * @bcast_msdu_cnt: Num Bcast Msdus received from HW in Rx
  * @fail_cnt: Rx deliver drop counters
- * @reo_err: V3 reo error statistics
- * @rxdma_err: V3 rxdma error statistics
  */
 struct cdp_tid_rx_stats {
 	struct cdp_delay_stats to_stack_delay;
@@ -886,8 +659,6 @@ struct cdp_tid_rx_stats {
 	uint64_t mcast_msdu_cnt;
 	uint64_t bcast_msdu_cnt;
 	uint64_t fail_cnt[RX_MAX_DROP];
-	struct cdp_reo_error_stats reo_err;
-	struct cdp_rxdma_error_stats rxdma_err;
 };
 
 /*
@@ -1074,7 +845,7 @@ enum cdp_peer_stats_type {
 	cdp_peer_rx_ratecode,
 	cdp_peer_rx_ucast,
 	cdp_peer_rx_flags,
-	cdp_peer_rx_avg_snr,
+	cdp_peer_rx_avg_rssi,
 	cdp_peer_stats_max,
 };
 
@@ -1100,7 +871,7 @@ typedef union cdp_peer_stats_buf {
 	uint32_t last_rx_rate;
 	uint32_t rx_ratecode;
 	uint32_t rx_flags;
-	uint32_t rx_avg_snr;
+	uint32_t rx_avg_rssi;
 } cdp_peer_stats_param_t; /* Max union size 16 bytes */
 
 /**
@@ -1208,19 +979,6 @@ struct protocol_trace_count {
  * @ru_loc: pkt info for RU location 26/ 52/ 106/ 242/ 484 counter
  * @num_ppdu_cookie_valid : Number of comp received with valid ppdu cookie
  * @tx_success_twt: Successful Tx Packets in TWT session
- * @nss_info: NSS 1,2, ...8
- * @mcs_info: MCS index
- * @bw_info: Bandwidth
- *       <enum 0 bw_20_MHz>
- *       <enum 1 bw_40_MHz>
- *       <enum 2 bw_80_MHz>
- *       <enum 3 bw_160_MHz>
- * @gi_info: <enum 0     0_8_us_sgi > Legacy normal GI
- *       <enum 1     0_4_us_sgi > Legacy short GI
- *       <enum 2     1_6_us_sgi > HE related GI
- *       <enum 3     3_2_us_sgi > HE
- * @preamble_info: preamble
- * @last_tx_ts: last timestamp in jiffies when tx comp occurred
  */
 struct cdp_tx_stats {
 	struct cdp_pkt_info comp_pkt;
@@ -1232,16 +990,15 @@ struct cdp_tx_stats {
 	struct protocol_trace_count protocol_trace_cnt[CDP_TRACE_MAX];
 #endif
 	struct cdp_pkt_info tx_success;
-	uint32_t multiple_retry_count;
 	uint32_t nawds_mcast_drop;
 	uint32_t tx_failed;
 	uint32_t ofdma;
-	uint32_t non_amsdu_cnt;
-	uint32_t amsdu_cnt;
 	uint32_t stbc;
 	uint32_t ldpc;
 	uint32_t retries;
 	uint32_t retries_mpdu;
+	uint32_t non_amsdu_cnt;
+	uint32_t amsdu_cnt;
 	uint32_t tx_rate;
 	uint32_t last_tx_rate;
 	uint32_t last_tx_rate_mcs;
@@ -1278,13 +1035,6 @@ struct cdp_tx_stats {
 		uint32_t fw_reason1;
 		uint32_t fw_reason2;
 		uint32_t fw_reason3;
-		uint32_t fw_rem_queue_disable;
-		uint32_t fw_rem_no_match;
-		uint32_t drop_threshold;
-		uint32_t drop_link_desc_na;
-		uint32_t invalid_drop;
-		uint32_t mcast_vdev_drop;
-		uint32_t invalid_rr;
 	} dropped;
 
 
@@ -1310,6 +1060,7 @@ struct cdp_tx_stats {
 	uint32_t non_ampdu_cnt;
 	uint32_t failed_retry_count;
 	uint32_t retry_count;
+	uint32_t multiple_retry_count;
 	uint32_t last_tx_rate_used;
 
 	struct cdp_tx_pkt_info transmit_type[MAX_TRANSMIT_TYPES];
@@ -1321,13 +1072,6 @@ struct cdp_tx_stats {
 	uint32_t num_ppdu_cookie_valid;
 	uint32_t no_ack_count[QDF_PROTO_SUBTYPE_MAX];
 	struct cdp_pkt_info tx_success_twt;
-	unsigned long last_tx_ts;
-
-	uint32_t nss_info:4,
-		 mcs_info:4,
-		 bw_info:4,
-		 gi_info:4,
-		 preamble_info:4;
 	/* mpdu retry count in case of successful transmission */
 	uint32_t mpdu_success_with_retries;
 };
@@ -1341,7 +1085,6 @@ struct cdp_tx_stats {
  * @raw: Raw Pakets received
  * @nawds_mcast_drop: Total multicast packets
  * @mec_drop: Total MEC packets dropped
- * @last_rx_ts: last timestamp in jiffies when RX happened
  * @pkts: Intra BSS packets received
  * @fail: Intra BSS packets failed
  * @mdns_no_fwd: Intra BSS MDNS packets not forwarded
@@ -1349,10 +1092,6 @@ struct cdp_tx_stats {
  * @mic_err: Rx MIC errors CCMP
  * @decrypt_err: Rx Decryption Errors CRC
  * @fcserr: rx MIC check failed (CCMP)
- * @pn_err: pn check failed
- * @oor_err: Rx OOR errors
- * @jump_2k_err: 2k jump errors
- * @rxdma_wifi_parse_err: rxdma wifi parse errors
  * @wme_ac_type[WME_AC_MAX]: Wireless Multimedia type Count
  * @reception_type[MAX_RECEPTION_TYPES]: Reception type os packets
  * @mcs_count[MAX_MCS]: mcs count
@@ -1370,7 +1109,7 @@ struct cdp_tx_stats {
  * @non_amsdu_cnt: Number of MSDUs with no MSDU level aggregation
  * @amsdu_cnt: Number of MSDUs part of AMSDU
  * @bar_recv_cnt: Number of bar received
- * @avg_snr: Average snr
+ * @avg_rssi: Average rssi
  * @rx_rate: Rx rate
  * @last_rx_rate: Previous rx rate
  * @rnd_avg_rx_rate: Rounded average rx rate
@@ -1394,25 +1133,11 @@ struct cdp_tx_stats {
  * @rx_discard: packets discard in rx
  * @rx_ratecode: Rx rate code of last frame
  * @rx_flags: rx flags
- * @rx_snr_measured_time: Time at which snr is measured
- * @snr: SNR of received signal
- * @last_snr: Previous snr
+ * @rx_rssi_measured_time: Time at which rssi is measured
+ * @rssi: RSSI of received signal
+ * @last_rssi: Previous rssi
  * @multipass_rx_pkt_drop: Dropped multipass rx pkt
- * @peer_unauth_rx_pkt_drop: Unauth rx packet drops
- * @policy_check_drop: policy check drops
  * @rx_mpdu_cnt: rx mpdu count per MCS rate
- * @nss_info: NSS 1,2, ...8
- * @mcs_info: MCS index
- * @bw_info: Bandwidth
- *       <enum 0 bw_20_MHz>
- *       <enum 1 bw_40_MHz>
- *       <enum 2 bw_80_MHz>
- *       <enum 3 bw_160_MHz>
- * @gi_info: <enum 0     0_8_us_sgi > Legacy normal GI
- *       <enum 1     0_4_us_sgi > Legacy short GI
- *       <enum 2     1_6_us_sgi > HE related GI
- *       <enum 3     3_2_us_sgi > HE
- * @preamble_info: preamble
  * @to_stack_twt: Total packets sent up the stack in TWT session
  */
 struct cdp_rx_stats {
@@ -1424,7 +1149,6 @@ struct cdp_rx_stats {
 	struct cdp_pkt_info raw;
 	uint32_t nawds_mcast_drop;
 	struct cdp_pkt_info mec_drop;
-	unsigned long last_rx_ts;
 	struct {
 		struct cdp_pkt_info pkts;
 		struct cdp_pkt_info fail;
@@ -1438,10 +1162,6 @@ struct cdp_rx_stats {
 		uint32_t mic_err;
 		uint32_t decrypt_err;
 		uint32_t fcserr;
-		uint32_t pn_err;
-		uint32_t oor_err;
-		uint32_t jump_2k_err;
-		uint32_t rxdma_wifi_parse_err;
 	} err;
 
 	uint32_t wme_ac_type[WME_AC_MAX];
@@ -1461,7 +1181,7 @@ struct cdp_rx_stats {
 	uint32_t non_amsdu_cnt;
 	uint32_t amsdu_cnt;
 	uint32_t bar_recv_cnt;
-	uint32_t avg_snr;
+	uint32_t avg_rssi;
 	uint32_t rx_rate;
 	uint32_t last_rx_rate;
 	uint32_t rnd_avg_rx_rate;
@@ -1482,18 +1202,11 @@ struct cdp_rx_stats {
 	uint32_t rx_discard;
 	uint32_t rx_ratecode;
 	uint32_t rx_flags;
-	uint32_t rx_snr_measured_time;
-	uint8_t snr;
-	uint8_t last_snr;
+	uint32_t rx_rssi_measured_time;
+	uint8_t rssi;
+	uint8_t last_rssi;
 	uint32_t multipass_rx_pkt_drop;
-	uint32_t peer_unauth_rx_pkt_drop;
-	uint32_t policy_check_drop;
 	uint32_t rx_mpdu_cnt[MAX_MCS];
-	uint32_t nss_info:4,
-		 mcs_info:4,
-		 bw_info:4,
-		 gi_info:4,
-	         preamble_info:4;
 	struct cdp_pkt_info to_stack_twt;
 };
 
@@ -1584,8 +1297,6 @@ struct cdp_tx_ingress_stats {
 	struct {
 		struct cdp_pkt_info dropped_pkt;
 		struct cdp_pkt_info  desc_na;
-		struct cdp_pkt_info  desc_na_exc_alloc_fail;
-		struct cdp_pkt_info  desc_na_exc_outstand;
 		struct cdp_pkt_info  exc_desc_na;
 		uint32_t ring_full;
 		uint32_t enqueue_fail;
@@ -1608,35 +1319,17 @@ struct cdp_tx_ingress_stats {
 	struct cdp_tso_stats tso_stats;
 };
 
-/* struct cdp_rx_ingress_stats - rx ingress stats
- * @reo_rcvd_pkt: packets received at REO block
- * @ null_q_desc_pkt: null queue desc pkt count
- * @ routed_eapol_pkt: routed eapol pkt count
- */
-struct cdp_rx_ingress_stats {
-	struct cdp_pkt_info reo_rcvd_pkt;
-	struct cdp_pkt_info null_q_desc_pkt;
-	struct cdp_pkt_info routed_eapol_pkt;
-};
-
 /* struct cdp_vdev_stats - vdev stats structure
  * @tx_i: ingress tx stats
- * @rx_i: ingress rx stats
  * @tx: cdp tx stats
  * @rx: cdp rx stats
  * @tso_stats: tso stats
- * @tid_tx_stats: tid tx stats
  */
 struct cdp_vdev_stats {
 	struct cdp_tx_ingress_stats tx_i;
-	struct cdp_rx_ingress_stats rx_i;
 	struct cdp_tx_stats tx;
 	struct cdp_rx_stats rx;
 	struct cdp_tso_stats tso_stats;
-#ifdef HW_TX_DELAY_STATS_ENABLE
-	struct cdp_tid_tx_stats tid_tx_stats[CDP_MAX_TX_COMP_RINGS]
-					    [CDP_MAX_DATA_TIDS];
-#endif
 };
 
 /* struct cdp_peer_stats - peer stats structure
@@ -1670,7 +1363,6 @@ struct cdp_peer_tid_stats {
 /* struct cdp_interface_peer_stats - interface structure for txrx peer stats
  * @peer_mac: peer mac address
  * @vdev_id : vdev_id for the peer
- * @rssi_changed: denotes rssi is changed
  * @last_peer_tx_rate: peer tx rate for last transmission
  * @peer_tx_rate: tx rate for current transmission
  * @peer_rssi: current rssi value of peer
@@ -1680,7 +1372,7 @@ struct cdp_peer_tid_stats {
  * @rx_byte_count: rx byte count
  * @per: per error rate
  * @ack_rssi: RSSI of the last ack received
- * @free_buff: free tx descriptor count
+ * @rssi_changed: denotes rssi is changed
  */
 struct cdp_interface_peer_stats {
 	uint8_t  peer_mac[QDF_MAC_ADDR_SIZE];
@@ -1695,7 +1387,6 @@ struct cdp_interface_peer_stats {
 	uint32_t rx_byte_count;
 	uint32_t per;
 	uint32_t ack_rssi;
-	uint32_t free_buff;
 };
 
 /* struct cdp_interface_peer_qos_stats - interface structure for peer qos stats
@@ -2127,11 +1818,7 @@ struct cdp_htt_rx_pdev_stats {
 #define RX_PROTOCOL_TAG_ALL 0xff
 #endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
 
-#ifdef WLAN_FEATURE_11BE
-#define OFDMA_NUM_RU_SIZE 16
-#else
 #define OFDMA_NUM_RU_SIZE 7
-#endif
 
 #define OFDMA_NUM_USERS	37
 
@@ -2210,36 +1897,6 @@ struct cdp_cfr_rcc_stats {
 struct cdp_cfr_rcc_stats {
 };
 #endif
-
-/* struct cdp_soc_stats - soc stats
- * @tx.egress: Total packets transmitted
- * @rx.ingress: Total rx packets count
- * @rx.err_ring_pkts: Total Packets in Rx Error ring
- * @rx.rx_frags: No of Fragments
- * @rx.reo_reinject: No of reinjected packets
- * @rx.bar_frame: Number of bar frames received
- * @rx.err.rejected: RX msdu rejected count on delivery to vdev stack_fn
- * @rx.err.raw_frm_drop: RX raw frame dropped count
- */
-struct cdp_soc_stats {
-	struct {
-		struct cdp_pkt_info egress;
-	} tx;
-
-	struct {
-		struct cdp_pkt_info ingress;
-		uint32_t err_ring_pkts;
-		uint32_t rx_frags;
-		uint32_t reo_reinject;
-		uint32_t bar_frame;
-
-		struct {
-			uint32_t rx_rejected;
-			uint32_t rx_raw_frm_drop;
-		} err;
-	} rx;
-};
-
 /* struct cdp_pdev_stats - pdev stats
  * @msdu_not_done: packets dropped because msdu done bit not set
  * @mec:Multicast Echo check
@@ -2254,7 +1911,6 @@ struct cdp_soc_stats {
  * @map_err: Mapping failure
  * @x86_fail: x86 failures
  * @low_thresh_intrs: low threshold interrupts
- * @free_list: RX descriptors moving back to free list
  * @rx_raw_pkts: Rx Raw Packets
  * @mesh_mem_alloc: Mesh Rx Stats Alloc fail
  * @tso_desc_cnt: TSO descriptors
@@ -2265,7 +1921,6 @@ struct cdp_soc_stats {
  * @tcp_udp_csum_err: tcp/udp checksum errors
  * @buf_freelist: buffers added back in freelist
  * @tx_i: Tx Ingress stats
- * @rx_i: Rx Ingress stats
  * @tx:CDP Tx Stats
  * @rx: CDP Rx Stats
  * @tx_comp_histogram: Number of Tx completions per interrupt
@@ -2282,7 +1937,6 @@ struct cdp_soc_stats {
  * @ack_ba_comes_twice: stats counter for ack_ba_comes twice
  * @ppdu_drop: stats counter for ppdu_desc drop once threshold reached
  * @ppdu_wrap_drop: stats counter for ppdu desc drop on wrap around
- * @peer_unauth_rx_pkt_drop: stats counter for drops due to unauthorized peer
  */
 struct cdp_pdev_stats {
 	struct {
@@ -2303,7 +1957,6 @@ struct cdp_pdev_stats {
 		uint32_t map_err;
 		uint32_t x86_fail;
 		uint32_t low_thresh_intrs;
-		int32_t free_list;
 	} replenish;
 
 	uint32_t rx_raw_pkts;
@@ -2323,7 +1976,6 @@ struct cdp_pdev_stats {
 
 	uint32_t buf_freelist;
 	struct cdp_tx_ingress_stats tx_i;
-	struct cdp_rx_ingress_stats rx_i;
 	struct cdp_tx_stats tx;
 	struct cdp_rx_stats rx;
 	struct cdp_hist_tx_comp tx_comp_histogram;
@@ -2364,8 +2016,6 @@ struct cdp_pdev_stats {
 		uint64_t num_bufs_refilled;
 		uint64_t num_bufs_allocated;
 	} rx_refill_buff_pool;
-
-	uint32_t peer_unauth_rx_pkt_drop;
 };
 
 /* struct cdp_peer_hmwds_ast_add_status - hmwds peer ast add status
@@ -2381,15 +2031,9 @@ struct cdp_peer_hmwds_ast_add_status {
 	uint8_t  ast_mac[QDF_MAC_ADDR_SIZE];
 };
 
-/*
- * Enumeration of cdp soc parameters
- * @DP_SOC_PARAM_EAPOL_OVER_CONTROL_PORT: For sending EAPOL's over control port
- */
 enum cdp_soc_param_t {
 	DP_SOC_PARAM_MSDU_EXCEPTION_DESC,
 	DP_SOC_PARAM_CMEM_FSE_SUPPORT,
-	DP_SOC_PARAM_MAX_AST_AGEOUT,
-	DP_SOC_PARAM_EAPOL_OVER_CONTROL_PORT,
 	DP_SOC_PARAM_MAX,
 };
 

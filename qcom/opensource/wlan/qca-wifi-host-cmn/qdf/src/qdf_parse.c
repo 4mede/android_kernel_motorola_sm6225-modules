@@ -32,10 +32,7 @@ QDF_STATUS qdf_ini_parse(const char *ini_path, void *context,
 	char *cursor;
 	int ini_read_count = 0;
 
-	if (qdf_str_eq(QDF_WIFI_MODULE_PARAMS_FILE, ini_path))
-		status = qdf_module_param_file_read(ini_path, &fbuf);
-	else
-		status = qdf_file_read(ini_path, &fbuf);
+	status = qdf_file_read(ini_path, &fbuf);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		qdf_err("Failed to read *.ini file @ %s", ini_path);
 		return status;
@@ -78,7 +75,6 @@ QDF_STATUS qdf_ini_parse(const char *ini_path, void *context,
 				break;
 
 			case '#':
-			case '[':
 				/*
 				 * We don't process comments, so we can null-
 				 * terminate unconditionally here (unlike '=').
@@ -113,11 +109,7 @@ QDF_STATUS qdf_ini_parse(const char *ini_path, void *context,
 				qdf_err("Invalid *.ini syntax '%s'", key);
 			} else {
 				key[len - 1] = '\0';
-				if (section_cb)
-					status = section_cb(context, key + 1);
-				else
-					status = QDF_STATUS_E_NULL_VALUE;
-
+				status = section_cb(context, key + 1);
 				if (QDF_IS_STATUS_ERROR(status))
 					goto free_fbuf;
 			}
@@ -130,20 +122,14 @@ QDF_STATUS qdf_ini_parse(const char *ini_path, void *context,
 			cursor++;
 	}
 
-	qdf_info("INI values read: %d", ini_read_count);
-	if (ini_read_count != 0) {
-		qdf_info("INI file parse successful");
+	qdf_debug("INI values read: %d", ini_read_count);
+	if (ini_read_count != 0)
 		status = QDF_STATUS_SUCCESS;
-	} else {
-		qdf_info("INI file parse fail: invalid file format");
+	else
 		status = QDF_STATUS_E_INVAL;
-	}
 
 free_fbuf:
-	if (qdf_str_eq(QDF_WIFI_MODULE_PARAMS_FILE, ini_path))
-		qdf_module_param_file_free(fbuf);
-	else
-		qdf_file_buf_free(fbuf);
+	qdf_file_buf_free(fbuf);
 
 	return status;
 }

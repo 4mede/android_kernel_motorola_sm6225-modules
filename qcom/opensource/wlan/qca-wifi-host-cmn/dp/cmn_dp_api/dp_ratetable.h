@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -29,28 +29,8 @@ enum CMN_BW_TYPES {
 	CMN_BW_40MHZ,
 	CMN_BW_80MHZ,
 	CMN_BW_160MHZ,
-	CMN_BW_80_80MHZ,
 	CMN_BW_CNT,
 	CMN_BW_IDLE = 0xFF, /*default BW state */
-};
-
-/*
- * Modes Types
- */
-enum CMN_MODE_TYPES {
-	CMN_IEEE80211_MODE_INVALID = 0,
-	CMN_IEEE80211_MODE_A,
-	CMN_IEEE80211_MODE_B,
-	CMN_IEEE80211_MODE_G,
-	CMN_IEEE80211_MODE_TURBO,
-	CMN_IEEE80211_MODE_NA,
-	CMN_IEEE80211_MODE_NG,
-	CMN_IEEE80211_MODE_N,
-	CMN_IEEE80211_MODE_AC,
-	CMN_IEEE80211_MODE_AXA,
-	CMN_IEEE80211_MODE_AXG,
-	CMN_IEEE80211_MODE_AX,
-	CMN_IEEE80211_MODE_MAX
 };
 
 #define NUM_SPATIAL_STREAMS 8
@@ -123,14 +103,12 @@ static inline int dp_ath_rate_out(uint64_t _i)
 		MAX_SPATIAL_STREAMS_SUPPORTED_AT_160MHZ)
 
 #define CCK_RATE_TABLE_INDEX 0
-#define CCK_RATE_TABLE_END_INDEX 3
 #define CCK_RATE_11M_INDEX 0
 #define CCK_FALLBACK_MIN_RATE 0x3 /** 1 Mbps */
 #define CCK_FALLBACK_MAX_RATE 0x2 /** 2 Mbps */
 
 #define OFDM_RATE_TABLE_INDEX 4
 #define OFDMA_RATE_54M_INDEX 8
-#define OFDMA_RATE_TABLE_END_INDEX 11
 
 #define HT_20_RATE_TABLE_INDEX 12
 #define HT_40_RATE_TABLE_INDEX (HT_20_RATE_TABLE_INDEX + NUM_HT_RIX_PER_BW)
@@ -179,7 +157,6 @@ enum HW_RATECODE_PREAM_TYPE {
 	HW_RATECODE_PREAM_CCK,
 	HW_RATECODE_PREAM_HT,
 	HW_RATECODE_PREAM_VHT,
-	HW_RATECODE_PREAM_HE,
 };
 
 enum DP_CMN_MODULATION_TYPE dp_getmodulation(
@@ -191,12 +168,5 @@ dp_getrateindex(uint32_t gi, uint16_t mcs, uint8_t nss, uint8_t preamble,
 		uint8_t bw, uint32_t *rix, uint16_t *ratecode);
 
 int dp_rate_idx_to_kbps(uint8_t rate_idx, uint8_t gintval);
-
-#if ALL_POSSIBLE_RATES_SUPPORTED
-int dp_get_supported_rates(int mode, int shortgi, int **rates);
-#else
-int dp_get_supported_rates(int mode, int shortgi, int nss,
-			   int ch_width, int **rates);
-#endif
 
 #endif /*_DP_RATES_H_*/

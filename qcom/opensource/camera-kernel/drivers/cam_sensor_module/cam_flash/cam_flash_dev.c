@@ -8,15 +8,9 @@
 #include "cam_flash_soc.h"
 #include "cam_flash_core.h"
 #include "cam_common_util.h"
-
-/* Spes flashlight by muralivijay@github */
-#ifdef CONFIG_CAMERA_FLASH_SPES
-struct gpio_flash_led mgpio_flash_led = {
-        .flash_en = 0,
-        .flash_now = 0,
-};
+#ifdef CONFIG_CAMERA_FLASH_PWM
+#include "pm6125_flash_gpio.h"
 #endif
-/* Spes flashlight by muralivijay@github */
 
 static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 		void *arg, struct cam_flash_private_soc *soc_private)
@@ -146,6 +140,10 @@ static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 	}
 	case CAM_QUERY_CAP: {
 		struct cam_flash_query_cap_info flash_cap = {0};
+#ifdef CONFIG_CAMERA_FLASH_IIC_COMPATIBLE
+		uint32_t flash_iic_supplier[3];
+		uint32_t flashid=0;
+#endif
 
 		CAM_DBG(CAM_FLASH, "CAM_QUERY_CAP");
 		flash_cap.slot_info  = fctrl->soc_info.index;
@@ -160,6 +158,40 @@ static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 		for (i = 0; i < fctrl->torch_num_sources; i++)
 			flash_cap.max_current_torch[i] =
 				soc_private->torch_max_current[i];
+
+#ifdef CONFIG_CAMERA_FLASH_IIC_COMPATIBLE
+		rc = of_property_read_u32_array(fctrl->of_node, "distinguish-flash-supplier",
+			flash_iic_supplier, 3);
+		if (!rc) {
+			CAM_DBG(CAM_FLASH, "Distinguish IIC Flash Supplier dev:0x%x addr:0x%x data:0x%x",
+				flash_iic_supplier[0],flash_iic_supplier[1],flash_iic_supplier[2]);
+			if (cam_flash_fill_vreg_setting(fctrl)){
+				CAM_ERR(CAM_FLASH, "Flash Fill Vreg Failed");
+				goto release_mutex;
+			}
+			if (fctrl->func_tbl.power_ops(fctrl, true)){
+				CAM_ERR(CAM_FLASH, "Power Up Failed");
+				goto release_mutex;
+			}
+			if (cam_flash_fill_i2c_default_setting(fctrl, flash_iic_supplier[0])){
+				CAM_ERR(CAM_FLASH, "Failed Flash Fill I2C Setting rc =%d",rc);
+				goto release_mutex;
+			}
+			rc = camera_io_dev_read(&(fctrl->io_master_info),
+				flash_iic_supplier[1],&flashid,
+				CAMERA_SENSOR_I2C_TYPE_BYTE,
+				CAMERA_SENSOR_I2C_TYPE_BYTE);
+			CAM_DBG(CAM_FLASH, "flashid=%d",flashid);
+			if ((!rc) && (flashid == flash_iic_supplier[2]))
+				flash_cap.flash_supplier = 1;
+			else
+				flash_cap.flash_supplier = 0;
+			if (fctrl->func_tbl.power_ops(fctrl, false)){
+				CAM_ERR(CAM_FLASH, "Power Down Failed");
+				goto release_mutex;
+			}
+		}
+#endif
 
 		if (copy_to_user(u64_to_user_ptr(cmd->handle),
 			&flash_cap, sizeof(struct cam_flash_query_cap_info))) {
@@ -327,6 +359,10 @@ static int cam_flash_platform_remove(struct platform_device *pdev)
 {
 	struct cam_flash_ctrl *fctrl;
 
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	pm6125_flash_control_remove_device(&pdev->dev);
+#endif
+
 	fctrl = platform_get_drvdata(pdev);
 	if (!fctrl) {
 		CAM_ERR(CAM_FLASH, "Flash device is NULL");
@@ -339,6 +375,9 @@ static int cam_flash_platform_remove(struct platform_device *pdev)
 	mutex_unlock(&fctrl->flash_mutex);
 	cam_unregister_subdev(&(fctrl->v4l2_dev_str));
 	platform_set_drvdata(pdev, NULL);
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	dev_set_drvdata(&pdev->dev, NULL);
+#endif
 	v4l2_set_subdevdata(&fctrl->v4l2_dev_str.sd, NULL);
 	kfree(fctrl);
 
@@ -424,10 +463,6 @@ static int32_t cam_flash_platform_probe(struct platform_device *pdev)
 	struct cam_flash_ctrl *fctrl     = NULL;
 	struct device_node *of_parent    = NULL;
 	struct cam_hw_soc_info *soc_info = NULL;
-/* Spes flashlight by muralivijay@github */
-#ifdef CONFIG_CAMERA_FLASH_SPES
-        struct device_node *gnode = pdev->dev.of_node; //store qcom-flash-gpios
-#endif
 
 	CAM_DBG(CAM_FLASH, "Enter");
 	if (!pdev->dev.of_node) {
@@ -446,6 +481,9 @@ static int32_t cam_flash_platform_probe(struct platform_device *pdev)
 	fctrl->of_node = pdev->dev.of_node;
 
 	platform_set_drvdata(pdev, fctrl);
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	dev_set_drvdata(&pdev->dev, fctrl);
+#endif
 
 	rc = cam_flash_get_dt_data(fctrl, &fctrl->soc_info);
 	if (rc) {
@@ -531,28 +569,6 @@ static int32_t cam_flash_platform_probe(struct platform_device *pdev)
 		fctrl->func_tbl.flush_req = cam_flash_pmic_flush_request;
 	}
 
-/* Spes flashlight by muralivijay@github */
-#ifdef CONFIG_CAMERA_FLASH_SPES
-                // Get flash_en GPIO
-                /*Xiaomi added tlmm 85 pin in dts used as flash mode in camera */
-                mgpio_flash_led.flash_en = of_get_named_gpio(gnode, "qcom,flash-gpios", 0);
-                if (!gpio_is_valid(mgpio_flash_led.flash_en)) {
-                // Handle error if GPIO is not valid
-                CAM_ERR(CAM_FLASH, "Invalid GPIO for flash_en");
-               }
-                CAM_INFO(CAM_FLASH, "flash_en GPIO: %d", mgpio_flash_led.flash_en);
-
-                // Get flash_now GPIO
-                /*Xiaomi added pm6125_gpios 2 pin in dts  mainly used as torch mode */
-                mgpio_flash_led.flash_now = of_get_named_gpio(gnode, "qcom,flash-gpios", 1);
-                if (!gpio_is_valid(mgpio_flash_led.flash_now)) {
-                // Handle error if GPIO is not valid
-                CAM_ERR(CAM_FLASH, "Invalid GPIO for flash_en");
-               }
-                CAM_INFO(CAM_FLASH, "flash_now GPIO: %d", mgpio_flash_led.flash_now);
-#endif
-/* Spes flashlight by muralivijay@github */
-
 	rc = cam_flash_init_subdev(fctrl);
 	if (rc) {
 		if (fctrl->io_master_info.cci_client != NULL)
@@ -573,6 +589,10 @@ static int32_t cam_flash_platform_probe(struct platform_device *pdev)
 
 	fctrl->flash_state = CAM_FLASH_STATE_INIT;
 	CAM_DBG(CAM_FLASH, "Probe success");
+#ifdef CONFIG_CAMERA_FLASH_PWM
+	pm6125_flash_control_create_device(&pdev->dev);
+#endif
+
 	return rc;
 
 free_cci_resource:

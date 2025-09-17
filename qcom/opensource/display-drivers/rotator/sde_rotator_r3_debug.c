@@ -32,7 +32,11 @@ int sde_rotator_r3_create_debugfs(struct sde_rot_mgr *mgr,
 
 	hw_data = mgr->hw_data;
 
-	debugfs_create_bool("dbgmem", 0644, debugfs_root, &hw_data->dbgmem);
+	if (!debugfs_create_bool("dbgmem", 0644,
+			debugfs_root, &hw_data->dbgmem)) {
+		SDEROT_ERR("fail create dbgmem\n");
+		return -EINVAL;
+	}
 
 	debugfs_create_u32("koff_timeout", 0644, debugfs_root, &hw_data->koff_timeout);
 

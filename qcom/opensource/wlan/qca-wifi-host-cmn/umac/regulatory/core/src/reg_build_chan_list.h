@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -29,13 +28,7 @@
 
 #define CHAN_12_CENT_FREQ 2467
 #define CHAN_13_CENT_FREQ 2472
-#define REG_MAX_20M_SUB_CH   8
-#ifdef CONFIG_AFC_SUPPORT
-#define MIN_AFC_BW 2
-#define MAX_AFC_BW 160
-#endif
 
-#include "reg_priv_objs.h"
 /**
  * reg_reset_reg_rules() - provides the reg domain rules info
  * @reg_rules: reg rules pointer
@@ -108,28 +101,6 @@ QDF_STATUS reg_get_6g_ap_master_chan_list(struct wlan_objmgr_pdev *pdev,
 					  enum reg_6g_ap_type ap_pwr_type,
 					  struct regulatory_channel *chan_list);
 
-#ifdef CONFIG_REG_CLIENT
-/**
- * reg_get_power_string() - get power string from power enum type
- * @power_type: power type enum value
- *
- * Return: power type string
- */
-const char *reg_get_power_string(enum reg_6g_ap_type power_type);
-#endif
-
-#ifdef CONFIG_AFC_SUPPORT
-/**
- * reg_process_afc_event() - Process the afc event and compute the 6G AFC
- * channel list based on the frequency range and channel frequency indices set.
- * @reg_info: Pointer to regulatory info
- *
- * Return: QDF_STATUS
- */
-QDF_STATUS
-reg_process_afc_event(struct afc_regulatory_info *afc_info);
-#endif
-
 #else /* CONFIG_BAND_6GHZ */
 static inline QDF_STATUS
 reg_get_6g_ap_master_chan_list(struct wlan_objmgr_pdev *pdev,
@@ -139,6 +110,7 @@ reg_get_6g_ap_master_chan_list(struct wlan_objmgr_pdev *pdev,
 	return QDF_STATUS_E_FAILURE;
 }
 #endif /* CONFIG_BAND_6GHZ */
+
 /**
  * reg_process_master_chan_list() - Compute master channel list based on the
  * regulatory rules.
@@ -158,44 +130,6 @@ QDF_STATUS reg_process_master_chan_list(struct cur_regulatory_info *reg_info);
 QDF_STATUS reg_get_current_chan_list(struct wlan_objmgr_pdev *pdev,
 				     struct regulatory_channel *chan_list);
 
-#if defined(CONFIG_AFC_SUPPORT) && defined(CONFIG_BAND_6GHZ)
-/**
- * reg_get_6g_afc_chan_list() - provide the pdev afc channel list
- * @pdev: pdev pointer
- * @chan_list: channel list pointer
- *
- * Return: QDF_STATUS
- */
-QDF_STATUS reg_get_6g_afc_chan_list(struct wlan_objmgr_pdev *pdev,
-				    struct regulatory_channel *chan_list);
-
-/**
- * reg_get_6g_afc_mas_chan_list() - provide the pdev afc master channel list
- * @pdev: pdev pointer
- * @chan_list: channel list pointer
- *
- * Return: QDF_STATUS
- */
-QDF_STATUS
-reg_get_6g_afc_mas_chan_list(struct wlan_objmgr_pdev *pdev,
-			     struct regulatory_channel *chan_list);
-
-/**
- * reg_psd_2_eirp() - Calculate EIRP from PSD and bandwidth
- * channel list
- * @pdev: pdev pointer
- * @psd: Power Spectral Density in dBm/MHz
- * @ch_bw: Bandwdith of a channel in MHz (20/40/80/160/320 etc)
- * @eirp:  EIRP power  in dBm
- *
- * Return: QDF_STATUS
- */
-QDF_STATUS reg_psd_2_eirp(struct wlan_objmgr_pdev *pdev,
-			  int16_t psd,
-			  uint16_t ch_bw,
-			  int16_t *eirp);
-#endif
-
 #ifdef CONFIG_REG_CLIENT
 /**
  * reg_get_secondary_current_chan_list() - provide the pdev secondary current
@@ -211,14 +145,19 @@ reg_get_secondary_current_chan_list(struct wlan_objmgr_pdev *pdev,
 #endif
 
 /**
- * reg_is_chan_disabled_and_not_nol() - In the regulatory channel list, a
- * channel may be disabled by the regulatory/device or by radar. Radar is
- * temporary and a radar disabled channel does not mean that the channel is
- * permanently disabled. The API checks if the channel is disabled, but not due
- * to radar.
- * @chan - Regulatory channel object
+ * reg_update_nol_history_ch() - Set nol-history flag for the channels in the
+ * list.
  *
- * Return - True,  the channel is disabled, but not due to radar, else false.
+ * @pdev: Pdev ptr.
+ * @ch_list: Input channel list.
+ * @num_ch: Number of channels.
+ * @nol_history_ch: NOL-History flag.
+ *
+ * Return: void
  */
-bool reg_is_chan_disabled_and_not_nol(struct regulatory_channel *chan);
+void reg_update_nol_history_ch(struct wlan_objmgr_pdev *pdev,
+			       uint8_t *chan_list,
+			       uint8_t num_chan,
+			       bool nol_history_chan);
+
 #endif

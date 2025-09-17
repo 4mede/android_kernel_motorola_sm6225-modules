@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -58,9 +57,6 @@
 #define QDF_RET_IP NULL
 #endif /* __KERNEL__ */
 #include <qdf_status.h>
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)) && defined(MSM_PLATFORM)
-#include <linux/qcom-iommu-util.h>
-#endif
 
 #if IS_ENABLED(CONFIG_ARM_SMMU)
 #include <pld_common.h>
@@ -227,91 +223,6 @@ static inline bool __qdf_mem_smmu_s1_enabled(qdf_device_t osdev)
 }
 
 #if IS_ENABLED(CONFIG_ARM_SMMU) && defined(ENABLE_SMMU_S1_TRANSLATION)
-/*
- * typedef __qdf_iommu_domain_t: abstraction for struct iommu_domain
- */
-typedef struct iommu_domain __qdf_iommu_domain_t;
-
-/**
- * __qdf_iommu_attr_to_os() - Convert qdf iommu attribute to OS specific enum
- * @attr: QDF iommu attribute
- *
- * Return: enum iommu_attr
- */
-static inline
-enum iommu_attr __qdf_iommu_attr_to_os(enum qdf_iommu_attr attr)
-{
-	switch (attr) {
-	case QDF_DOMAIN_ATTR_GEOMETRY:
-		return DOMAIN_ATTR_GEOMETRY;
-	case QDF_DOMAIN_ATTR_PAGING:
-		return DOMAIN_ATTR_PAGING;
-	case QDF_DOMAIN_ATTR_WINDOWS:
-		return DOMAIN_ATTR_WINDOWS;
-	case QDF_DOMAIN_ATTR_FSL_PAMU_STASH:
-		return DOMAIN_ATTR_FSL_PAMU_STASH;
-	case QDF_DOMAIN_ATTR_FSL_PAMU_ENABLE:
-		return DOMAIN_ATTR_FSL_PAMU_ENABLE;
-	case QDF_DOMAIN_ATTR_FSL_PAMUV1:
-		return DOMAIN_ATTR_FSL_PAMUV1;
-	case QDF_DOMAIN_ATTR_NESTING:
-		return DOMAIN_ATTR_NESTING;
-	case QDF_DOMAIN_ATTR_DMA_USE_FLUSH_QUEUE:
-		return DOMAIN_ATTR_DMA_USE_FLUSH_QUEUE;
-	case QDF_DOMAIN_ATTR_CONTEXT_BANK:
-		return DOMAIN_ATTR_CONTEXT_BANK;
-	case QDF_DOMAIN_ATTR_NON_FATAL_FAULTS:
-		return DOMAIN_ATTR_NON_FATAL_FAULTS;
-	case QDF_DOMAIN_ATTR_S1_BYPASS:
-		return DOMAIN_ATTR_S1_BYPASS;
-	case QDF_DOMAIN_ATTR_ATOMIC:
-		return DOMAIN_ATTR_ATOMIC;
-	case QDF_DOMAIN_ATTR_SECURE_VMID:
-		return DOMAIN_ATTR_SECURE_VMID;
-	case QDF_DOMAIN_ATTR_FAST:
-		return DOMAIN_ATTR_FAST;
-	case QDF_DOMAIN_ATTR_PGTBL_INFO:
-		return DOMAIN_ATTR_PGTBL_INFO;
-	case QDF_DOMAIN_ATTR_USE_UPSTREAM_HINT:
-		return DOMAIN_ATTR_USE_UPSTREAM_HINT;
-	case QDF_DOMAIN_ATTR_EARLY_MAP:
-		return DOMAIN_ATTR_EARLY_MAP;
-	case QDF_DOMAIN_ATTR_PAGE_TABLE_IS_COHERENT:
-		return DOMAIN_ATTR_PAGE_TABLE_IS_COHERENT;
-	case QDF_DOMAIN_ATTR_PAGE_TABLE_FORCE_COHERENT:
-		return DOMAIN_ATTR_PAGE_TABLE_FORCE_COHERENT;
-	case QDF_DOMAIN_ATTR_USE_LLC_NWA:
-		return DOMAIN_ATTR_USE_LLC_NWA;
-	case QDF_DOMAIN_ATTR_SPLIT_TABLES:
-		return DOMAIN_ATTR_SPLIT_TABLES;
-	case QDF_DOMAIN_ATTR_FAULT_MODEL_NO_CFRE:
-		return DOMAIN_ATTR_FAULT_MODEL_NO_CFRE;
-	case QDF_DOMAIN_ATTR_FAULT_MODEL_NO_STALL:
-		return DOMAIN_ATTR_FAULT_MODEL_NO_STALL;
-	case QDF_DOMAIN_ATTR_FAULT_MODEL_HUPCF:
-		return DOMAIN_ATTR_FAULT_MODEL_HUPCF;
-	default:
-		return DOMAIN_ATTR_EXTENDED_MAX;
-	}
-}
-
-/**
- * __qdf_iommu_domain_get_attr() - API to get iommu domain attributes
- *
- * @domain: iommu domain
- * @attr: iommu attribute
- * @data: data pointer
- *
- * Return: iommu domain attr
- */
-static inline int
-__qdf_iommu_domain_get_attr(__qdf_iommu_domain_t *domain,
-			    enum qdf_iommu_attr attr, void *data)
-{
-	return iommu_domain_get_attr(domain, __qdf_iommu_attr_to_os(attr),
-				     data);
-}
-
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
 /**
  * __qdf_dev_get_domain() - get iommu domain from osdev
@@ -583,54 +494,6 @@ void *__qdf_mem_malloc(qdf_size_t size, const char *func, uint32_t line);
  * Return: None
  */
 void __qdf_mem_free(void *ptr);
-
-/**
- * __qdf_mem_valloc() - QDF virtual memory allocation API
- * @size: Number of bytes of virtual memory to allocate.
- * @func: Caller function name
- * @line: Line number
- *
- * Return: A valid memory location on success, or NULL on failure
- */
-void *__qdf_mem_valloc(size_t size, const char *func, uint32_t line);
-
-/**
- * __qdf_mem_vfree() - QDF API to free virtual memory
- * @ptr: Pointer to the virtual memory to free
- *
- * Return: None
- */
-void __qdf_mem_vfree(void *ptr);
-
-#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
-/**
- * __qdf_untracked_mem_malloc() - allocates non-QDF memory
- * @size: Number of bytes of memory to allocate.
- *
- * @func: Function name of the call site
- * @line: line number of the call site
- *
- * This function will dynamically allocate the specified number of bytes of
- * memory. Memory allocated is not tracked by qdf memory debug framework.
- *
- * Return:
- * Upon successful allocation, returns a non-NULL pointer to the allocated
- * memory.  If this function is unable to allocate the amount of memory
- * specified (for any reason) it returns NULL.
- */
-void *__qdf_untracked_mem_malloc(qdf_size_t size, const char *func,
-				 uint32_t line);
-
-/**
- * __qdf_untracked_mem_free() - free non-QDF memory
- * @ptr: Pointer to the starting address of the memory to be freed.
- *
- * This function will free the memory pointed to by 'ptr'.
- * Return: None
- */
-
-void __qdf_untracked_mem_free(void *ptr);
-#endif
 
 /**
  * __qdf_mem_free_consistent() - free consistent qdf memory

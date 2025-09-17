@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -32,8 +31,6 @@
 #include <target_if.h>
 #include <cdp_txrx_ops.h>
 
-#define PEER_ROUTING_LMAC_ID_INDEX	6
-#define PEER_ROUTING_LMAC_ID_BITS	2
 /**
  * struct reorder_q_setup - reorder queue setup params
  * @psoc: psoc
@@ -66,7 +63,6 @@ struct reorder_q_setup {
  * @vdev_id: vdev id
  * @hash_based: hash based routing
  * @ring_num: ring number
- * @lmac_peer_id_msb: lmac_peer_id_msb
  *
  * return: void
  */
@@ -74,8 +70,7 @@ void
 target_if_peer_set_default_routing(struct cdp_ctrl_objmgr_psoc *psoc,
 				   uint8_t pdev_id,
 				   uint8_t *peer_macaddr, uint8_t vdev_id,
-				   bool hash_based, uint8_t ring_num,
-				   uint8_t lmac_peer_id_msb);
+				   bool hash_based, uint8_t ring_num);
 /**
  * target_if_peer_rx_reorder_queue_setup() - setup rx reorder queue
  * @pdev: pdev pointer

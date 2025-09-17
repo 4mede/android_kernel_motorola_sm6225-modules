@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -41,7 +40,9 @@
 #include "wifi_pos_api.h"
 #endif /* WIFI_POS_CONVERGED */
 #include <wlan_reg_services_api.h>
+#ifdef WLAN_CONV_CRYPTO_SUPPORTED
 #include "wlan_crypto_main.h"
+#endif
 #ifdef DFS_COMPONENT_ENABLE
 #include <wlan_dfs_init_deinit_api.h>
 #endif
@@ -79,11 +80,10 @@
 #ifdef DCS_INTERFERENCE_DETECTION
 #include <wlan_dcs_init_deinit_api.h>
 #endif
-#include <wlan_if_mgr_main.h>
-#include <wlan_mlo_mgr_main.h>
-#include <wlan_gpio_api.h>
 
-#include <wlan_twt_api.h>
+#ifdef WLAN_FEATURE_INTERFACE_MGR
+#include <wlan_if_mgr_main.h>
+#endif
 
 /**
  * DOC: This file provides various init/deinit trigger point for new
@@ -551,6 +551,7 @@ static QDF_STATUS atf_psoc_disable(struct wlan_objmgr_psoc *psoc)
 }
 #endif /* END of WLAN_ATF_ENABLE */
 
+#ifdef WLAN_CONV_CRYPTO_SUPPORTED
 static QDF_STATUS dispatcher_init_crypto(void)
 {
 	return wlan_crypto_init();
@@ -560,16 +561,17 @@ static QDF_STATUS dispatcher_deinit_crypto(void)
 {
 	return wlan_crypto_deinit();
 }
-
-static QDF_STATUS dispatcher_crypto_psoc_enable(struct wlan_objmgr_psoc *psoc)
+#else
+static QDF_STATUS dispatcher_init_crypto(void)
 {
-	return wlan_crypto_psoc_enable(psoc);
+	return QDF_STATUS_SUCCESS;
 }
 
-static QDF_STATUS dispatcher_crypto_psoc_disable(struct wlan_objmgr_psoc *psoc)
+static QDF_STATUS dispatcher_deinit_crypto(void)
 {
-	return wlan_crypto_psoc_disable(psoc);
+	return QDF_STATUS_SUCCESS;
 }
+#endif /* END of WLAN_CONV_CRYPTO_SUPPORTED */
 
 #ifdef WIFI_POS_CONVERGED
 static QDF_STATUS dispatcher_init_wifi_pos(void)
@@ -650,49 +652,6 @@ static QDF_STATUS dispatcher_dfs_psoc_enable(struct wlan_objmgr_psoc *psoc)
 }
 
 static QDF_STATUS dispatcher_dfs_psoc_disable(struct wlan_objmgr_psoc *psoc)
-{
-	return QDF_STATUS_SUCCESS;
-}
-#endif
-
-#if defined(WLAN_SUPPORT_TWT) && defined(WLAN_TWT_CONV_SUPPORTED)
-static QDF_STATUS dispatcher_twt_psoc_enable(struct wlan_objmgr_psoc *psoc)
-{
-	return twt_psoc_enable(psoc);
-}
-
-static QDF_STATUS dispatcher_twt_psoc_disable(struct wlan_objmgr_psoc *psoc)
-{
-	return twt_psoc_disable(psoc);
-}
-
-static QDF_STATUS dispatcher_twt_init(void)
-{
-	return wlan_twt_init();
-}
-
-static QDF_STATUS dispatcher_twt_deinit(void)
-{
-	return wlan_twt_deinit();
-}
-
-#else
-static QDF_STATUS dispatcher_twt_psoc_enable(struct wlan_objmgr_psoc *psoc)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-static QDF_STATUS dispatcher_twt_psoc_disable(struct wlan_objmgr_psoc *psoc)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-static QDF_STATUS dispatcher_twt_init(void)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-static QDF_STATUS dispatcher_twt_deinit(void)
 {
 	return QDF_STATUS_SUCCESS;
 }
@@ -907,6 +866,7 @@ static QDF_STATUS fd_psoc_disable(struct wlan_objmgr_psoc *psoc)
 }
 #endif /* WLAN_SUPPORT_FILS */
 
+#ifdef WLAN_FEATURE_INTERFACE_MGR
 static QDF_STATUS dispatcher_if_mgr_init(void)
 {
 	return wlan_if_mgr_init();
@@ -916,6 +876,17 @@ static QDF_STATUS dispatcher_if_mgr_deinit(void)
 {
 	return wlan_if_mgr_deinit();
 }
+#else
+static QDF_STATUS dispatcher_if_mgr_init(void)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static QDF_STATUS dispatcher_if_mgr_deinit(void)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
 
 #ifdef FEATURE_COEX
 static QDF_STATUS dispatcher_coex_init(void)
@@ -961,35 +932,10 @@ dispatcher_coex_psoc_close(struct wlan_objmgr_psoc *psoc)
 }
 #endif /* FEATURE_COEX */
 
-#ifdef WLAN_FEATURE_11BE_MLO
-static QDF_STATUS mlo_mgr_psoc_enable(struct wlan_objmgr_psoc *psoc)
-{
-	return wlan_mlo_mgr_psoc_enable(psoc);
-}
-
-static QDF_STATUS mlo_mgr_psoc_disable(struct wlan_objmgr_psoc *psoc)
-{
-	return wlan_mlo_mgr_psoc_disable(psoc);
-}
-#else
-static QDF_STATUS mlo_mgr_psoc_enable(struct wlan_objmgr_psoc *psoc)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-static QDF_STATUS mlo_mgr_psoc_disable(struct wlan_objmgr_psoc *psoc)
-{
-	return QDF_STATUS_SUCCESS;
-}
-#endif
-
 QDF_STATUS dispatcher_init(void)
 {
 	if (QDF_STATUS_SUCCESS != wlan_objmgr_global_obj_init())
 		goto out;
-
-	if (QDF_STATUS_SUCCESS != wlan_mlo_mgr_init())
-		goto mgmt_mlo_mgr_fail;
 
 	if (QDF_STATUS_SUCCESS != wlan_mgmt_txrx_init())
 		goto mgmt_txrx_init_fail;
@@ -1060,12 +1006,6 @@ QDF_STATUS dispatcher_init(void)
 	if (QDF_STATUS_SUCCESS != dispatcher_if_mgr_init())
 		goto ifmgr_init_fail;
 
-	if (QDF_STATUS_SUCCESS != wlan_gpio_init())
-		goto gpio_init_fail;
-
-	if (QDF_STATUS_SUCCESS != dispatcher_twt_init())
-		goto twt_init_fail;
-
 	/*
 	 * scheduler INIT has to be the last as each component's
 	 * initialization has to happen first and then at the end
@@ -1077,10 +1017,6 @@ QDF_STATUS dispatcher_init(void)
 	return QDF_STATUS_SUCCESS;
 
 scheduler_init_fail:
-	dispatcher_twt_deinit();
-twt_init_fail:
-	wlan_gpio_deinit();
-gpio_init_fail:
 	dispatcher_if_mgr_deinit();
 ifmgr_init_fail:
 	dispatcher_coex_deinit();
@@ -1128,8 +1064,6 @@ ucfg_scan_init_fail:
 	wlan_mgmt_txrx_deinit();
 mgmt_txrx_init_fail:
 	wlan_objmgr_global_obj_deinit();
-mgmt_mlo_mgr_fail:
-	wlan_mlo_mgr_deinit();
 
 out:
 	return QDF_STATUS_E_FAILURE;
@@ -1141,10 +1075,6 @@ QDF_STATUS dispatcher_deinit(void)
 	QDF_STATUS status;
 
 	QDF_BUG(QDF_STATUS_SUCCESS == scheduler_deinit());
-
-	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_twt_deinit());
-
-	QDF_BUG(QDF_STATUS_SUCCESS == wlan_gpio_deinit());
 
 	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_if_mgr_deinit());
 
@@ -1192,8 +1122,6 @@ QDF_STATUS dispatcher_deinit(void)
 	QDF_BUG(QDF_STATUS_SUCCESS == ucfg_scan_deinit());
 
 	QDF_BUG(QDF_STATUS_SUCCESS == wlan_mgmt_txrx_deinit());
-
-	QDF_BUG(QDF_STATUS_SUCCESS == wlan_mlo_mgr_deinit());
 
 	QDF_BUG(QDF_STATUS_SUCCESS == wlan_objmgr_global_obj_deinit());
 
@@ -1351,9 +1279,6 @@ QDF_STATUS dispatcher_psoc_enable(struct wlan_objmgr_psoc *psoc)
 	if (QDF_STATUS_SUCCESS != dispatcher_dbr_psoc_enable(psoc))
 		goto dbr_psoc_enable_fail;
 
-	if (QDF_STATUS_SUCCESS != dispatcher_crypto_psoc_enable(psoc))
-		goto crypto_psoc_enable_fail;
-
 	if (QDF_STATUS_SUCCESS != wlan_mlme_psoc_enable(psoc))
 		goto mlme_psoc_enable_fail;
 
@@ -1361,28 +1286,11 @@ QDF_STATUS dispatcher_psoc_enable(struct wlan_objmgr_psoc *psoc)
 	if (status != QDF_STATUS_SUCCESS && status != QDF_STATUS_COMP_DISABLED)
 		goto spectral_psoc_enable_fail;
 
-	if (QDF_STATUS_SUCCESS != wlan_mgmt_txrx_psoc_enable(psoc))
-		goto mgmt_txrx_psoc_enable_fail;
-
-	if (QDF_STATUS_SUCCESS != mlo_mgr_psoc_enable(psoc))
-		goto mlo_mgr_psoc_enable_fail;
-
-	if (QDF_STATUS_SUCCESS != dispatcher_twt_psoc_enable(psoc))
-		goto twt_psoc_enable_fail;
-
 	return QDF_STATUS_SUCCESS;
 
-twt_psoc_enable_fail:
-	mlo_mgr_psoc_disable(psoc);
-mlo_mgr_psoc_enable_fail:
-	wlan_mgmt_txrx_psoc_disable(psoc);
-mgmt_txrx_psoc_enable_fail:
-	spectral_psoc_disable(psoc);
 spectral_psoc_enable_fail:
 	wlan_mlme_psoc_disable(psoc);
 mlme_psoc_enable_fail:
-	dispatcher_crypto_psoc_disable(psoc);
-crypto_psoc_enable_fail:
 	dispatcher_dbr_psoc_disable(psoc);
 dbr_psoc_enable_fail:
 	fd_psoc_disable(psoc);
@@ -1411,15 +1319,7 @@ QDF_STATUS dispatcher_psoc_disable(struct wlan_objmgr_psoc *psoc)
 {
 	QDF_STATUS status;
 
-	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_twt_psoc_disable(psoc));
-
-	QDF_BUG(QDF_STATUS_SUCCESS == mlo_mgr_psoc_disable(psoc));
-
-	QDF_BUG(QDF_STATUS_SUCCESS == wlan_mgmt_txrx_psoc_disable(psoc));
-
 	QDF_BUG(QDF_STATUS_SUCCESS == wlan_mlme_psoc_disable(psoc));
-
-	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_crypto_psoc_disable(psoc));
 
 	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_dbr_psoc_disable(psoc));
 

@@ -1,6 +1,7 @@
 /*
- * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -146,17 +147,13 @@
 #define WLAN_SOC_CEXT_SCAN_PER_CH_CONFIG    0x01000000
 	/* CAPABILITY: csa offload in case of AP */
 #define WLAN_SOC_CEXT_CSA_TX_OFFLOAD      0x02000000
-	/* AP initiator mode supported in staggered beacon mode */
-#define WLAN_SOC_RTT_AP_INITIATOR_STAGGERED_MODE_SUPPORTED 0x04000000
-	/* AP initiator mode supported in burst beacon mode */
-#define WLAN_SOC_RTT_AP_INITIATOR_BURSTED_MODE_SUPPORTED 0x08000000
-	/* ext cc event supported by fw */
-#define WLAN_SOC_EXT_EVENT_SUPPORTED      0x010000000
-	/* check 29th bit for p2p + p2p conc support by fw */
-#define WLAN_SOC_EXT_P2P_P2P_CONC_SUPPORT 0x20000000
+	/* ext event supported by fw */
+#define WLAN_SOC_EXT_EVENT_SUPPORTED      0x04000000
 
 /* check 31st bit for per channel pno scan config flags support */
 #define WLAN_SOC_PNO_SCAN_CONFIG_PER_CHANNEL   0x40000000
+	/* check 29th bit for p2p + p2p conc support by fw */
+#define WLAN_SOC_EXT_P2P_P2P_CONC_SUPPORT 0x20000000
 
 /* feature_flags */
 	/* CONF: ATH FF enabled */
@@ -201,14 +198,16 @@
 #define WLAN_SOC_F_DOT11D              0x00020000
 	/* Beacon offload */
 #define WLAN_SOC_F_BCN_OFFLOAD         0x00040000
+	/* QWRAP enable */
+#define WLAN_SOC_F_QWRAP_ENABLE        0x00080000
 	/* LTEU support */
 #define WLAN_SOC_F_LTEU_SUPPORT        0x00100000
 	/* BT coext support */
 #define WLAN_SOC_F_BTCOEX_SUPPORT      0x00200000
 	/* HOST 80211 enable*/
 #define WLAN_SOC_F_HOST_80211_ENABLE   0x00400000
-	/* Spectral disable from INI */
-#define WLAN_SOC_F_SPECTRAL_INI_DISABLE    0x00800000
+	/* Spectral disable */
+#define WLAN_SOC_F_SPECTRAL_DISABLE    0x00800000
 	/* FTM testmode enable */
 #define WLAN_SOC_F_TESTMODE_ENABLE     0x01000000
 	/* Dynamic HW mode swithch enable */
@@ -219,30 +218,7 @@
 #define WLAN_SOC_F_WDS_EXTENDED        0x08000000
 /* Peer create response */
 #define WLAN_SOC_F_PEER_CREATE_RESP    0x10000000
-/* Strict channel mode */
-#define WLAN_SOC_F_STRICT_CHANNEL      0x20000000
-/* MGMT Rx REO feature capability */
-#define WLAN_SOC_F_MGMT_RX_REO_CAPABLE  0x40000000
 
-/* 11AZ Secure ranging Feature flags */
-/* 11AZ Non-Trigger based ranging support */
-#define WLAN_RTT_11AZ_NTB_SUPPORT 0x80000000
-
-/*
- * Feature flags are exhausted. Add EXT feature caps below to extend
- * the feature flags
- */
-/* 11AZ Trigger based ranging support */
-#define WLAN_RTT_11AZ_TB_SUPPORT  0x00000001
-/* 11AZ Secure ranging PASN Support */
-#define WLAN_RTT_11AZ_MAC_SEC_SUPPORT    0x00000002
-/* 11AZ Secure ranging PHY Security support */
-#define WLAN_RTT_11AZ_MAC_PHY_SEC_SUPPORT 0x00000004
-
-/* Roam Frame info stats - per candidate frames support */
-#define WLAN_ROAM_STATS_FRAME_INFO_PER_CANDIDATE  0x00000008
-/* multi client feature flags support */
-#define WLAN_SOC_WLM_MULTI_CLIENT_LL_SUPPORT      0x00000010
 
 /* PSOC op flags */
 
@@ -303,7 +279,6 @@ struct wlan_objmgr_psoc_user_config {
  * @phy_type:        OL/DA type
  * @soc_fw_caps:     FW capabilities
  * @soc_fw_ext_caps: FW ext capabilities
- * @soc_fw_ext2_caps: FW ext2 capabilities
  * @soc_feature_caps:Feature capabilities
  * @soc_op_flags:    Flags to set/reset during operation
  * @soc_hw_macaddr[]:HW MAC address
@@ -314,7 +289,6 @@ struct wlan_objmgr_psoc_nif {
 	WLAN_DEV_TYPE phy_type;
 	uint32_t soc_fw_caps;
 	uint32_t soc_fw_ext_caps;
-	uint32_t soc_fw_ext2_caps;
 	uint32_t soc_feature_caps;
 	uint32_t soc_op_flags;
 	uint8_t soc_hw_macaddr[QDF_MAC_ADDR_SIZE];
@@ -433,7 +407,7 @@ struct wlan_psoc_host_hal_reg_capabilities_ext {
 	uint32_t eeprom_reg_domain_ext;
 	uint32_t regcap1;
 	uint32_t regcap2;
-	uint64_t wireless_modes;
+	uint32_t wireless_modes;
 	uint32_t low_2ghz_chan;
 	uint32_t high_2ghz_chan;
 	uint32_t low_5ghz_chan;
@@ -448,7 +422,7 @@ struct wlan_psoc_host_hal_reg_capabilities_ext {
  */
 struct wlan_psoc_host_hal_reg_capabilities_ext2 {
 	uint32_t phy_id;
-	uint64_t wireless_modes_ext;
+	uint32_t wireless_modes_ext;
 };
 
 /**
@@ -1052,37 +1026,6 @@ struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_id_from_psoc_no_state(
 #endif
 
 /**
- * wlan_objmgr_get_vdev_by_id_from_psoc_not_log_del() - retrieve vdev by id
- * @psoc: PSOC object
- * @id: vdev id
- * @dbg_id: id of the caller
- *
- * API to find vdev object pointer by vdev id from psoc, ignores the
- * state check
- *
- * This API increments the ref count of the vdev object internally, the
- * caller has to invoke the wlan_objmgr_vdev_release_ref() to decrement
- * ref count
- *
- * Return: vdev pointer
- *         NULL on FAILURE
- */
-#ifdef WLAN_OBJMGR_REF_ID_TRACE
-struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_id_from_psoc_not_log_del_debug(
-			struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
-			wlan_objmgr_ref_dbgid dbg_id,
-			const char *func, int line);
-
-#define wlan_objmgr_get_vdev_by_id_from_psoc_not_log_del(psoc, vdev_id, dbgid) \
-		wlan_objmgr_get_vdev_by_id_from_psoc_not_log_del_debug(psoc, \
-		vdev_id, dbgid, __func__, __LINE__)
-#else
-struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_id_from_psoc_not_log_del(
-			struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
-			wlan_objmgr_ref_dbgid dbg_id);
-#endif
-
-/**
  * wlan_objmgr_get_vdev_by_macaddr_from_psoc() - retrieve vdev by macaddr
  * @psoc: PSOC object
  * @pdev_id: Pdev id
@@ -1330,52 +1273,6 @@ static inline uint8_t wlan_psoc_nif_fw_ext_cap_get(
 		struct wlan_objmgr_psoc *psoc, uint32_t ext_cap)
 {
 	return (psoc->soc_nif.soc_fw_ext_caps & ext_cap) ? 1 : 0;
-}
-
-/**
- * wlan_psoc_nif_fw_ext2_cap_set() - set fw ext2 caps
- * @psoc: PSOC object
- * @ext2_cap: capability flag to be set
- *
- * API to set fw ext caps in psoc
- *
- * Return: void
- */
-static inline void wlan_psoc_nif_fw_ext2_cap_set(struct wlan_objmgr_psoc *psoc,
-						 uint32_t ext2_cap)
-{
-	psoc->soc_nif.soc_fw_ext2_caps |= ext2_cap;
-}
-
-/**
- * wlan_psoc_nif_fw_ext2_cap_clear() - clear fw ext2 caps
- * @psoc: PSOC object
- * @ext2_cap: capability flag to be cleared
- *
- * API to clear fw ext caps in psoc
- *
- * Return: void
- */
-static inline void
-wlan_psoc_nif_fw_ext2_cap_clear(struct wlan_objmgr_psoc *psoc,
-				uint32_t ext2_cap)
-{
-	psoc->soc_nif.soc_fw_ext2_caps &= ~ext2_cap;
-}
-
-/**
- * wlan_psoc_nif_fw_ext2_cap_get() - get fw caps
- * @psoc: PSOC object
- * @ext2_cap: capability flag to be checked
- *
- * API to know, whether particular fw caps flag is set in psoc
- *
- * Return: 1 (for set) or 0 (for not set)
- */
-static inline uint8_t
-wlan_psoc_nif_fw_ext2_cap_get(struct wlan_objmgr_psoc *psoc, uint32_t ext2_cap)
-{
-	return (psoc->soc_nif.soc_fw_ext2_caps & ext2_cap) ? 1 : 0;
 }
 
 /**

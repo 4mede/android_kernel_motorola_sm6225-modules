@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -324,7 +323,7 @@ void hif_exec_fill_poll_time_histogram(struct hif_exec_context *hif_ext_group)
 	uint32_t bucket;
 	uint32_t cpu_id = qdf_get_cpu();
 
-	poll_time_ns = qdf_time_sched_clock() - hif_ext_group->poll_start_time;
+	poll_time_ns = sched_clock() - hif_ext_group->poll_start_time;
 	poll_time_us = qdf_do_div(poll_time_ns, 1000);
 
 	napi_stat = &hif_ext_group->stats[cpu_id];
@@ -351,7 +350,7 @@ static bool hif_exec_poll_should_yield(struct hif_exec_context *hif_ext_group)
 	struct hif_softc *scn = HIF_GET_SOFTC(hif_ext_group->hif);
 	struct hif_config_info *cfg = &scn->hif_config;
 
-	poll_time_ns = qdf_time_sched_clock() - hif_ext_group->poll_start_time;
+	poll_time_ns = sched_clock() - hif_ext_group->poll_start_time;
 	time_limit_reached =
 		poll_time_ns > cfg->rx_softirq_max_yield_duration_ns ? 1 : 0;
 
@@ -394,7 +393,7 @@ bool hif_exec_should_yield(struct hif_opaque_softc *hif_ctx, uint grp_id)
 static inline
 void hif_exec_update_service_start_time(struct hif_exec_context *hif_ext_group)
 {
-	hif_ext_group->poll_start_time = qdf_time_sched_clock();
+	hif_ext_group->poll_start_time = sched_clock();
 }
 
 void hif_print_napi_stats(struct hif_opaque_softc *hif_ctx)
@@ -411,7 +410,7 @@ void hif_print_napi_stats(struct hif_opaque_softc *hif_ctx)
 	 */
 	char hist_str[(QCA_NAPI_NUM_BUCKETS * 11) + 1] = {'\0'};
 
-	QDF_TRACE(QDF_MODULE_ID_HIF, QDF_TRACE_LEVEL_INFO_HIGH,
+	QDF_TRACE(QDF_MODULE_ID_HIF, QDF_TRACE_LEVEL_ERROR,
 		  "NAPI[#]CPU[#] |scheds |polls  |comps  |dones  |t-lim  |max(us)|hist(500us buckets)");
 
 	for (i = 0;
@@ -427,7 +426,7 @@ void hif_print_napi_stats(struct hif_opaque_softc *hif_ctx)
 						    hist_str,
 						    sizeof(hist_str));
 			QDF_TRACE(QDF_MODULE_ID_HIF,
-				  QDF_TRACE_LEVEL_INFO_HIGH,
+				  QDF_TRACE_LEVEL_ERROR,
 				  "NAPI[%d]CPU[%d]: %7u %7u %7u %7u %7u %7llu %s",
 				  i, j,
 				  napi_stats->napi_schedules,
@@ -593,20 +592,6 @@ void hif_latency_profile_start(struct hif_exec_context *hif_ext_group)
 #endif
 
 #ifdef FEATURE_NAPI
-#ifdef FEATURE_IRQ_AFFINITY
-static inline int32_t
-hif_is_force_napi_complete_required(struct hif_exec_context *hif_ext_group)
-{
-	return qdf_atomic_inc_not_zero(&hif_ext_group->force_napi_complete);
-}
-#else
-static inline int32_t
-hif_is_force_napi_complete_required(struct hif_exec_context *hif_ext_group)
-{
-	return 0;
-}
-#endif
-
 /**
  * hif_exec_poll() - napi poll
  * napi: napi struct
@@ -642,8 +627,7 @@ static int hif_exec_poll(struct napi_struct *napi, int budget)
 
 	actual_dones = work_done;
 
-	if (hif_is_force_napi_complete_required(hif_ext_group) ||
-	    (!hif_ext_group->force_break && work_done < normalized_budget)) {
+	if (!hif_ext_group->force_break && work_done < normalized_budget) {
 		hif_record_event(hif_ext_group->hif, hif_ext_group->grp_id,
 				 0, 0, 0, HIF_EVENT_BH_COMPLETE);
 		napi_complete(napi);
@@ -981,19 +965,6 @@ void hif_exec_kill(struct hif_opaque_softc *hif_ctx)
 	qdf_atomic_set(&hif_state->ol_sc.active_grp_tasklet_cnt, 0);
 }
 
-#ifdef FEATURE_IRQ_AFFINITY
-static inline void
-hif_init_force_napi_complete(struct hif_exec_context *hif_ext_group)
-{
-	qdf_atomic_init(&hif_ext_group->force_napi_complete);
-}
-#else
-static inline void
-hif_init_force_napi_complete(struct hif_exec_context *hif_ext_group)
-{
-}
-#endif
-
 /**
  * hif_register_ext_group() - API to register external group
  * interrupt handler.
@@ -1047,7 +1018,6 @@ QDF_STATUS hif_register_ext_group(struct hif_opaque_softc *hif_ctx,
 	hif_ext_group->hif = hif_ctx;
 	hif_ext_group->context_name = context_name;
 	hif_ext_group->type = type;
-	hif_init_force_napi_complete(hif_ext_group);
 
 	hif_state->hif_num_extgroup++;
 	return QDF_STATUS_SUCCESS;
@@ -1083,10 +1053,7 @@ struct hif_exec_context *hif_exec_create(enum hif_exec_type type,
  */
 void hif_exec_destroy(struct hif_exec_context *ctx)
 {
-	struct hif_softc *scn = HIF_GET_SOFTC(ctx->hif);
-
-	if (scn->ext_grp_irq_configured)
-		qdf_spinlock_destroy(&ctx->irq_lock);
+	qdf_spinlock_destroy(&ctx->irq_lock);
 	qdf_mem_free(ctx);
 }
 

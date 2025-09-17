@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -154,10 +153,6 @@ struct CE_state {
 	qdf_lro_ctx_t lro_data;
 
 	void (*service)(struct hif_softc *scn, int CE_id);
-#ifdef WLAN_TRACEPOINTS
-	/* CE tasklet sched time in nanoseconds */
-	unsigned long long ce_tasklet_sched_time;
-#endif
 };
 
 /* Descriptor rings must be aligned to this boundary */

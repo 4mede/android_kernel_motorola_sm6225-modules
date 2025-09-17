@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2019, 2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -262,18 +261,6 @@ QDF_STATUS tgt_vdev_mgr_multiple_vdev_restart_send(
 				struct multiple_vdev_restart_params *param);
 
 /**
- * tgt_vdev_mgr_multiple_vdev_set_param() – API to send multiple vdev
- * param
- * @pdev: pointer to pdev
- * @param: pointer to multiple_vdev_set_param
- *
- * Return: QDF_STATUS - Success or Failure
- */
-QDF_STATUS tgt_vdev_mgr_multiple_vdev_set_param(
-				struct wlan_objmgr_pdev *pdev,
-				struct multiple_vdev_set_param *param);
-
-/**
  * tgt_vdev_mgr_set_tx_rx_decap_type() – API to send tx rx decap type
  * @mlme_obj: pointer to vdev mlme obj
  * @param_id: param id
@@ -315,35 +302,4 @@ QDF_STATUS tgt_vdev_mgr_peer_delete_all_send(
 				struct vdev_mlme_obj *mlme_obj,
 				struct peer_delete_all_params *param);
 
-#ifdef WLAN_FEATURE_DYNAMIC_MAC_ADDR_UPDATE
-/**
- * tgt_vdev_mgr_send_set_mac_addr() - Send set MAC address command to FW
- * @mac_addr: VDEV MAC address
- * @mld_addr: VDEV MLD address
- * @vdev: Pointer to object manager VDEV
- *
- * API to send set MAC address request to FW
- *
- * Return: QDF_STATUS
- */
-QDF_STATUS tgt_vdev_mgr_send_set_mac_addr(struct qdf_mac_addr mac_addr,
-					  struct qdf_mac_addr mld_addr,
-					  struct wlan_objmgr_vdev *vdev);
-
-/**
- * tgt_vdev_mgr_cdp_vdev_attach() - API to send CDP VDEV attach
- * @mlme_obj: pointer to vdev_mlme_obj
- *
- * Return: QDF_STATUS - Success or Failure
- */
-QDF_STATUS tgt_vdev_mgr_cdp_vdev_attach(struct vdev_mlme_obj *mlme_obj);
-
-/**
- * tgt_vdev_mgr_cdp_vdev_detach() - API to send CDP VDEV detach
- * @mlme_obj: pointer to vdev_mlme_obj
- *
- * Return: QDF_STATUS - Success or Failure
- */
-QDF_STATUS tgt_vdev_mgr_cdp_vdev_detach(struct vdev_mlme_obj *mlme_obj);
-#endif
 #endif /* __WLAN_VDEV_MGR_TX_OPS_API_H__ */

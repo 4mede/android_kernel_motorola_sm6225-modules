@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -56,7 +56,9 @@
 #include <pktlog.h>
 #endif
 
-//#include "dp_tx.h"
+#ifdef WLAN_TX_PKT_CAPTURE_ENH
+#include "dp_tx_capture.h"
+#endif
 
 #define REPT_MU_MIMO 1
 #define REPT_MU_OFDMA_MIMO 3
@@ -74,7 +76,10 @@
 #define DP_VDEV_ALL 0xff
 
 #if defined(WLAN_MAX_PDEVS) && (WLAN_MAX_PDEVS == 1)
+#define MAX_PDEV_CNT 1
 #define WLAN_DP_RESET_MON_BUF_RING_FILTER
+#else
+#define MAX_PDEV_CNT 3
 #endif
 
 /* Max no. of VDEV per PSOC */
@@ -91,21 +96,14 @@
 #define DP_PDEV_MAX_VDEVS 17
 #endif
 
-#define MAX_TXDESC_POOLS 6
+#define MAX_TXDESC_POOLS 4
 #define MAX_RXDESC_POOLS 4
-
+#define MAX_REO_DEST_RINGS 4
 #define EXCEPTION_DEST_RING_ID 0
+#define MAX_TCL_DATA_RINGS 4
 #define MAX_IDLE_SCATTER_BUFS 16
 #define DP_MAX_IRQ_PER_CONTEXT 12
 #define DEFAULT_HW_PEER_ID 0xffff
-
-#define MAX_AST_AGEOUT_COUNT 128
-
-#ifdef TX_ADDR_INDEX_SEARCH
-#define DP_TX_ADDR_SEARCH_ADDR_POLICY HAL_TX_ADDR_INDEX_SEARCH
-#else
-#define DP_TX_ADDR_SEARCH_ADDR_POLICY HAL_TX_ADDR_SEARCH_DEFAULT
-#endif
 
 #define WBM_INT_ERROR_ALL 0
 #define WBM_INT_ERROR_REO_NULL_BUFFER 1
@@ -118,24 +116,10 @@
 /* Maximum retries for Delba per tid per peer */
 #define DP_MAX_DELBA_RETRY 3
 
-#ifdef AST_OFFLOAD_ENABLE
-#define AST_OFFLOAD_ENABLE_STATUS 1
-#else
-#define AST_OFFLOAD_ENABLE_STATUS 0
-#endif
-
-#ifdef FEATURE_MEC_OFFLOAD
-#define FW_MEC_FW_OFFLOAD_ENABLED 1
-#else
-#define FW_MEC_FW_OFFLOAD_ENABLED 0
-#endif
-
 #define PCP_TID_MAP_MAX 8
 #define MAX_MU_USERS 37
 
 #define REO_CMD_EVENT_HIST_MAX 64
-
-#define DP_MAX_SRNGS 64
 
 /* 2G PHYB */
 #define PHYB_2G_LMAC_ID 2
@@ -145,7 +129,6 @@
 #define DP_TX_HW_DSCP_TID_MAP_VALID 0x1
 #define DP_TXRX_HLOS_TID_OVERRIDE_ENABLED 0x2
 #define DP_TX_MESH_ENABLED 0x4
-#define DP_TX_INVALID_QOS_TAG 0xf
 
 #ifdef WLAN_SUPPORT_RX_FISA
 #define FISA_FLOW_MAX_AGGR_COUNT        16 /* max flow aggregate count */
@@ -156,13 +139,6 @@
 #define DP_RX_REFILL_BUFF_POOL_BURST 64
 #define DP_RX_REFILL_THRD_THRESHOLD  512
 #endif
-
-#ifdef WLAN_VENDOR_SPECIFIC_BAR_UPDATE
-#define DP_SKIP_BAR_UPDATE_TIMEOUT 5000
-#endif
-
-#define DP_TX_MAGIC_PATTERN_INUSE	0xABCD1234
-#define DP_TX_MAGIC_PATTERN_FREE	0xDEADBEEF
 
 enum rx_pktlog_mode {
 	DP_RX_PKTLOG_DISABLED = 0,
@@ -182,7 +158,7 @@ enum m_copy_mode {
 struct msdu_list {
 	qdf_nbuf_t head;
 	qdf_nbuf_t tail;
-	uint32_t sum_len;
+	uint32 sum_len;
 };
 
 struct dp_soc_cmn;
@@ -196,9 +172,6 @@ struct cdp_soc_rate_stats_ctx;
 struct dp_rx_fst;
 struct dp_mon_filter;
 struct dp_mon_mpdu;
-#ifdef QCA_WIFI_QCN9224
-struct dp_mon_filter_be;
-#endif
 
 /**
  * enum for DP peer state
@@ -437,7 +410,6 @@ enum dp_ctxt_type {
  * @DP_RX_DESC_BUF_TYPE: DP RX SW descriptor
  * @DP_RX_DESC_STATUS_TYPE: DP RX SW descriptor for monitor status
  * @DP_HW_LINK_DESC_TYPE: DP HW link descriptor
- * @DP_HW_CC_SPT_PAGE_TYPE: DP pages for HW CC secondary page table
  */
 enum dp_desc_type {
 	DP_TX_DESC_TYPE,
@@ -448,7 +420,6 @@ enum dp_desc_type {
 	DP_RX_DESC_BUF_TYPE,
 	DP_RX_DESC_STATUS_TYPE,
 	DP_HW_LINK_DESC_TYPE,
-	DP_HW_CC_SPT_PAGE_TYPE,
 };
 
 /**
@@ -488,19 +459,12 @@ struct rx_desc_pool {
  * @vaddr: hlos virtual address pointer
  * @paddr: physical address pointer for descriptor
  * @flags: mark features for extension descriptor
- * @me_buffer: Pointer to ME buffer - store this so that it can be freed on
- *		Tx completion of ME packet
- * @tso_desc: Pointer to Tso desc
- * @tso_num_desc: Pointer to tso_num_desc
  */
 struct dp_tx_ext_desc_elem_s {
 	struct dp_tx_ext_desc_elem_s *next;
 	void *vaddr;
 	qdf_dma_addr_t paddr;
 	uint16_t flags;
-	struct dp_tx_me_buf_t *me_buffer;
-	struct qdf_tso_seg_elem_t *tso_desc;
-	struct qdf_tso_num_seg_elem_t *tso_num_desc;
 };
 
 /**
@@ -540,19 +504,17 @@ struct dp_tx_ext_desc_pool_s {
  * @tx_encap_type: Transmit encap type (i.e. Raw, Native Wi-Fi, Ethernet).
  * 		   This is maintained in descriptor to allow more efficient
  * 		   processing in completion event processing code.
- * 		   This field is filled in with the htt_pkt_type enum.
- * @buffer_src: buffer source TQM, REO, FW etc.
+ * 		    This field is filled in with the htt_pkt_type enum.
  * @frm_type: Frame Type - ToDo check if this is redundant
  * @pkt_offset: Offset from which the actual packet data starts
+ * @me_buffer: Pointer to ME buffer - store this so that it can be freed on
+ *		Tx completion of ME packet
  * @pool: handle to flow_pool this descriptor belongs to.
  */
 struct dp_tx_desc_s {
 	struct dp_tx_desc_s *next;
 	qdf_nbuf_t nbuf;
 	uint16_t length;
-#ifdef DP_TX_TRACKING
-	uint32_t magic;
-#endif
 	uint16_t flags;
 	uint32_t id;
 	qdf_dma_addr_t dma_addr;
@@ -560,13 +522,14 @@ struct dp_tx_desc_s {
 	uint8_t tx_status;
 	uint16_t peer_id;
 	struct dp_pdev *pdev;
-	uint8_t tx_encap_type:2,
-		buffer_src:3,
-		reserved:3;
+	uint8_t tx_encap_type;
 	uint8_t frm_type;
 	uint8_t pkt_offset;
 	uint8_t  pool_id;
 	struct dp_tx_ext_desc_elem_s *msdu_ext_desc;
+	void *me_buffer;
+	void *tso_desc;
+	void *tso_num_desc;
 	uint64_t timestamp;
 	struct hal_tx_desc_comp_s comp;
 };
@@ -718,10 +681,6 @@ struct dp_txrx_pool_stats {
  * @cached: is the srng ring memory cached or un-cached memory
  * @irq: irq number of the srng ring
  * @num_entries: number of entries in the srng ring
- * @is_mem_prealloc: Is this srng memeory pre-allocated
- * @crit_thresh: Critical threshold for near-full processing of this srng
- * @safe_thresh: Safe threshold for near-full processing of this srng
- * @near_full: Flag to indicate srng is near-full
  */
 struct dp_srng {
 	hal_ring_handle_t hal_srng;
@@ -735,11 +694,6 @@ struct dp_srng {
 	uint32_t num_entries;
 #ifdef DP_MEM_PRE_ALLOC
 	uint8_t is_mem_prealloc;
-#endif
-#ifdef WLAN_FEATURE_NEAR_FULL_IRQ
-	uint16_t crit_thresh;
-	uint16_t safe_thresh;
-	qdf_atomic_t near_full;
 #endif
 };
 
@@ -846,9 +800,6 @@ struct dp_rx_tid {
 
 	/* Peer TID statistics */
 	struct cdp_peer_tid_stats stats;
-
-	/* defrag usage only, dp_peer pointer related with this tid */
-	struct dp_peer *defrag_peer;
 };
 
 /**
@@ -861,16 +812,8 @@ struct dp_rx_tid {
  * @num_reo_status_ring_masks: interrupts with reo_status_ring_mask set
  * @num_rxdma2host_ring_masks: interrupts with rxdma2host_ring_mask set
  * @num_host2rxdma_ring_masks: interrupts with host2rxdma_ring_mask set
- * @num_rx_ring_near_full_masks: Near-full interrupts for REO DST ring
- * @num_tx_comp_ring_near_full_masks: Near-full interrupts for TX completion
- * @num_rx_wbm_rel_ring_near_full_masks: total number of times the wbm rel ring
- *                                       near full interrupt was received
- * @num_reo_status_ring_near_full_masks: total number of times the reo status
- *                                       near full interrupt was received
- * @num_near_full_masks: total number of times the near full interrupt
- *                       was received
+ * @num_host2rxdma_ring_masks: interrupts with host2rxdma_ring_mask set
  * @num_masks: total number of times the interrupt was received
- * @num_tx_mon_ring_masks: interrupts with num_tx_mon_ring_masks set
  *
  * Counter for individual masks are incremented only if there are any packets
  * on that ring.
@@ -884,13 +827,7 @@ struct dp_intr_stats {
 	uint32_t num_reo_status_ring_masks;
 	uint32_t num_rxdma2host_ring_masks;
 	uint32_t num_host2rxdma_ring_masks;
-	uint32_t num_rx_ring_near_full_masks[MAX_REO_DEST_RINGS];
-	uint32_t num_tx_comp_ring_near_full_masks[MAX_TCL_DATA_RINGS];
-	uint32_t num_rx_wbm_rel_ring_near_full_masks;
-	uint32_t num_reo_status_ring_near_full_masks;
-	uint32_t num_near_full_masks;
 	uint32_t num_masks;
-	uint32_t num_tx_mon_ring_masks;
 };
 
 /* per interrupt context  */
@@ -900,7 +837,6 @@ struct dp_intr {
 	uint8_t rx_ring_mask;   /* Rx REO rings (0-3) associated
 				with this interrupt context */
 	uint8_t rx_mon_ring_mask;  /* Rx monitor ring mask (0-2) */
-	uint8_t tx_mon_ring_mask;  /* Tx monitor ring mask (0-2) */
 	uint8_t rx_err_ring_mask; /* REO Exception Ring */
 	uint8_t rx_wbm_rel_ring_mask; /* WBM2SW Rx Release Ring */
 	uint8_t reo_status_ring_mask; /* REO command response ring */
@@ -908,12 +844,6 @@ struct dp_intr {
 	uint8_t host2rxdma_ring_mask; /* Host to RXDMA buffer ring */
 	/* Host to RXDMA monitor  buffer ring */
 	uint8_t host2rxdma_mon_ring_mask;
-	/* RX REO rings near full interrupt mask */
-	uint8_t rx_near_full_grp_1_mask;
-	/* RX REO rings near full interrupt mask */
-	uint8_t rx_near_full_grp_2_mask;
-	/* WBM TX completion rings near full interrupt mask */
-	uint8_t tx_ring_near_full_mask;
 	struct dp_soc *soc;    /* Reference to SoC structure ,
 				to get DMA ring handles */
 	qdf_lro_ctx_t lro_ctx;
@@ -986,17 +916,10 @@ struct dp_soc_stats {
 		uint32_t ast_mismatch;
 	} ast;
 
-	struct {
-		uint32_t added;
-		uint32_t deleted;
-	} mec;
-
 	/* SOC level TX stats */
 	struct {
 		/* Total packets transmitted */
-		struct cdp_pkt_info egress[MAX_TCL_DATA_RINGS];
-		/* Enqueues per tcl ring */
-		uint32_t tcl_enq[MAX_TCL_DATA_RINGS];
+		struct cdp_pkt_info egress;
 		/* packets dropped on tx because of no peer */
 		struct cdp_pkt_info tx_invalid_peer;
 		/* descriptors in each tcl ring */
@@ -1017,14 +940,6 @@ struct dp_soc_stats {
 		uint32_t hp_oos2;
 		/* tx desc freed as part of vdev detach */
 		uint32_t tx_comp_exception;
-		/* TQM drops after/during peer delete */
-		uint64_t tqm_drop_no_peer;
-		/* Number of tx completions reaped per WBM2SW release ring */
-		uint32_t tx_comp[MAX_TCL_DATA_RINGS];
-		/* Number of tx completions force freed */
-		uint32_t tx_comp_force_freed;
-		/* Tx completion ring near full */
-		uint32_t near_full;
 	} tx;
 
 	/* SOC level RX stats */
@@ -1147,20 +1062,16 @@ struct dp_soc_stats {
 			uint32_t nbuf_sanity_fail;
 			/* Duplicate link desc refilled */
 			uint32_t dup_refill_link_desc;
-			/* Incorrect msdu continuation bit in MSDU desc */
-			uint32_t msdu_continuation_err;
 			/* count of start sequence (ssn) updates */
 			uint32_t ssn_update_count;
 			/* count of bar handling fail */
 			uint32_t bar_handle_fail_count;
 			/* EAPOL drop count in intrabss scenario */
 			uint32_t intrabss_eapol_drop;
-			/* PN check failed for 2K-jump or OOR error */
-			uint32_t pn_in_dest_check_fail;
+			/* Non Eapol pkt drop cnt due to peer not authorized */
+			uint32_t peer_unauth_rx_pkt_drop;
 			/* MSDU len err count */
 			uint32_t msdu_len_err;
-			/* Rx flush count */
-			uint32_t rx_flush_count;
 			/* Rx invalid tid count */
 			uint32_t rx_invalid_tid_err;
 		} err;
@@ -1251,25 +1162,6 @@ struct dp_ast_entry {
 	TAILQ_ENTRY(dp_ast_entry) hash_list_elem;
 };
 
-/*
- * dp_mec_entry
- *
- * @mac_addr:  MAC Address for this MEC entry
- * @is_active: flag to indicate active data traffic on this node
- *             (used for aging out/expiry)
- * @pdev_id: pdev ID
- * @vdev_id: vdev ID
- * @hash_list_elem: node in soc MEC hash list (mac address used as hash)
- */
-struct dp_mec_entry {
-	union dp_align_mac_addr mac_addr;
-	bool is_active;
-	uint8_t pdev_id;
-	uint8_t vdev_id;
-
-	TAILQ_ENTRY(dp_mec_entry) hash_list_elem;
-};
-
 /* SOC level htt stats */
 struct htt_t2h_stats {
 	/* lock to protect htt_stats_msg update */
@@ -1334,7 +1226,7 @@ struct dp_tx_hw_desc_history {
  * value being power of 2.
  */
 #define DP_RX_HIST_MAX 2048
-#define DP_RX_ERR_HIST_MAX 2048
+#define DP_RX_ERR_HIST_MAX 4096
 #define DP_RX_REINJECT_HIST_MAX 1024
 #define DP_RX_REFILL_HIST_MAX 2048
 
@@ -1467,8 +1359,6 @@ struct dp_last_op_info {
  * @nbuf: TX packet
  * @tid: tid for transmitting the current packet
  * @num_ll_connections: Number of low latency connections on this vdev
- * @ring_id: TCL ring id
- * @pkt_len: Packet length
  *
  * This structure contains the information required by the software
  * latency manager to decide on whether to coalesce the current TCL
@@ -1478,8 +1368,6 @@ struct dp_swlm_tcl_data {
 	qdf_nbuf_t nbuf;
 	uint8_t tid;
 	uint8_t num_ll_connections;
-	uint8_t ring_id;
-	uint32_t pkt_len;
 };
 
 /**
@@ -1531,65 +1419,43 @@ struct dp_swlm_stats {
 		uint32_t tput_criteria_fail;
 		uint32_t coalesce_success;
 		uint32_t coalesce_fail;
-	} tcl[MAX_TCL_DATA_RINGS];
-};
-
-/**
- * struct dp_swlm_tcl_params: Parameters based on TCL for different modules
- *			      in the Software latency manager.
- * @soc: DP soc reference
- * @ring_id: TCL ring id
- * @flush_timer: Timer for flushing the coalesced TCL HP writes
- * @sampling_session_tx_bytes: Num bytes transmitted in the sampling time
- * @bytes_flush_thresh: Bytes threshold to flush the TCL HP register write
- * @coalesce_end_time: End timestamp for current coalescing session
- * @bytes_coalesced: Num bytes coalesced in the current session
- * @prev_tx_packets: Previous TX packets accounted
- * @prev_tx_bytes: Previous TX bytes accounted
- * @prev_rx_bytes: Previous RX bytes accounted
- * @expire_time: expiry time for sample
- * @tput_pass_cnt: threshold throughput pass counter
- */
-struct dp_swlm_tcl_params {
-	struct dp_soc *soc;
-	uint32_t ring_id;
-	qdf_timer_t flush_timer;
-	uint32_t sampling_session_tx_bytes;
-	uint32_t bytes_flush_thresh;
-	uint64_t coalesce_end_time;
-	uint32_t bytes_coalesced;
-	uint32_t prev_tx_packets;
-	uint32_t prev_tx_bytes;
-	uint32_t prev_rx_bytes;
-	uint64_t expire_time;
-	uint32_t tput_pass_cnt;
+	} tcl;
 };
 
 /**
  * struct dp_swlm_params: Parameters for different modules in the
  *			  Software latency manager.
- * @rx_traffic_thresh: Threshold for RX traffic, to begin TCL register
+ * @tcl.flush_timer: Timer for flushing the coalesced TCL HP writes
+ * @tcl.rx_traffic_thresh: Threshold for RX traffic, to begin TCL register
  *			   write coalescing
- * @tx_traffic_thresh: Threshold for TX traffic, to begin TCL register
+ * @tcl.tx_traffic_thresh: Threshold for TX traffic, to begin TCL register
  *			   write coalescing
- * @sampling_time: Sampling time to test the throughput threshold
- * @time_flush_thresh: Time threshold to flush the TCL HP register write
- * @tx_thresh_multiplier: Multiplier to deduce the bytes threshold after
+ * @tcl.sampling_time: Sampling time to test the throughput threshold
+ * @tcl.sampling_session_tx_bytes: Num bytes transmitted in the sampling time
+ * @tcl.bytes_flush_thresh: Bytes threshold to flush the TCL HP register write
+ * @tcl.time_flush_thresh: Time threshold to flush the TCL HP register write
+ * @tcl.tx_thresh_multiplier: Multiplier to deduce the bytes threshold after
  *			      which the TCL HP register is written, thereby
  *			      ending the coalescing.
- * @tx_pkt_thresh: Threshold for TX packet count, to begin TCL register
+ * @tcl.coalesce_end_time: End timestamp for current coalescing session
+ * @tcl.bytes_coalesced: Num bytes coalesced in the current session
+ * @tcl.tx_pkt_thresh: Threshold for TX packet count, to begin TCL register
  *		       write coalescing
- * @tcl: TCL ring specific params
  */
-
 struct dp_swlm_params {
-	uint32_t rx_traffic_thresh;
-	uint32_t tx_traffic_thresh;
-	uint32_t sampling_time;
-	uint32_t time_flush_thresh;
-	uint32_t tx_thresh_multiplier;
-	uint32_t tx_pkt_thresh;
-	struct dp_swlm_tcl_params tcl[MAX_TCL_DATA_RINGS];
+	struct {
+		qdf_timer_t flush_timer;
+		uint32_t rx_traffic_thresh;
+		uint32_t tx_traffic_thresh;
+		uint32_t sampling_time;
+		uint32_t sampling_session_tx_bytes;
+		uint32_t bytes_flush_thresh;
+		uint32_t time_flush_thresh;
+		uint32_t tx_thresh_multiplier;
+		uint64_t coalesce_end_time;
+		uint32_t bytes_coalesced;
+		uint32_t tx_pkt_thresh;
+	} tcl;
 };
 
 /**
@@ -1607,212 +1473,6 @@ struct dp_swlm {
 		is_init:1;
 	struct dp_swlm_stats stats;
 	struct dp_swlm_params params;
-};
-#endif
-
-#ifdef IPA_OFFLOAD
-/* IPA uC datapath offload Wlan Tx resources */
-struct ipa_dp_tx_rsc {
-	/* Resource info to be passed to IPA */
-	qdf_dma_addr_t ipa_tcl_ring_base_paddr;
-	void *ipa_tcl_ring_base_vaddr;
-	uint32_t ipa_tcl_ring_size;
-	qdf_dma_addr_t ipa_tcl_hp_paddr;
-	uint32_t alloc_tx_buf_cnt;
-
-	qdf_dma_addr_t ipa_wbm_ring_base_paddr;
-	void *ipa_wbm_ring_base_vaddr;
-	uint32_t ipa_wbm_ring_size;
-	qdf_dma_addr_t ipa_wbm_tp_paddr;
-	/* WBM2SW HP shadow paddr */
-	qdf_dma_addr_t ipa_wbm_hp_shadow_paddr;
-
-	/* TX buffers populated into the WBM ring */
-	void **tx_buf_pool_vaddr_unaligned;
-	qdf_dma_addr_t *tx_buf_pool_paddr_unaligned;
-};
-#endif
-
-struct dp_tx_msdu_info_s;
-/*
- * enum dp_context_type- DP Context Type
- * @DP_CONTEXT_TYPE_SOC: Context type DP SOC
- * @DP_CONTEXT_TYPE_PDEV: Context type DP PDEV
- * @DP_CONTEXT_TYPE_VDEV: Context type DP VDEV
- * @DP_CONTEXT_TYPE_PEER: Context type DP PEER
- *
- * Helper enums to be used to retrieve the size of the corresponding
- * data structure by passing the type.
- */
-enum dp_context_type {
-	DP_CONTEXT_TYPE_SOC,
-	DP_CONTEXT_TYPE_PDEV,
-	DP_CONTEXT_TYPE_VDEV,
-	DP_CONTEXT_TYPE_PEER
-};
-
-/*
- * struct dp_arch_ops- DP target specific arch ops
- * @DP_CONTEXT_TYPE_SOC: Context type DP SOC
- * @DP_CONTEXT_TYPE_PDEV: Context type DP PDEV
- * @tx_hw_enqueue: enqueue TX data to HW
- * @tx_comp_get_params_from_hal_desc: get software tx descriptor and release
- * 				      source from HAL desc for wbm release ring
- * @dp_service_near_full_srngs: Handler for servicing the near full IRQ
- * @txrx_set_vdev_param: target specific ops while setting vdev params
- * @dp_srng_test_and_update_nf_params: Check if the srng is in near full state
- *				and set the near-full params.
- */
-struct dp_arch_ops {
-	/* INIT/DEINIT Arch Ops */
-	QDF_STATUS (*txrx_soc_attach)(struct dp_soc *soc,
-				      struct cdp_soc_attach_params *params);
-	QDF_STATUS (*txrx_soc_detach)(struct dp_soc *soc);
-	QDF_STATUS (*txrx_soc_init)(struct dp_soc *soc);
-	QDF_STATUS (*txrx_soc_deinit)(struct dp_soc *soc);
-	QDF_STATUS (*txrx_soc_srng_alloc)(struct dp_soc *soc);
-	QDF_STATUS (*txrx_soc_srng_init)(struct dp_soc *soc);
-	void (*txrx_soc_srng_deinit)(struct dp_soc *soc);
-	void (*txrx_soc_srng_free)(struct dp_soc *soc);
-	QDF_STATUS (*txrx_pdev_attach)(struct dp_pdev *pdev,
-				       struct cdp_pdev_attach_params *params);
-	QDF_STATUS (*txrx_pdev_detach)(struct dp_pdev *pdev);
-	QDF_STATUS (*txrx_vdev_attach)(struct dp_soc *soc,
-				       struct dp_vdev *vdev);
-	QDF_STATUS (*txrx_vdev_detach)(struct dp_soc *soc,
-				       struct dp_vdev *vdev);
-	QDF_STATUS (*txrx_peer_map_attach)(struct dp_soc *soc);
-	void (*txrx_peer_map_detach)(struct dp_soc *soc);
-	QDF_STATUS (*dp_rxdma_ring_sel_cfg)(struct dp_soc *soc);
-	void (*soc_cfg_attach)(struct dp_soc *soc);
-	void (*peer_get_reo_hash)(struct dp_vdev *vdev,
-				  struct cdp_peer_setup_info *setup_info,
-				  enum cdp_host_reo_dest_ring *reo_dest,
-				  bool *hash_based,
-				  uint8_t *lmac_peer_id_msb);
-	bool (*reo_remap_config)(struct dp_soc *soc, uint32_t *remap0,
-				 uint32_t *remap1, uint32_t *remap2);
-
-	/* TX RX Arch Ops */
-	QDF_STATUS (*tx_hw_enqueue)(struct dp_soc *soc, struct dp_vdev *vdev,
-				    struct dp_tx_desc_s *tx_desc,
-				    uint16_t fw_metadata,
-				    struct cdp_tx_exception_metadata *metadata,
-				    struct dp_tx_msdu_info_s *msdu_info);
-
-	 void (*tx_comp_get_params_from_hal_desc)(struct dp_soc *soc,
-						  void *tx_comp_hal_desc,
-						  struct dp_tx_desc_s **desc);
-	void (*dp_tx_process_htt_completion)(struct dp_soc *soc,
-					     struct dp_tx_desc_s *tx_desc,
-					     uint8_t *status,
-					     uint8_t ring_id);
-	uint32_t (*dp_rx_process)(struct dp_intr *int_ctx,
-				  hal_ring_handle_t hal_ring_hdl,
-				  uint8_t reo_ring_num, uint32_t quota);
-
-	QDF_STATUS (*dp_tx_desc_pool_init)(struct dp_soc *soc,
-					   uint16_t num_elem,
-					   uint8_t pool_id);
-	void (*dp_tx_desc_pool_deinit)(
-				struct dp_soc *soc,
-				struct dp_tx_desc_pool_s *tx_desc_pool,
-				uint8_t pool_id);
-
-	QDF_STATUS (*dp_rx_desc_pool_init)(struct dp_soc *soc,
-					   struct rx_desc_pool *rx_desc_pool,
-					   uint32_t pool_id);
-	void (*dp_rx_desc_pool_deinit)(struct dp_soc *soc,
-				       struct rx_desc_pool *rx_desc_pool,
-				       uint32_t pool_id);
-
-	QDF_STATUS (*dp_wbm_get_rx_desc_from_hal_desc)(
-						struct dp_soc *soc,
-						void *ring_desc,
-						struct dp_rx_desc **r_rx_desc);
-
-	struct dp_rx_desc *(*dp_rx_desc_cookie_2_va)(struct dp_soc *soc,
-						     uint32_t cookie);
-	uint32_t (*dp_service_near_full_srngs)(struct dp_soc *soc,
-					       struct dp_intr *int_ctx,
-					       uint32_t dp_budget);
-	void (*tx_implicit_rbm_set)(struct dp_soc *soc, uint8_t tx_ring_id,
-				    uint8_t bm_id);
-	uint16_t (*dp_rx_peer_metadata_peer_id_get)(struct dp_soc *soc,
-						    uint32_t peer_metadata);
-
-	/* Control Arch Ops */
-	QDF_STATUS (*txrx_set_vdev_param)(struct dp_soc *soc,
-					  struct dp_vdev *vdev,
-					  enum cdp_vdev_param_type param,
-					  cdp_config_param_type val);
-
-	/* Misc Arch Ops */
-	qdf_size_t (*txrx_get_context_size)(enum dp_context_type);
-	int (*dp_srng_test_and_update_nf_params)(struct dp_soc *soc,
-						 struct dp_srng *dp_srng,
-						 int *max_reap_limit);
-
-	/* MLO ops */
-#ifdef WLAN_FEATURE_11BE_MLO
-	void (*mlo_peer_find_hash_detach)(struct dp_soc *soc);
-	QDF_STATUS (*mlo_peer_find_hash_attach)(struct dp_soc *soc);
-	void (*mlo_peer_find_hash_add)(struct dp_soc *soc,
-				       struct dp_peer *peer);
-	void (*mlo_peer_find_hash_remove)(struct dp_soc *soc,
-					  struct dp_peer *peer);
-	struct dp_peer *(*mlo_peer_find_hash_find)(struct dp_soc *soc,
-						   uint8_t *peer_mac_addr,
-						   int mac_addr_is_aligned,
-						   enum dp_mod_id mod_id);
-#endif
-};
-
-/**
- * struct dp_soc_features: Data structure holding the SOC level feature flags.
- * @pn_in_reo_dest: PN provided by hardware in the REO destination ring.
- * @dmac_cmn_src_rxbuf_ring_enabled: Flag to indicate DMAC mode common Rx
- *				     buffer source rings
- */
-struct dp_soc_features {
-	uint8_t pn_in_reo_dest:1,
-		dmac_cmn_src_rxbuf_ring_enabled:1;
-};
-
-enum sysfs_printing_mode {
-	PRINTING_MODE_DISABLED = 0,
-	PRINTING_MODE_ENABLED
-};
-
-#ifdef WLAN_SYSFS_DP_STATS
-/**
- * struct sysfs_stats_config: Data structure holding stats sysfs config.
- * @rw_stats_lock: Lock to read and write to stat_type and pdev_id.
- * @sysfs_read_lock: Lock held while another stat req is being executed.
- * @sysfs_write_user_buffer: Lock to change buff len, max buf len
- * and *buf.
- * @sysfs_txrx_fw_request_done: Event to wait for firmware response.
- * @stat_type_requested: stat type requested.
- * @mac_id: mac id for which stat type are requested.
- * @printing_mode: Should a print go through.
- * @process_id: Process allowed to write to buffer.
- * @curr_buffer_length: Curr length of buffer written
- * @max_buffer_length: Max buffer length.
- * @buf: Sysfs buffer.
- */
-struct sysfs_stats_config {
-	/* lock held to read stats */
-	qdf_spinlock_t rw_stats_lock;
-	qdf_mutex_t sysfs_read_lock;
-	qdf_spinlock_t sysfs_write_user_buffer;
-	qdf_event_t sysfs_txrx_fw_request_done;
-	uint32_t stat_type_requested;
-	uint32_t mac_id;
-	enum sysfs_printing_mode printing_mode;
-	int process_id;
-	uint16_t curr_buffer_length;
-	uint16_t max_buffer_length;
-	char *buf;
 };
 #endif
 
@@ -1878,13 +1538,6 @@ struct dp_soc {
 	/* HAL SOC handle */
 	hal_soc_handle_t hal_soc;
 
-	/* rx monitor pkt tlv size */
-	uint16_t rx_mon_pkt_tlv_size;
-	/* rx pkt tlv size */
-	uint16_t rx_pkt_tlv_size;
-
-	struct dp_arch_ops arch_ops;
-
 	/* Device ID coming from Bus sub-system */
 	uint32_t device_id;
 
@@ -1893,6 +1546,17 @@ struct dp_soc {
 
 	/* total link descriptors for regular RX and TX */
 	uint32_t total_link_descs;
+
+	/* monitor link descriptor pages */
+	struct qdf_mem_multi_page_t mon_link_desc_pages[MAX_NUM_LMAC_HW];
+
+	/* total link descriptors for monitor mode for each radio */
+	uint32_t total_mon_link_descs[MAX_NUM_LMAC_HW];
+
+	/* Monitor Link descriptor memory banks */
+	struct link_desc_bank
+		mon_link_desc_banks[MAX_NUM_LMAC_HW][MAX_MON_LINK_DESC_BANKS];
+	uint32_t num_mon_link_desc_banks[MAX_NUM_LMAC_HW];
 
 	/* Link descriptor Idle list for HW internal use (SRNG mode) */
 	struct dp_srng wbm_idle_link_ring;
@@ -1940,8 +1604,6 @@ struct dp_soc {
 	uint8_t num_tcl_data_rings;
 
 	/* TCL CMD_CREDIT ring */
-	bool init_tcl_cmd_cred_ring;
-
 	/* It is used as credit based ring on QCN9000 else command ring */
 	struct dp_srng tcl_cmd_credit_ring;
 
@@ -2043,22 +1705,12 @@ struct dp_soc {
 	/* Protect peer_id_to_objmap */
 	DP_MUTEX_TYPE peer_map_lock;
 
-	/* maximum number of suppoerted peers */
-	uint32_t max_peers;
 	/* maximum value for peer_id */
-	uint32_t max_peer_id;
-
-#ifdef DP_USE_REDUCED_PEER_ID_FIELD_WIDTH
-	uint32_t peer_id_shift;
-	uint32_t peer_id_mask;
-#endif
+	uint32_t max_peers;
 
 	/* SoC level data path statistics */
 	struct dp_soc_stats stats;
-#ifdef WLAN_SYSFS_DP_STATS
-	/* sysfs config for DP stats */
-	struct sysfs_stats_config *sysfs_config;
-#endif
+
 	/* timestamp to keep track of msdu buffers received on reo err ring */
 	uint64_t rx_route_err_start_pkt_ts;
 
@@ -2097,17 +1749,17 @@ struct dp_soc {
 
 	/*Timer counter for WDS AST entry ageout*/
 	uint8_t wds_ast_aging_timer_cnt;
-	bool pending_ageout;
-	bool ast_offload_support;
-	uint32_t max_ast_ageout_count;
-	uint8_t eapol_over_control_port;
 
-	uint8_t sta_mode_search_policy;
+	/*interrupt timer*/
+	qdf_timer_t mon_reap_timer;
+	uint8_t reap_timer_init;
 	qdf_timer_t lmac_reap_timer;
 	uint8_t lmac_timer_init;
 	qdf_timer_t int_timer;
 	uint8_t intr_mode;
 	uint8_t lmac_polled_mode;
+	qdf_timer_t mon_vdev_timer;
+	uint8_t mon_vdev_timer_state;
 
 	qdf_list_t reo_desc_freelist;
 	qdf_spinlock_t reo_desc_freelist_lock;
@@ -2117,11 +1769,26 @@ struct dp_soc {
 
 	void *external_txrx_handle; /* External data path handle */
 #ifdef IPA_OFFLOAD
-	struct ipa_dp_tx_rsc ipa_uc_tx_rsc;
-#ifdef IPA_WDI3_TX_TWO_PIPES
-	/* Resources for the alternative IPA TX pipe */
-	struct ipa_dp_tx_rsc ipa_uc_tx_rsc_alt;
-#endif
+	/* IPA uC datapath offload Wlan Tx resources */
+	struct {
+		/* Resource info to be passed to IPA */
+		qdf_dma_addr_t ipa_tcl_ring_base_paddr;
+		void *ipa_tcl_ring_base_vaddr;
+		uint32_t ipa_tcl_ring_size;
+		qdf_dma_addr_t ipa_tcl_hp_paddr;
+		uint32_t alloc_tx_buf_cnt;
+
+		qdf_dma_addr_t ipa_wbm_ring_base_paddr;
+		void *ipa_wbm_ring_base_vaddr;
+		uint32_t ipa_wbm_ring_size;
+		qdf_dma_addr_t ipa_wbm_tp_paddr;
+		/* WBM2SW HP shadow paddr */
+		qdf_dma_addr_t ipa_wbm_hp_shadow_paddr;
+
+		/* TX buffers populated into the WBM ring */
+		void **tx_buf_pool_vaddr_unaligned;
+		qdf_dma_addr_t *tx_buf_pool_paddr_unaligned;
+	} ipa_uc_tx_rsc;
 
 	/* IPA uC datapath offload Wlan Rx resources */
 	struct {
@@ -2155,8 +1822,10 @@ struct dp_soc {
 	bool is_last_stats_ctx_init;
 #endif /* WLAN_FEATURE_STATS_EXT */
 
-	/* Indicates HTT map/unmap versions*/
-	uint8_t peer_map_unmap_versions;
+	/* Smart monitor capability for HKv2 */
+	uint8_t hw_nac_monitor_support;
+	/* Flag to indicate if HTT v2 is enabled*/
+	bool is_peer_map_unmap_v2;
 	/* Per peer per Tid ba window size support */
 	uint8_t per_tid_basize_max_tid;
 	/* Soc level flag to enable da_war */
@@ -2207,6 +1876,8 @@ struct dp_soc {
 	} skip_fisa_param;
 #endif
 #endif /* WLAN_SUPPORT_RX_FLOW_TAG || WLAN_SUPPORT_RX_FISA */
+	/* Full monitor mode support */
+	bool full_mon_mode;
 	/* SG supported for msdu continued packets from wbm release ring */
 	bool wbm_release_desc_rx_sg_support;
 	bool peer_map_attach_success;
@@ -2248,26 +1919,6 @@ struct dp_soc {
 #ifdef FEATURE_RUNTIME_PM
 	/* Dp runtime refcount */
 	qdf_atomic_t dp_runtime_refcount;
-
-	/* Dp tx pending count in RTPM */
-	qdf_atomic_t tx_pending_rtpm;
-#endif
-	/* Invalid buffer that allocated for RX buffer */
-	qdf_nbuf_queue_t invalid_buf_queue;
-
-#ifdef FEATURE_MEC
-	/** @mec_lock: spinlock for MEC table */
-	qdf_spinlock_t mec_lock;
-	/** @mec_cnt: number of active mec entries */
-	qdf_atomic_t mec_cnt;
-	struct {
-		/** @mask: mask bits */
-		uint32_t mask;
-		/** @idx_bits: index to shift bits */
-		uint32_t idx_bits;
-		/** @bins: MEC table */
-		TAILQ_HEAD(, dp_mec_entry) * bins;
-	} mec_hash;
 #endif
 
 #ifdef WLAN_DP_FEATURE_DEFERRED_REO_QDESC_DESTROY
@@ -2275,40 +1926,6 @@ struct dp_soc {
 	qdf_spinlock_t reo_desc_deferred_freelist_lock;
 	bool reo_desc_deferred_freelist_init;
 #endif
-	/* BM id for first WBM2SW  ring */
-	uint32_t wbm_sw0_bm_id;
-
-	/* Store arch_id from device_id */
-	uint16_t arch_id;
-
-	/* link desc ID start per device type */
-	uint32_t link_desc_id_start;
-
-	/* CMEM buffer target reserved for host usage */
-	uint64_t cmem_base;
-	/* CMEM size in bytes */
-	uint64_t cmem_size;
-
-	/* SOC level feature flags */
-	struct dp_soc_features features;
-
-#ifdef WIFI_MONITOR_SUPPORT
-	struct dp_mon_soc *monitor_soc;
-#endif
-	uint8_t rxdma2sw_rings_not_supported:1,
-		mec_fw_offload:1;
-
-	/* Number of Rx refill rings */
-	uint8_t num_rx_refill_buf_rings;
-#ifdef FEATURE_RUNTIME_PM
-	/* flag to indicate vote for runtime_pm for high tput castt*/
-	qdf_atomic_t rtpm_high_tput_flag;
-#endif
-	/* Buffer manager ID for idle link descs */
-	uint8_t idle_link_bm_id;
-	qdf_atomic_t ref_count;
-
-	unsigned long vdev_stats_id_map;
 	bool is_tx_pause;
 };
 
@@ -2330,16 +1947,6 @@ struct dp_ipa_resources {
 	qdf_dma_addr_t rx_ready_doorbell_paddr;
 
 	bool is_db_ddr_mapped;
-
-#ifdef IPA_WDI3_TX_TWO_PIPES
-	qdf_shared_mem_t tx_alt_ring;
-	uint32_t tx_alt_ring_num_alloc_buffer;
-	qdf_shared_mem_t tx_alt_comp_ring;
-
-	/* IPA UC doorbell registers paddr */
-	qdf_dma_addr_t tx_alt_comp_doorbell_paddr;
-	uint32_t *tx_alt_comp_doorbell_vaddr;
-#endif
 };
 #endif
 
@@ -2364,20 +1971,19 @@ struct dp_ipa_resources {
 #ifdef MAX_ALLOC_PAGE_SIZE
 #define LINK_DESC_PAGE_ID_MASK  0x007FE0
 #define LINK_DESC_ID_SHIFT      5
-#define LINK_DESC_COOKIE(_desc_id, _page_id, _desc_id_start) \
-	((((_page_id) + (_desc_id_start)) << LINK_DESC_ID_SHIFT) | (_desc_id))
+#define LINK_DESC_COOKIE(_desc_id, _page_id) \
+	((((_page_id) + LINK_DESC_ID_START) << LINK_DESC_ID_SHIFT) | (_desc_id))
 #define LINK_DESC_COOKIE_PAGE_ID(_cookie) \
 	(((_cookie) & LINK_DESC_PAGE_ID_MASK) >> LINK_DESC_ID_SHIFT)
 #else
 #define LINK_DESC_PAGE_ID_MASK  0x7
 #define LINK_DESC_ID_SHIFT      3
-#define LINK_DESC_COOKIE(_desc_id, _page_id, _desc_id_start) \
-	((((_desc_id) + (_desc_id_start)) << LINK_DESC_ID_SHIFT) | (_page_id))
+#define LINK_DESC_COOKIE(_desc_id, _page_id) \
+	((((_desc_id) + LINK_DESC_ID_START) << LINK_DESC_ID_SHIFT) | (_page_id))
 #define LINK_DESC_COOKIE_PAGE_ID(_cookie) \
 	((_cookie) & LINK_DESC_PAGE_ID_MASK)
 #endif
-#define LINK_DESC_ID_START_21_BITS_COOKIE 0x8000
-#define LINK_DESC_ID_START_20_BITS_COOKIE 0x4000
+#define LINK_DESC_ID_START 0x8000
 
 /* same as ieee80211_nac_param */
 enum dp_nac_param_cmd {
@@ -2491,6 +2097,13 @@ struct rx_protocol_tag_stats {
 
 #endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
 
+#ifndef WLAN_TX_PKT_CAPTURE_ENH
+struct dp_pdev_tx_capture {
+};
+
+struct dp_peer_tx_capture {
+};
+#endif
 #ifdef WLAN_RX_PKT_CAPTURE_ENH
 /* Template data to be set for Enhanced RX Monitor packets */
 #define RX_MON_CAP_ENH_TRAILER 0xdeadc0dedeadda7a
@@ -2547,61 +2160,6 @@ struct pdev_htt_stats_dbgfs_cfg {
 };
 #endif /* HTT_STATS_DEBUGFS_SUPPORT */
 
-struct dp_srng_ring_state {
-	enum hal_ring_type ring_type;
-	uint32_t sw_head;
-	uint32_t sw_tail;
-	uint32_t hw_head;
-	uint32_t hw_tail;
-
-};
-
-struct dp_soc_srngs_state {
-	uint32_t seq_num;
-	uint32_t max_ring_id;
-	struct dp_srng_ring_state ring_state[DP_MAX_SRNGS];
-	TAILQ_ENTRY(dp_soc_srngs_state) list_elem;
-};
-
-#ifdef WLAN_FEATURE_11BE_MLO
-/* struct dp_mlo_sync_timestamp - PDEV level data structure for storing
- * MLO timestamp received via HTT msg.
- * msg_type: This would be set to HTT_T2H_MSG_TYPE_MLO_TIMESTAMP_OFFSET_IND
- * pdev_id: pdev_id
- * chip_id: chip_id
- * mac_clk_freq: mac clock frequency of the mac HW block in MHz
- * sync_tstmp_lo_us: lower 32 bits of the WLAN global time stamp (in us) at
- *                   which last sync interrupt was received
- * sync_tstmp_hi_us: upper 32 bits of the WLAN global time stamp (in us) at
- *                   which last sync interrupt was received
- * mlo_offset_lo_us: lower 32 bits of the MLO time stamp offset in us
- * mlo_offset_hi_us: upper 32 bits of the MLO time stamp offset in us
- * mlo_offset_clks:  MLO time stamp offset in clock ticks for sub us
- * mlo_comp_us:      MLO time stamp compensation applied in us
- * mlo_comp_clks:    MLO time stamp compensation applied in clock ticks
- *                   for sub us resolution
- * mlo_comp_timer:   period of MLO compensation timer at which compensation
- *                   is applied, in us
- */
-struct dp_mlo_sync_timestamp {
-	uint32_t msg_type:8,
-		 pdev_id:2,
-		 chip_id:2,
-		 rsvd1:4,
-		 mac_clk_freq:16;
-	uint32_t sync_tstmp_lo_us;
-	uint32_t sync_tstmp_hi_us;
-	uint32_t mlo_offset_lo_us;
-	uint32_t mlo_offset_hi_us;
-	uint32_t mlo_offset_clks;
-	uint32_t mlo_comp_us:16,
-		 mlo_comp_clks:10,
-		 rsvd2:6;
-	uint32_t mlo_comp_timer:22,
-		 rsvd3:10;
-};
-#endif
-
 /* PDEV level structure for data path */
 struct dp_pdev {
 	/**
@@ -2620,6 +2178,9 @@ struct dp_pdev {
 	/* TXRX SOC handle */
 	struct dp_soc *soc;
 
+	/* Stuck count on monitor destination ring MPDU process */
+	uint32_t mon_dest_ring_stuck_cnt;
+
 	bool pdev_deinit;
 
 	/* pdev status down or up required to handle dynamic hw
@@ -2628,9 +2189,6 @@ struct dp_pdev {
 	 * 0 = up
 	 */
 	bool is_pdev_down;
-
-	/* Enhanced Stats is enabled */
-	bool enhanced_stats_en;
 
 	/* Second ring used to replenish rx buffers */
 	struct dp_srng rx_refill_buf_ring2;
@@ -2665,9 +2223,42 @@ struct dp_pdev {
 	/* PDEV transmit lock */
 	qdf_spinlock_t tx_lock;
 
+#ifndef REMOVE_PKT_LOG
+	bool pkt_log_init;
+	/* Pktlog pdev */
+	struct pktlog_dev_t *pl_dev;
+#endif /* #ifndef REMOVE_PKT_LOG */
+
+	/* Monitor mode interface and status storage */
+	struct dp_vdev *monitor_vdev;
+
+	/* Monitor mode operation channel */
+	int mon_chan_num;
+
+	/* Monitor mode operation frequency */
+	qdf_freq_t mon_chan_freq;
+
+	/* Monitor mode band */
+	enum reg_wifi_band mon_chan_band;
+
+	/* monitor mode lock */
+	qdf_spinlock_t mon_lock;
+
 	/*tx_mutex for me*/
 	DP_MUTEX_TYPE tx_mutex;
 
+	/* monitor */
+	bool monitor_configured;
+
+	/* Smart Mesh */
+	bool filter_neighbour_peers;
+
+	/*flag to indicate neighbour_peers_list not empty */
+	bool neighbour_peers_added;
+	/* smart mesh mutex */
+	qdf_spinlock_t neighbour_peer_mutex;
+	/* Neighnour peer list */
+	TAILQ_HEAD(, dp_neighbour_peer) neighbour_peers_list;
 	/* msdu chain head & tail */
 	qdf_nbuf_t invalid_peer_head_msdu;
 	qdf_nbuf_t invalid_peer_tail_msdu;
@@ -2681,8 +2272,20 @@ struct dp_pdev {
 	/* Global RX decap mode for the device */
 	enum htt_pkt_type rx_decap_mode;
 
+	/* Enhanced Stats is enabled */
+	bool enhanced_stats_en;
+
+	/* advance filter mode and type*/
+	uint8_t mon_filter_mode;
+	uint16_t fp_mgmt_filter;
+	uint16_t fp_ctrl_filter;
+	uint16_t fp_data_filter;
+	uint16_t mo_mgmt_filter;
+	uint16_t mo_ctrl_filter;
+	uint16_t mo_data_filter;
+	uint16_t md_data_filter;
+
 	qdf_atomic_t num_tx_outstanding;
-	int32_t tx_descs_max;
 
 	qdf_atomic_t num_tx_exception;
 
@@ -2697,6 +2300,8 @@ struct dp_pdev {
 	/* dscp_tid_map_*/
 	uint8_t dscp_tid_map[DP_MAX_TID_MAPS][DSCP_TID_MAP_MAX];
 
+	struct hal_rx_ppdu_info ppdu_info;
+
 	/* operating channel */
 	struct {
 		uint8_t num;
@@ -2704,6 +2309,32 @@ struct dp_pdev {
 		uint16_t freq;
 	} operating_channel;
 
+	qdf_nbuf_queue_t rx_status_q;
+	uint32_t mon_ppdu_status;
+	struct cdp_mon_status rx_mon_recv_status;
+	/* monitor mode status/destination ring PPDU and MPDU count */
+	struct cdp_pdev_mon_stats rx_mon_stats;
+	/* to track duplicate link descriptor indications by HW for a WAR */
+	uint64_t mon_last_linkdesc_paddr;
+	/* to track duplicate buffer indications by HW for a WAR */
+	uint32_t mon_last_buf_cookie;
+	/* 128 bytes mpdu header queue per user for ppdu */
+	qdf_nbuf_queue_t mpdu_q[MAX_MU_USERS];
+	/* is this a mpdu header TLV and not msdu header TLV */
+	bool is_mpdu_hdr[MAX_MU_USERS];
+	/* per user 128 bytes msdu header list for MPDU */
+	struct msdu_list msdu_list[MAX_MU_USERS];
+	/* RX enhanced capture mode */
+	uint8_t rx_enh_capture_mode;
+	/* Rx per peer enhanced capture mode */
+	bool rx_enh_capture_peer;
+	struct dp_vdev *rx_enh_monitor_vdev;
+	/* RX enhanced capture trailer enable/disable flag */
+	bool is_rx_enh_capture_trailer_enabled;
+#ifdef WLAN_RX_PKT_CAPTURE_ENH
+	/* RX per MPDU/PPDU information */
+	struct cdp_rx_indication_mpdu mpdu_ind;
+#endif
 	/* pool addr for mcast enhance buff */
 	struct {
 		int size;
@@ -2733,19 +2364,63 @@ struct dp_pdev {
 	/* map this pdev to a particular Reo Destination ring */
 	enum cdp_host_reo_dest_ring reo_dest;
 
+	/* Packet log mode */
+	uint8_t rx_pktlog_mode;
+
 	/* WDI event handlers */
 	struct wdi_event_subscribe_t **wdi_event_list;
 
+	/* ppdu_id of last received HTT TX stats */
+	uint32_t last_ppdu_id;
+	struct {
+		uint8_t last_user;
+		qdf_nbuf_t buf;
+	} tx_ppdu_info;
+
+	bool tx_sniffer_enable;
+	/* mirror copy mode */
+	enum m_copy_mode mcopy_mode;
 	bool cfr_rcc_mode;
+	bool enable_reap_timer_non_pkt;
+	bool bpr_enable;
 
 	/* enable time latency check for tx completion */
 	bool latency_capture_enable;
 
 	/* enable calculation of delay stats*/
 	bool delay_stats_flag;
+	struct {
+		uint32_t tx_ppdu_id;
+		uint16_t tx_peer_id;
+		uint32_t rx_ppdu_id;
+	} m_copy_id;
+
+	/* To check if PPDU Tx stats are enabled for Pktlog */
+	bool pktlog_ppdu_stats;
+
 	void *dp_txrx_handle; /* Advanced data path handle */
+
+#ifdef ATH_SUPPORT_NAC_RSSI
+	bool nac_rssi_filtering;
+#endif
+	/* list of ppdu tlvs */
+	TAILQ_HEAD(, ppdu_info) ppdu_info_list;
+	TAILQ_HEAD(, ppdu_info) sched_comp_ppdu_list;
+
+	uint32_t sched_comp_list_depth;
+	uint16_t delivered_sched_cmdid;
+	uint16_t last_sched_cmdid;
+	uint32_t tlv_count;
+	uint32_t list_depth;
 	uint32_t ppdu_id;
 	bool first_nbuf;
+	struct {
+		qdf_nbuf_t last_nbuf; /*Ptr to mgmt last buf */
+		uint8_t *mgmt_buf; /* Ptr to mgmt. payload in HTT ppdu stats */
+		uint32_t mgmt_buf_len; /* Len of mgmt. payload in ppdu stats */
+		uint32_t ppdu_id;
+	} mgmtctrl_frm_info;
+
 	/* Current noise-floor reading for the pdev channel */
 	int16_t chan_noise_floor;
 
@@ -2760,6 +2435,8 @@ struct dp_pdev {
 	 * with same MAC address across 2 radios
 	 */
 	uint8_t is_primary;
+	/* Context of cal client timer */
+	struct cdp_cal_client *cal_client_ctx;
 	struct cdp_tx_sojourn_stats sojourn_stats;
 	qdf_nbuf_t sojourn_buf;
 
@@ -2768,6 +2445,11 @@ struct dp_pdev {
 
 	union dp_rx_desc_list_elem_t *free_list_head;
 	union dp_rx_desc_list_elem_t *free_list_tail;
+	/* Pdev level flag to check peer based pktlog enabled or
+	 * disabled
+	 */
+	uint8_t dp_peer_based_pktlog;
+
 	/* Cached peer_id from htt_peer_details_tlv */
 	uint16_t fw_stats_peer_id;
 
@@ -2806,6 +2488,12 @@ struct dp_pdev {
 #endif /* WLAN_SUPPORT_RX_TAG_STATISTICS */
 #endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
 
+	/* tx packet capture enhancement */
+	enum cdp_tx_enh_capture_mode tx_capture_enabled;
+	struct dp_pdev_tx_capture tx_capture;
+
+	uint32_t *ppdu_tlv_buf; /* Buffer to hold HTT ppdu stats TLVs*/
+
 #ifdef WLAN_SUPPORT_RX_FLOW_TAG
 	/**
 	 * Pointer to DP Flow FST at SOC level if
@@ -2823,35 +2511,35 @@ struct dp_pdev {
 	data_stall_detect_cb data_stall_detect_callback;
 #endif /* WLAN_SUPPORT_DATA_STALL */
 
+	struct dp_mon_filter **filter;	/* Monitor Filter pointer */
+
+#ifdef QCA_SUPPORT_FULL_MON
+	/* List to maintain all MPDUs for a PPDU in monitor mode */
+	TAILQ_HEAD(, dp_mon_mpdu) mon_mpdu_q;
+
+	/* TODO: define per-user mpdu list
+	 * struct dp_mon_mpdu_list mpdu_list[MAX_MU_USERS];
+	 */
+	struct hal_rx_mon_desc_info *mon_desc;
+#endif
+	qdf_nbuf_t mcopy_status_nbuf;
+
 	/* flag to indicate whether LRO hash command has been sent to FW */
 	uint8_t is_lro_hash_configured;
 
+	/* Flag to hold on to monitor destination ring */
+	bool hold_mon_dest_ring;
+
+#ifdef WLAN_ATF_ENABLE
+	/* ATF stats enable */
+	bool dp_atf_stats_enable;
+#endif
+
+	/* Maintains first status buffer's paddr of a PPDU */
+	uint64_t status_buf_addr;
 #ifdef HTT_STATS_DEBUGFS_SUPPORT
 	/* HTT stats debugfs params */
 	struct pdev_htt_stats_dbgfs_cfg *dbgfs_cfg;
-#endif
-	struct {
-		qdf_work_t work;
-		qdf_workqueue_t *work_queue;
-		uint32_t seq_num;
-		uint8_t queue_depth;
-		qdf_spinlock_t list_lock;
-
-		TAILQ_HEAD(, dp_soc_srngs_state) list;
-	} bkp_stats;
-#ifdef WIFI_MONITOR_SUPPORT
-	struct dp_mon_pdev *monitor_pdev;
-#endif
-#ifdef WLAN_FEATURE_11BE_MLO
-	struct dp_mlo_sync_timestamp timestamp;
-#endif
-#ifdef WLAN_FEATURE_MARK_FIRST_WAKEUP_PACKET
-	uint8_t is_first_wakeup_packet;
-#endif
-#ifdef CONNECTIVITY_PKTLOG
-	/* packetdump callback functions */
-	ol_txrx_pktdump_cb dp_tx_packetdump_cb;
-	ol_txrx_pktdump_cb dp_rx_packetdump_cb;
 #endif
 };
 
@@ -2896,10 +2584,6 @@ struct dp_vdev {
 	bool wds_ext_enabled;
 #endif /* QCA_SUPPORT_WDS_EXTENDED */
 
-#ifdef WLAN_VENDOR_SPECIFIC_BAR_UPDATE
-	bool skip_bar_update;
-	unsigned long skip_bar_update_last_ts;
-#endif
 	/* WDS Aging timer period */
 	uint32_t wds_aging_timer_val;
 
@@ -2937,9 +2621,6 @@ struct dp_vdev {
 	 */
 	uint8_t skip_sw_tid_classification;
 
-	/* Flag to enable peer authorization */
-	uint8_t peer_authorize;
-
 	/* AST hash value for BSS peer in HW valid for STA VAP*/
 	uint16_t bss_ast_hash;
 
@@ -2957,11 +2638,6 @@ struct dp_vdev {
 	/* MAC address */
 	union dp_align_mac_addr mac_addr;
 
-#ifdef WLAN_FEATURE_11BE_MLO
-	/* MLO MAC address corresponding to vdev */
-	union dp_align_mac_addr mld_mac_addr;
-#endif
-
 	/* node in the pdev's list of vdevs */
 	TAILQ_ENTRY(dp_vdev) vdev_list_elem;
 
@@ -2974,10 +2650,6 @@ struct dp_vdev {
 	ol_txrx_rx_gro_flush_ind_fp osif_gro_flush;
 	/* default RX call back function called by dp */
 	ol_txrx_rx_fp osif_rx;
-#ifdef QCA_SUPPORT_EAPOL_OVER_CONTROL_PORT
-	/* callback to receive eapol frames */
-	ol_txrx_rx_fp osif_rx_eapol;
-#endif
 	/* callback to deliver rx frames to the OS */
 	ol_txrx_rx_fp osif_rx_stack;
 	/* Callback to handle rx fisa frames */
@@ -2998,12 +2670,13 @@ struct dp_vdev {
 	/* proxy arp function */
 	ol_txrx_proxy_arp_fp osif_proxy_arp;
 
+	/* callback to hand rx monitor 802.11 MPDU to the OS shim */
+	ol_txrx_rx_mon_fp osif_rx_mon;
+
 	ol_txrx_mcast_me_fp me_convert;
 
 	/* completion function used by this vdev*/
 	ol_txrx_completion_fp tx_comp;
-
-	ol_txrx_get_tsf_time get_tsf_time;
 
 	/* deferred vdev deletion state */
 	struct {
@@ -3126,19 +2799,6 @@ struct dp_vdev {
 	qdf_atomic_t ref_cnt;
 	qdf_atomic_t mod_refs[DP_MOD_ID_MAX];
 	uint8_t num_latency_critical_conn;
-#ifdef WLAN_SUPPORT_MESH_LATENCY
-	uint8_t peer_tid_latency_enabled;
-	/* tid latency configuration parameters */
-	struct {
-		uint32_t service_interval;
-		uint32_t burst_size;
-		uint8_t latency_tid;
-	} mesh_tid_latency_config;
-#endif
-#ifdef WIFI_MONITOR_SUPPORT
-	struct dp_mon_vdev *monitor_vdev;
-#endif
-
 #ifdef WLAN_FEATURE_TSF_UPLINK_DELAY
 	/* Indicate if uplink delay report is enabled or not */
 	qdf_atomic_t ul_delay_report;
@@ -3150,12 +2810,6 @@ struct dp_vdev {
 	qdf_atomic_t ul_pkts_accum;
 #endif /* WLAN_FEATURE_TSF_UPLINK_DELAY */
 
-	/* vdev_stats_id - ID used for stats collection by FW from HW*/
-	uint8_t vdev_stats_id;
-#ifdef HW_TX_DELAY_STATS_ENABLE
-	/* hw tx delay stats enable */
-	uint8_t hw_tx_delay_stats_enabled;
-#endif
 #ifdef DP_RX_UDP_OVER_PEER_ROAM
 	uint32_t roaming_peer_status;
 	union dp_align_mac_addr roaming_peer_mac;
@@ -3239,34 +2893,6 @@ struct dp_peer_ast_params {
 	uint8_t flowQ;
 };
 
-#ifdef WLAN_SUPPORT_SCS
-/* SCS procedures macros */
-/* SCS Procedures - SCS parameters
- * obtained from SCS request are stored
- * in a peer based database for traffic
- * classification.
- */
-#define IEEE80211_SCS_MAX_NO_OF_ELEM 10
-#endif
-
-#define DP_MLO_FLOW_INFO_MAX	3
-
-/**
- * struct dp_mlo_flow_override_info - Flow override info
- * @ast_idx: Primary TCL AST Index
- * @ast_idx_valid: Is AST index valid
- * @chip_id: CHIP ID
- * @tidmask: tidmask
- * @cache_set_num: Cache set number
- */
-struct dp_mlo_flow_override_info {
-	uint16_t ast_idx;
-	uint8_t ast_idx_valid;
-	uint8_t chip_id;
-	uint8_t tidmask;
-	uint8_t cache_set_num;
-};
-
 #ifdef WLAN_SUPPORT_MSCS
 /*MSCS Procedure based macros */
 #define IEEE80211_MSCS_MAX_ELEM_SIZE    5
@@ -3307,60 +2933,6 @@ struct dp_wds_ext_peer {
 };
 #endif /* QCA_SUPPORT_WDS_EXTENDED */
 
-#ifdef WLAN_SUPPORT_MESH_LATENCY
-/*Advanced Mesh latency feature based macros */
-/*
- * struct dp_peer_mesh_latency parameter - Mesh latency related
- * parameters. This data is updated per peer per TID based on
- * the flow tuple classification in external rule database
- * during packet processing.
- * @service_interval_dl - Service interval associated with TID in DL
- * @burst_size_dl - Burst size additive over multiple flows in DL
- * @service_interval_ul - Service interval associated with TID in UL
- * @burst_size_ul - Burst size additive over multiple flows in UL
- * @ac - custom ac derived from service interval
- * @msduq - MSDU queue number within TID
- */
-struct dp_peer_mesh_latency_parameter {
-	uint32_t service_interval_dl;
-	uint32_t burst_size_dl;
-	uint32_t service_interval_ul;
-	uint32_t burst_size_ul;
-	uint8_t ac;
-	uint8_t msduq;
-};
-#endif
-
-#ifdef WLAN_FEATURE_11BE_MLO
-/* Max number of links for MLO connection */
-#define DP_MAX_MLO_LINKS 3
-
-/**
- * struct dp_peer_link_info - link peer information for MLO
- * @mac_add: Mac address
- * @vdev_id: Vdev ID for current link peer
- * @is_valid: flag for link peer info valid or not
- * @chip_id: chip id
- */
-struct dp_peer_link_info {
-	union dp_align_mac_addr mac_addr;
-	uint8_t vdev_id;
-	uint8_t is_valid;
-	uint8_t chip_id;
-};
-
-/**
- * struct dp_mld_link_peers - this structure is used to get link peers
-			      pointer from mld peer
- * @link_peers: link peers pointer array
- * @num_links: number of link peers fetched
- */
-struct dp_mld_link_peers {
-	struct dp_peer *link_peers[DP_MAX_MLO_LINKS];
-	uint8_t num_links;
-};
-#endif
-
 /* Peer structure for data path state */
 struct dp_peer {
 	/* VDEV to which this peer is associated */
@@ -3380,8 +2952,10 @@ struct dp_peer {
 	/* node in the hash table bin's list of peers */
 	TAILQ_ENTRY(dp_peer) hash_list_elem;
 
-	/* TID structures pointer */
-	struct dp_rx_tid *rx_tid;
+	/* TID structures */
+	struct dp_rx_tid rx_tid[DP_MAX_TIDS];
+	struct dp_peer_tx_capture tx_capture;
+
 
 	/* TBD: No transmit TID state required? */
 
@@ -3401,14 +2975,7 @@ struct dp_peer {
 		valid:1, /* valid bit */
 		in_twt:1, /* in TWT session */
 		delete_in_progress:1, /* Indicate kickout sent */
-		sta_self_peer:1, /* Indicate STA self peer */
-		hw_txrx_stats_en:1, /*Indicate HW offload vdev stats */
-		is_tdls_peer:1; /* Indicate TDLS peer */
-
-#ifdef WLAN_FEATURE_11BE_MLO
-	uint8_t first_link:1, /* first link peer for MLO */
-		primary_link:1; /* primary link for MLO */
-#endif
+		sta_self_peer:1; /* Indicate STA self peer */
 
 #ifdef QCA_SUPPORT_PEER_ISOLATION
 	bool isolation; /* enable peer isolation for this peer */
@@ -3465,6 +3032,14 @@ struct dp_peer {
 	qdf_atomic_t flush_in_progress;
 	struct dp_peer_cached_bufq bufq_info;
 #endif
+#ifdef FEATURE_PERPKT_INFO
+	/* delayed ba ppdu stats handling */
+	struct cdp_delayed_tx_completion_ppdu_user delayed_ba_ppdu_stats;
+	/* delayed ba flag */
+	bool last_delayed_ba;
+	/* delayed ba ppdu id */
+	uint32_t last_delayed_ba_ppduid;
+#endif
 #ifdef QCA_PEER_MULTIQ_SUPPORT
 	struct dp_peer_ast_params peer_ast_flowq_idx[DP_PEER_AST_FLOWQ_MAX];
 #endif
@@ -3475,11 +3050,6 @@ struct dp_peer {
 
 	uint8_t peer_state;
 	qdf_spinlock_t peer_state_lock;
-#ifdef WLAN_SUPPORT_SCS
-	struct cdp_scs_params scs[IEEE80211_SCS_MAX_NO_OF_ELEM];
-	bool scs_is_active;
-	uint8_t no_of_scs_sessions;
-#endif
 #ifdef WLAN_SUPPORT_MSCS
 	struct dp_peer_mscs_parameter mscs_ipv4_parameter, mscs_ipv6_parameter;
 	bool mscs_active;
@@ -3487,30 +3057,6 @@ struct dp_peer {
 #ifdef QCA_SUPPORT_WDS_EXTENDED
 	struct dp_wds_ext_peer wds_ext;
 	ol_txrx_rx_fp osif_rx;
-#endif
-
-#ifdef WLAN_SUPPORT_MESH_LATENCY
-	struct dp_peer_mesh_latency_parameter mesh_latency_params[DP_MAX_TIDS];
-#endif
-#ifdef WIFI_MONITOR_SUPPORT
-	struct dp_mon_peer *monitor_peer;
-#endif
-#ifdef WLAN_FEATURE_11BE_MLO
-	/* peer type */
-	enum cdp_peer_type peer_type;
-	/*---------for link peer---------*/
-	struct dp_peer *mld_peer;
-
-	/*---------for mld peer----------*/
-	struct dp_peer_link_info link_peers[DP_MAX_MLO_LINKS];
-	uint8_t num_links;
-	DP_MUTEX_TYPE link_peers_info_lock;
-#endif
-#ifdef DP_PEER_EXTENDED_API
-	/* BW of peer connection */
-	enum cdp_peer_bw bw;
-	/* MPDU retry threshold to increment tx bad count */
-	uint8_t mpdu_retry_threshold;
 #endif
 };
 
@@ -3592,6 +3138,7 @@ struct dp_fisa_stats {
 	/* flow index invalid from RX HW TLV */
 	uint32_t invalid_flow_index;
 	uint32_t reo_mismatch;
+	 uint32_t incorrect_rdi;
 };
 
 enum fisa_aggr_ret {
@@ -3601,14 +3148,22 @@ enum fisa_aggr_ret {
 };
 
 /**
+ * struct fisa_pkt_hist_elem - FISA Packet history element
+ * @ts: timestamp indicating when the packet was received by FISA framework.
+ * @tlvs: record of TLVS for the packet coming to FISA framework
+ */
+struct fisa_pkt_hist_elem {
+	qdf_time_t ts;
+	struct rx_pkt_tlvs tlvs;
+};
+
+/**
  * struct fisa_pkt_hist - FISA Packet history structure
- * @tlv_hist: array of TLV history
- * @ts: array of timestamps of fisa packets
+ * @hist_elem: array of hist elements
  * @idx: index indicating the next location to be used in the array.
  */
 struct fisa_pkt_hist {
-	uint8_t *tlv_hist;
-	qdf_time_t ts_hist[FISA_FLOW_MAX_AGGR_COUNT];
+	struct fisa_pkt_hist_elem hist_elem[FISA_FLOW_MAX_AGGR_COUNT];
 	uint32_t idx;
 };
 
@@ -3660,7 +3215,7 @@ struct dp_fisa_rx_sw_ft {
 	qdf_time_t flow_init_ts;
 	qdf_time_t last_accessed_ts;
 #ifdef WLAN_SUPPORT_RX_FISA_HIST
-	struct fisa_pkt_hist pkt_hist;
+	struct fisa_pkt_hist *pkt_hist;
 #endif
 };
 
@@ -3734,8 +3289,6 @@ struct dp_req_rx_hw_stats_t {
 	bool is_query_timeout;
 };
 #endif
-/* soc level structure to declare arch specific ops for DP */
-
 
 void dp_hw_link_desc_pool_banks_free(struct dp_soc *soc, uint32_t mac_id);
 QDF_STATUS dp_hw_link_desc_pool_banks_alloc(struct dp_soc *soc,
@@ -3747,48 +3300,4 @@ void dp_rx_refill_buff_pool_enqueue(struct dp_soc *soc);
 #else
 static inline void dp_rx_refill_buff_pool_enqueue(struct dp_soc *soc) {}
 #endif
-QDF_STATUS dp_srng_alloc(struct dp_soc *soc, struct dp_srng *srng,
-			 int ring_type, uint32_t num_entries,
-			 bool cached);
-void dp_srng_free(struct dp_soc *soc, struct dp_srng *srng);
-QDF_STATUS dp_srng_init(struct dp_soc *soc, struct dp_srng *srng,
-			int ring_type, int ring_num, int mac_id);
-void dp_srng_deinit(struct dp_soc *soc, struct dp_srng *srng,
-		    int ring_type, int ring_num);
-
-enum timer_yield_status
-dp_should_timer_irq_yield(struct dp_soc *soc, uint32_t work_done,
-			  uint64_t start_time);
-
-/*
- * dp_vdev_get_default_reo_hash() - get reo dest ring and hash values for a vdev
- * @vdev: Datapath VDEV handle
- * @reo_dest: pointer to default reo_dest ring for vdev to be populated
- * @hash_based: pointer to hash value (enabled/disabled) to be populated
- *
- * Return: None
- */
-void dp_vdev_get_default_reo_hash(struct dp_vdev *vdev,
-				  enum cdp_host_reo_dest_ring *reo_dest,
-				  bool *hash_based);
-
-/**
- * dp_reo_remap_config() - configure reo remap register value based
- *                         nss configuration.
- *		based on offload_radio value below remap configuration
- *		get applied.
- *		0 - both Radios handled by host (remap rings 1, 2, 3 & 4)
- *		1 - 1st Radio handled by NSS (remap rings 2, 3 & 4)
- *		2 - 2nd Radio handled by NSS (remap rings 1, 2 & 4)
- *		3 - both Radios handled by NSS (remap not required)
- *		4 - IPA OFFLOAD enabled (remap rings 1,2 & 3)
- *
- * @remap0: output parameter indicates reo remap 0 register value
- * @remap1: output parameter indicates reo remap 1 register value
- * @remap2: output parameter indicates reo remap 2 register value
- * Return: bool type, true if remap is configured else false.
- */
-
-bool dp_reo_remap_config(struct dp_soc *soc, uint32_t *remap0,
-			 uint32_t *remap1, uint32_t *remap2);
 #endif /* _DP_TYPES_H_ */

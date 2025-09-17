@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -241,7 +241,6 @@ void hif_ipci_nointrs(struct hif_softc *scn)
 	int ret;
 	struct HIF_CE_state *hif_state = HIF_GET_CE_STATE(scn);
 
-	scn->free_irq_done = true;
 	ce_unregister_irq(hif_state, CE_ALL_BITMAP);
 
 	if (scn->request_irq_done == false)
@@ -566,71 +565,6 @@ const char *hif_ipci_get_irq_name(int irq_no)
 	return "pci-dummy";
 }
 
-#ifdef FEATURE_IRQ_AFFINITY
-static
-void hif_ipci_irq_set_affinity_hint(struct hif_exec_context *hif_ext_group,
-				    bool perf)
-{
-	int i, ret;
-	unsigned int cpus;
-	bool mask_set = false;
-	int cpu_cluster = perf ? CPU_CLUSTER_TYPE_PERF :
-						CPU_CLUSTER_TYPE_LITTLE;
-
-	for (i = 0; i < hif_ext_group->numirq; i++)
-		qdf_cpumask_clear(&hif_ext_group->new_cpu_mask[i]);
-
-	for (i = 0; i < hif_ext_group->numirq; i++) {
-		qdf_for_each_online_cpu(cpus) {
-			if (qdf_topology_physical_package_id(cpus) ==
-			    cpu_cluster) {
-				qdf_cpumask_set_cpu(cpus,
-						    &hif_ext_group->
-						    new_cpu_mask[i]);
-				mask_set = true;
-			}
-		}
-	}
-	for (i = 0; i < hif_ext_group->numirq; i++) {
-		if (mask_set) {
-			qdf_dev_modify_irq_status(hif_ext_group->os_irq[i],
-						  IRQ_NO_BALANCING, 0);
-			ret = qdf_dev_set_irq_affinity(hif_ext_group->os_irq[i],
-						       (struct qdf_cpu_mask *)
-						       &hif_ext_group->
-						       new_cpu_mask[i]);
-			qdf_dev_modify_irq_status(hif_ext_group->os_irq[i],
-						  0, IRQ_NO_BALANCING);
-			if (ret)
-				qdf_debug("Set affinity %*pbl fails for IRQ %d ",
-					  qdf_cpumask_pr_args(&hif_ext_group->
-							      new_cpu_mask[i]),
-					  hif_ext_group->os_irq[i]);
-		} else {
-			qdf_err("Offline CPU: Set affinity fails for IRQ: %d",
-				hif_ext_group->os_irq[i]);
-		}
-	}
-}
-
-void hif_ipci_set_grp_intr_affinity(struct hif_softc *scn,
-				    uint32_t grp_intr_bitmask, bool perf)
-{
-	int i;
-	struct HIF_CE_state *hif_state = HIF_GET_CE_STATE(scn);
-	struct hif_exec_context *hif_ext_group;
-
-	for (i = 0; i < hif_state->hif_num_extgroup; i++) {
-		if (!(grp_intr_bitmask & BIT(i)))
-			continue;
-
-		hif_ext_group = hif_state->hif_ext_group[i];
-		hif_ipci_irq_set_affinity_hint(hif_ext_group, perf);
-		qdf_atomic_set(&hif_ext_group->force_napi_complete, -1);
-	}
-}
-#endif
-
 #ifdef HIF_CPU_PERF_AFFINE_MASK
 static void hif_ipci_ce_irq_set_affinity_hint(struct hif_softc *scn)
 {
@@ -690,43 +624,6 @@ void hif_ipci_config_irq_affinity(struct hif_softc *scn)
 }
 #endif /* #ifdef HIF_CPU_PERF_AFFINE_MASK */
 
-#ifdef HIF_CPU_CLEAR_AFFINITY
-void hif_ipci_config_irq_clear_cpu_affinity(struct hif_softc *scn,
-					    int intr_ctxt_id, int cpu)
-{
-	struct HIF_CE_state *hif_state = HIF_GET_CE_STATE(scn);
-	struct hif_exec_context *hif_ext_group;
-	int i, ret;
-
-	if (intr_ctxt_id < hif_state->hif_num_extgroup) {
-		hif_ext_group = hif_state->hif_ext_group[intr_ctxt_id];
-		for (i = 0; i < hif_ext_group->numirq; i++) {
-			qdf_cpumask_setall(&hif_ext_group->new_cpu_mask[i]);
-			qdf_cpumask_clear_cpu(cpu,
-					      &hif_ext_group->new_cpu_mask[i]);
-			qdf_dev_modify_irq_status(hif_ext_group->os_irq[i],
-						  IRQ_NO_BALANCING, 0);
-			ret = qdf_dev_set_irq_affinity(hif_ext_group->os_irq[i],
-						       (struct qdf_cpu_mask *)
-						       &hif_ext_group->
-						       new_cpu_mask[i]);
-			qdf_dev_modify_irq_status(hif_ext_group->os_irq[i],
-						  0, IRQ_NO_BALANCING);
-			if (ret)
-				hif_err("Set affinity %*pbl fails for IRQ %d ",
-					qdf_cpumask_pr_args(&hif_ext_group->
-							    new_cpu_mask[i]),
-					hif_ext_group->os_irq[i]);
-			else
-				hif_debug("Set affinity %*pbl for IRQ: %d",
-					  qdf_cpumask_pr_args(&hif_ext_group->
-							      new_cpu_mask[i]),
-					  hif_ext_group->os_irq[0]);
-		}
-	}
-}
-#endif
-
 int hif_ipci_configure_grp_irq(struct hif_softc *scn,
 			       struct hif_exec_context *hif_ext_group)
 {
@@ -763,6 +660,8 @@ int hif_configure_irq(struct hif_softc *scn)
 {
 	int ret = 0;
 
+	hif_info("E");
+
 	if (hif_is_polled_mode_enabled(GET_HIF_OPAQUE_HDL(scn))) {
 		scn->request_irq_done = false;
 		return 0;
@@ -792,15 +691,11 @@ static void hif_ipci_get_soc_info_pld(struct hif_ipci_softc *sc,
 				      struct device *dev)
 {
 	struct pld_soc_info info;
-	struct hif_softc *scn = HIF_GET_SOFTC(sc);
 
 	pld_get_soc_info(dev, &info);
 	sc->mem = info.v_addr;
 	sc->ce_sc.ol_sc.mem    = info.v_addr;
 	sc->ce_sc.ol_sc.mem_pa = info.p_addr;
-
-	scn->target_info.target_version = info.soc_id;
-	scn->target_info.target_revision = 0;
 }
 
 /**

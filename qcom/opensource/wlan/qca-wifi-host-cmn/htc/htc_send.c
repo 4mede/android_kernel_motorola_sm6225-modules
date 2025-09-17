@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -49,7 +48,7 @@ static unsigned int ep_debug_mask =
 	(1 << ENDPOINT_0) | (1 << ENDPOINT_1) | (1 << ENDPOINT_2);
 #endif
 
-#ifdef QCA_WIFI_EMULATION
+#ifdef QCA_WIFI_NAPIER_EMULATION
 #define HTC_EMULATION_DELAY_IN_MS 20
 /**
  * htc_add_delay(): Adds a delay in before proceeding, only for emulation
@@ -131,10 +130,6 @@ static void send_packet_completion(HTC_TARGET *target, HTC_PACKET *pPacket)
 {
 	HTC_ENDPOINT *pEndpoint = &target->endpoint[pPacket->Endpoint];
 	HTC_EP_SEND_PKT_COMPLETE EpTxComplete;
-
-	if ((pPacket->PktInfo.AsTx.Flags & HTC_TX_PACKET_FLAG_FIXUP_NETBUF) &&
-	    (!IS_TX_CREDIT_FLOW_ENABLED(pEndpoint)))
-		target->nbuf_nfc_unmap_count++;
 
 	restore_tx_packet(target, pPacket);
 
@@ -765,7 +760,6 @@ static QDF_STATUS htc_issue_packets(HTC_TARGET *target,
 					    (pEndpoint) < 1)
 						break;
 				}
-				/* fallthrough */
 			case QDF_BUS_TYPE_USB:
 				htc_issue_packets_bundle(target,
 							pEndpoint,
@@ -1710,7 +1704,6 @@ static enum HTC_SEND_QUEUE_RESULT htc_try_send(HTC_TARGET *target,
 					pEndpoint->total_num_requeues++;
 					pEndpoint->num_requeues_warn = 0;
 				}
-				/* fallthrough */
 			default:
 				QDF_TRACE(QDF_MODULE_ID_HIF, QDF_TRACE_LEVEL_INFO,
 					  "htc_issue_packets, failed status:%d"
@@ -1938,9 +1931,7 @@ static inline QDF_STATUS __htc_send_pkt(HTC_HANDLE HTCHandle,
 		status = qdf_nbuf_map(target->osdev,
 				      GET_HTC_PACKET_NET_BUF_CONTEXT(pPacket),
 				      QDF_DMA_TO_DEVICE);
-		if (status == QDF_STATUS_SUCCESS) {
-			target->nbuf_nfc_map_count++;
-		} else {
+		if (status != QDF_STATUS_SUCCESS) {
 			AR_DEBUG_PRINTF(ATH_DEBUG_ERR,
 					("%s: nbuf map failed, endpoint %pK, seq_no. %d\n",
 					 __func__, pEndpoint, pEndpoint->SeqNo));
@@ -2480,9 +2471,7 @@ QDF_STATUS htc_tx_completion_handler(void *Context,
 			netbuf = NULL;
 			break;
 		}
-		if (pPacket->PktInfo.AsTx.Tag != HTC_TX_PACKET_TAG_AUTO_PM &&
-		    pPacket->PktInfo.AsTx.Tag != HTC_TX_PACKET_TAG_RUNTIME_PUT &&
-		    pPacket->PktInfo.AsTx.Tag != HTC_TX_PACKET_TAG_RTPM_PUT_RC)
+		if (pPacket->PktInfo.AsTx.Tag != HTC_TX_PACKET_TAG_AUTO_PM)
 			hif_pm_runtime_put(target->hif_dev,
 					   RTPM_ID_WMI);
 

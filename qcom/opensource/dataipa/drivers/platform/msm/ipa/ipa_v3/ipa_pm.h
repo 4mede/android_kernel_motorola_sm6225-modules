@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  */
 
 #ifndef _IPA_PM_H_
@@ -9,9 +9,7 @@
 #include <linux/msm_ipa.h>
 
 /* internal to ipa */
-
-/* actual max is value -1 since we start from 1*/
-#define IPA_PM_MAX_CLIENTS IPA5_PIPES_NUM
+#define IPA_PM_MAX_CLIENTS 32 /* actual max is value -1 since we start from 1*/
 #define IPA_PM_MAX_EX_CL 64
 #define IPA_PM_THRESHOLD_MAX 5
 #define IPA_PM_EXCEPTION_MAX 5
@@ -98,13 +96,11 @@ int ipa_pm_deregister(u32 hdl);
 /* IPA Internal Functions */
 int ipa_pm_init(struct ipa_pm_init_params *params);
 int ipa_pm_destroy(void);
-int ipa_pm_handle_suspend(u32 pipe_bitmask, u32 pipe_arr_idx);
+int ipa_pm_handle_suspend(u32 pipe_bitmask);
 int ipa_pm_deactivate_all_deferred(void);
 int ipa_pm_stat(char *buf, int size);
 int ipa_pm_exceptions_stat(char *buf, int size);
 void ipa_pm_set_clock_index(int index);
-int ipa_pm_add_dummy_clients(s8 power_plan);
-int ipa_pm_remove_dummy_clients(void);
 
 #else /* IS_ENABLED(CONFIG_IPA3) */
 
@@ -161,7 +157,7 @@ static inline int ipa_pm_destroy(void)
 	return -EPERM;
 }
 
-static inline int ipa_pm_handle_suspend(u32 pipe_bitmask, u32 pipe_arr_idx)
+static inline int ipa_pm_handle_suspend(u32 pipe_bitmask)
 {
 	return -EPERM;
 }
@@ -177,16 +173,6 @@ static inline int ipa_pm_stat(char *buf, int size)
 }
 
 static inline int ipa_pm_exceptions_stat(char *buf, int size)
-{
-	return -EPERM;
-}
-
-static inline int ipa_pm_add_dummy_clients(s8 power_plan);
-{
-	return -EPERM;
-}
-
-static inline int ipa_pm_remove_dummy_clients(void);
 {
 	return -EPERM;
 }

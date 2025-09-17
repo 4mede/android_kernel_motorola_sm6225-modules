@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
  */
 
 #ifndef IPA_QMI_SERVICE_H
@@ -22,11 +22,7 @@
 #define MAX_NUM_QMI_RULE_CACHE 10
 #define MAX_NUM_QMI_MPM_AGGR_CACHE 3
 #define DEV_NAME "ipa-wan"
-#if IS_ENABLED(CONFIG_QCOM_Q6V5_PAS)
-#define SUBSYS_LOCAL_MODEM "mpss"
-#else
 #define SUBSYS_LOCAL_MODEM "modem"
-#endif
 #define SUBSYS_REMOTE_MODEM "esoc0"
 
 
@@ -219,10 +215,6 @@ extern struct qmi_elem_info ipa_add_offload_connection_req_msg_v01_ei[];
 extern struct qmi_elem_info ipa_add_offload_connection_resp_msg_v01_ei[];
 extern struct qmi_elem_info ipa_remove_offload_connection_req_msg_v01_ei[];
 extern struct qmi_elem_info ipa_remove_offload_connection_resp_msg_v01_ei[];
-extern struct qmi_elem_info ipa_bw_change_ind_msg_v01_ei[];
-extern struct qmi_elem_info ipa_move_nat_req_msg_v01_ei[];
-extern struct qmi_elem_info ipa_move_nat_resp_msg_v01_ei[];
-extern struct qmi_elem_info ipa_move_nat_table_complt_ind_msg_v01_ei[];
 
 /**
  * struct ipa3_rmnet_context - IPA rmnet context
@@ -291,13 +283,8 @@ int rmnet_ipa3_poll_tethering_stats(struct wan_ioctl_poll_tethering_stats
 
 int rmnet_ipa3_set_data_quota(struct wan_ioctl_set_data_quota *data);
 
-#ifdef IPA_DATA_WARNING_QUOTA
-int rmnet_ipa3_set_data_quota_warning(struct wan_ioctl_set_data_quota_warning
-		*data);
-#endif
-
 void ipa3_broadcast_quota_reach_ind(uint32_t mux_id,
-	enum ipa_upstream_type upstream_type, bool is_warning_limit);
+	enum ipa_upstream_type upstream_type);
 
 int rmnet_ipa3_set_tether_client_pipe(struct wan_ioctl_set_tether_client_pipe
 	*data);
@@ -323,9 +310,6 @@ int rmnet_ipa3_query_per_client_stats(
 int rmnet_ipa3_get_wan_mtu(
 	struct ipa_mtu_info *data);
 
-int rmnet_ipa3_query_per_client_stats_v2(
-	struct wan_ioctl_query_per_client_stats *data);
-
 int ipa3_qmi_get_data_stats(struct ipa_get_data_stats_req_msg_v01 *req,
 	struct ipa_get_data_stats_resp_msg_v01 *resp);
 
@@ -337,9 +321,7 @@ int ipa3_qmi_set_data_quota(struct ipa_set_data_usage_quota_req_msg_v01 *req);
 int ipa3_qmi_set_aggr_info(
 	enum ipa_aggr_enum_type_v01 aggr_enum_type);
 
-int ipa3_qmi_req_ind(bool bw_reg);
-
-int ipa3_qmi_stop_data_quota(struct ipa_stop_data_usage_quota_req_msg_v01 *req);
+int ipa3_qmi_stop_data_qouta(void);
 
 void ipa3_q6_handshake_complete(bool ssr_bootup);
 
@@ -357,25 +339,18 @@ int ipa3_qmi_get_per_client_packet_stats(
 int ipa3_qmi_send_mhi_ready_indication(
 	struct ipa_mhi_ready_indication_msg_v01 *req);
 
-int ipa3_qmi_send_endp_desc_indication(
+int ipa3_qmi_send_wan_pipe_indication(
 	struct ipa_endp_desc_indication_msg_v01 *req);
 
 int ipa3_qmi_send_mhi_cleanup_request(struct ipa_mhi_cleanup_req_msg_v01 *req);
-
-/* sending nat table move result indication to modem */
-int rmnet_ipa3_notify_nat_move_res(bool success);
 
 void ipa3_qmi_init(void);
 
 void ipa3_qmi_cleanup(void);
 
-int ipa3_wwan_platform_driver_register(void);
-
 int ipa3_wwan_init(void);
 
 void ipa3_wwan_cleanup(void);
-
-void ipa3_disable_move_nat_resp(void);
 
 #else /* IS_ENABLED(CONFIG_RMNET_IPA3) */
 
@@ -386,7 +361,7 @@ static inline int ipa3_qmi_service_init(uint32_t wan_platform_type)
 
 static inline void ipa3_qmi_service_exit(void) { }
 
-/* sending filter-install-request to modem */
+/* sending filter-install-request to modem*/
 static inline int ipa3_qmi_filter_request_send(
 	struct ipa_install_fltr_rule_req_msg_v01 *req)
 {
@@ -472,16 +447,8 @@ static inline int rmnet_ipa3_set_data_quota(
 	return -EPERM;
 }
 
-#ifdef IPA_DATA_WARNING_QUOTA
-static inline int rmnet_ipa3_set_data_quota_warning(
-	struct wan_ioctl_set_data_quota_warning *data)
-{
-	return -EPERM;
-}
-#endif
-
 static inline void ipa3_broadcast_quota_reach_ind(uint32_t mux_id,
-	enum ipa_upstream_type upstream_type, bool is_warning_limit) { }
+	enum ipa_upstream_type upstream_type) { }
 
 static inline int ipa3_qmi_get_data_stats(
 	struct ipa_get_data_stats_req_msg_v01 *req,
@@ -503,8 +470,7 @@ static inline int ipa3_qmi_set_data_quota(
 	return -EPERM;
 }
 
-static inline int ipa3_qmi_stop_data_quota(
-struct ipa_stop_data_usage_quota_req_msg_v01 *req)
+static inline int ipa3_qmi_stop_data_qouta(void)
 {
 	return -EPERM;
 }
@@ -517,7 +483,7 @@ static inline int ipa3_qmi_send_mhi_ready_indication(
 	return -EPERM;
 }
 
-static inline int ipa3_qmi_send_endp_desc_indication(
+static inline int ipa3_qmi_send_wan_pipe_indication(
 	struct ipa_endp_desc_indication_msg_v01 *req)
 {
 	return -EPERM;
@@ -527,11 +493,6 @@ static inline int ipa3_qmi_send_mhi_cleanup_request(
 	struct ipa_mhi_cleanup_req_msg_v01 *req)
 {
 	return -EPERM;
-}
-
-static int rmnet_ipa3_notify_nat_move_res(bool success)
-{
-	return -EPERM
 }
 
 static inline int ipa3_wwan_set_modem_perf_profile(
@@ -567,16 +528,6 @@ static inline void ipa3_qmi_init(void)
 static inline void ipa3_qmi_cleanup(void)
 {
 
-}
-
-static void ipa3_disable_move_nat_resp(void)
-{
-
-}
-
-static inline int ipa3_wwan_platform_driver_register(void)
-{
-	return -EPERM;
 }
 
 static inline int ipa3_wwan_init(void)

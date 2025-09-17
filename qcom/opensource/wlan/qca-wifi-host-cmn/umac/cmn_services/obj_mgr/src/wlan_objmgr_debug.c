@@ -1,7 +1,6 @@
 /*
  *
- * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2018-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -35,13 +34,8 @@
  * Default TTL (of FW) for mgmt frames is 5 sec, by considering all the other
  * delays, arrived with this value
  */
-#ifndef LOG_DEL_OBJ_TIMEOUT_VALUE_MSEC
 #define LOG_DEL_OBJ_TIMEOUT_VALUE_MSEC   8000
-#endif
-#ifndef LOG_DEL_OBJ_DESTROY_DURATION_SEC
 #define LOG_DEL_OBJ_DESTROY_DURATION_SEC 8
-#endif
-
 /*
  * The max duration for which a obj can be allowed to remain in L-state
  * The duration  should be higher than the psoc idle timeout.
@@ -180,7 +174,9 @@ void wlan_objmgr_notify_log_delete(void *obj,
 		return;
 	}
 
+	qdf_spin_lock_bh(&g_umac_glb_obj->global_lock);
 	debug_info = g_umac_glb_obj->debug_info;
+	qdf_spin_unlock_bh(&g_umac_glb_obj->global_lock);
 
 	if (!debug_info) {
 		obj_mgr_err("debug_info is null");
@@ -218,13 +214,17 @@ static bool wlan_objmgr_del_obj_match(union wlan_objmgr_del_obj *obj,
 {
 	switch (obj_type) {
 	case WLAN_PSOC_OP:
-		return (del_obj->obj_psoc == obj->obj_psoc);
+		if (del_obj->obj_psoc == obj->obj_psoc)
+			return true;
 	case WLAN_PDEV_OP:
-		return (del_obj->obj_pdev == obj->obj_pdev);
+		if (del_obj->obj_pdev == obj->obj_pdev)
+			return true;
 	case WLAN_VDEV_OP:
-		return (del_obj->obj_vdev == obj->obj_vdev);
+		if (del_obj->obj_vdev == obj->obj_vdev)
+			return true;
 	case WLAN_PEER_OP:
-		return (del_obj->obj_peer == obj->obj_peer);
+		if (del_obj->obj_peer == obj->obj_peer)
+			return true;
 	default:
 		return false;
 	}
@@ -273,7 +273,9 @@ void wlan_objmgr_notify_destroy(void *obj,
 	const char *obj_name;
 	union wlan_objmgr_del_obj *del_obj = (union wlan_objmgr_del_obj *)&obj;
 
+	qdf_spin_lock_bh(&g_umac_glb_obj->global_lock);
 	debug_info = g_umac_glb_obj->debug_info;
+	qdf_spin_unlock_bh(&g_umac_glb_obj->global_lock);
 
 	if (!debug_info) {
 		obj_mgr_err("debug_info is null");
@@ -359,7 +361,7 @@ wlan_objmgr_print_ref_func_line(struct wlan_objmgr_trace_func *func_head,
 	uint32_t ref_cnt;
 	struct wlan_objmgr_line_ref_node *tmp_ln_node;
 
-	obj_mgr_debug("ID: %s(%d)", string_from_dbgid(id), id);
+	obj_mgr_debug("ID: %s", string_from_dbgid(id));
 	while (func_head) {
 		obj_mgr_debug("Func: %s", func_head->func);
 		tmp_ln_node = func_head->line_head;
@@ -405,7 +407,7 @@ wlan_objmgr_trace_print_ref(union wlan_objmgr_del_obj *obj,
 		peer_obj = &obj->obj_peer->peer_objmgr;
 		trace = &peer_obj->trace;
 		for (id = 0; id < WLAN_REF_ID_MAX; id++) {
-			if (qdf_atomic_read(&peer_obj->ref_id_dbg[id])) {
+			if (qdf_atomic_read(&vdev_obj->ref_id_dbg[id])) {
 				obj_mgr_debug("Reference:");
 
 				func_head = trace->references[id].head;
@@ -443,7 +445,9 @@ static void wlan_objmgr_iterate_log_del_obj_handler(void *timer_arg)
 	qdf_time_t cur_tstamp;
 	QDF_STATUS status;
 
+	qdf_spin_lock_bh(&g_umac_glb_obj->global_lock);
 	debug_info = g_umac_glb_obj->debug_info;
+	qdf_spin_unlock_bh(&g_umac_glb_obj->global_lock);
 
 	if (!debug_info) {
 		obj_mgr_err("debug_info is not initialized");
@@ -516,7 +520,9 @@ void wlan_objmgr_debug_info_deinit(void)
 	qdf_list_t *list;
 	bool is_child_alive = false;
 
+	qdf_spin_lock_bh(&g_umac_glb_obj->global_lock);
 	debug_info = g_umac_glb_obj->debug_info;
+	qdf_spin_unlock_bh(&g_umac_glb_obj->global_lock);
 
 	if (!debug_info) {
 		obj_mgr_err("debug_info is not initialized");
@@ -583,7 +589,9 @@ void wlan_objmgr_debug_info_init(void)
 	qdf_spinlock_create(&debug_info->list_lock);
 
 	/* attach debug_info object to global object */
+	qdf_spin_lock_bh(&g_umac_glb_obj->global_lock);
 	g_umac_glb_obj->debug_info = debug_info;
+	qdf_spin_unlock_bh(&g_umac_glb_obj->global_lock);
 }
 
 #ifdef WLAN_OBJMGR_REF_ID_TRACE
@@ -644,10 +652,12 @@ static inline void
 wlan_objmgr_trace_check_line(struct wlan_objmgr_trace_func *tmp_func_node,
 			     struct wlan_objmgr_trace *trace, int line)
 {
+	struct wlan_objmgr_line_ref_node *line_node;
 	struct wlan_objmgr_line_ref_node *tmp_ln_node;
 
 	tmp_ln_node = tmp_func_node->line_head;
 	while (tmp_ln_node) {
+		line_node = tmp_ln_node;
 		if (tmp_ln_node->line_ref.line == line) {
 			qdf_atomic_inc(&tmp_ln_node->line_ref.cnt);
 			break;
@@ -656,10 +666,8 @@ wlan_objmgr_trace_check_line(struct wlan_objmgr_trace_func *tmp_func_node,
 	}
 	if (!tmp_ln_node) {
 		tmp_ln_node = wlan_objmgr_trace_line_node_alloc(line);
-		if (tmp_ln_node) {
-			tmp_ln_node->next = tmp_func_node->line_head;
-			tmp_func_node->line_head = tmp_ln_node;
-		}
+		if (tmp_ln_node)
+			line_node->next = tmp_ln_node;
 	}
 }
 
@@ -699,7 +707,7 @@ wlan_objmgr_trace_ref(struct wlan_objmgr_trace_func **func_head,
 	qdf_spin_unlock_bh(&trace->trace_lock);
 }
 
-static void
+void
 wlan_objmgr_trace_del_line(struct wlan_objmgr_line_ref_node **line_head)
 {
 	struct wlan_objmgr_line_ref_node *del_tmp_node;

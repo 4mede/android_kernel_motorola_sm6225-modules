@@ -573,7 +573,7 @@ enum phy_ch_width wlan_sap_get_concurrent_bw(struct wlan_objmgr_pdev *pdev,
 	bool is_hw_dbs_capable = false;
 
 	if (WLAN_REG_IS_24GHZ_CH_FREQ(con_ch_freq))
-		return CH_WIDTH_20MHZ;
+		return channel_width;
 
 	if (wlan_reg_is_6ghz_chan_freq(con_ch_freq))
 		return channel_width;
@@ -2244,7 +2244,7 @@ wlansap_reset_sap_config_add_ie(struct sap_config *config,
 		}
 		if (eUPDATE_IE_ALL != updateType)
 			break;
-		/* fallthrough */
+		fallthrough;
 	case eUPDATE_IE_ASSOC_RESP:
 		if (config->pAssocRespIEsBuffer) {
 			qdf_mem_free(config->pAssocRespIEsBuffer);
@@ -2253,7 +2253,7 @@ wlansap_reset_sap_config_add_ie(struct sap_config *config,
 		}
 		if (eUPDATE_IE_ALL != updateType)
 			break;
-		/* fallthrough */
+		fallthrough;
 	case eUPDATE_IE_PROBE_BCN:
 		if (config->pProbeRespBcnIEsBuffer) {
 			qdf_mem_free(config->pProbeRespBcnIEsBuffer);
@@ -2262,7 +2262,7 @@ wlansap_reset_sap_config_add_ie(struct sap_config *config,
 		}
 		if (eUPDATE_IE_ALL != updateType)
 			break;
-		/* fallthrough */
+		fallthrough;
 	default:
 		if (eUPDATE_IE_ALL != updateType)
 			sap_err("Invalid buffer type %d", updateType);
@@ -2365,9 +2365,9 @@ void wlansap_extend_to_acs_range(mac_handle_t mac_handle,
 	}
 
 	if (*end_ch_freq <= wlan_reg_ch_to_freq(CHAN_ENUM_2484)) {
-		*bandEndChannel = CHAN_ENUM_2484;
+		*bandEndChannel = CHAN_ENUM_2472;
 		tmp_end_ch_freq = (*end_ch_freq + ACS_2G_EXTEND) <=
-					wlan_reg_ch_to_freq(CHAN_ENUM_2484) ?
+					wlan_reg_ch_to_freq(CHAN_ENUM_2472) ?
 					(*end_ch_freq + ACS_2G_EXTEND) :
 					wlan_reg_ch_to_freq(CHAN_ENUM_2484);
 	} else if (*end_ch_freq <= wlan_reg_ch_to_freq(CHAN_ENUM_5885)) {
@@ -3304,8 +3304,9 @@ qdf_freq_t wlansap_get_chan_band_restrict(struct sap_context *sap_ctx,
 				return 0;
 			}
 		}
-	} else if (wlan_reg_is_disable_for_freq(mac->pdev,
-						sap_ctx->chan_freq) &&
+	} else if (wlan_reg_is_disable_in_secondary_list_for_freq(
+							mac->pdev,
+							sap_ctx->chan_freq) &&
 		   !utils_dfs_is_freq_in_nol(mac->pdev, sap_ctx->chan_freq)) {
 		sap_debug("channel is disabled");
 		*csa_reason = CSA_REASON_CHAN_DISABLED;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/init.h>
@@ -10,7 +10,6 @@
 #include <linux/device.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/compat.h>
 #include <linux/rmnet_ipa_fd_ioctl.h>
 #include "ipa_qmi_service.h"
 #include "ipa_i.h"
@@ -97,8 +96,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 		IPAWANDBG("device %s got WAN_IOC_ADD_FLT_RULE :>>>\n",
 			DRIVER_NAME);
 		pyld_sz = sizeof(struct ipa_install_fltr_rule_req_msg_v01);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -119,8 +117,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 		IPAWANDBG("device %s got WAN_IOC_ADD_FLT_RULE_EX :>>>\n",
 			DRIVER_NAME);
 		pyld_sz = sizeof(struct ipa_install_fltr_rule_req_ex_msg_v01);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -141,8 +138,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 		IPAWANDBG("device %s got WAN_IOC_ADD_OFFLOAD_CONNECTION :>>>\n",
 		DRIVER_NAME);
 		pyld_sz = sizeof(struct ipa_add_offload_connection_req_msg_v01);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -164,8 +160,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 		IPAWANDBG("device %s got WAN_IOC_RMV_OFFLOAD_CONNECTION :>>>\n",
 		DRIVER_NAME);
 		pyld_sz = rmv_offload_req__msg_size;
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -188,8 +183,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 			DRIVER_NAME);
 		pyld_sz =
 		sizeof(struct ipa_configure_ul_firewall_rules_req_msg_v01);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -211,8 +205,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 		IPAWANDBG("device %s got WAN_IOC_ADD_FLT_RULE_INDEX :>>>\n",
 			DRIVER_NAME);
 		pyld_sz = sizeof(struct ipa_fltr_installed_notif_req_msg_v01);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -233,8 +226,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 		IPAWANDBG("device %s got WAN_IOC_VOTE_FOR_BW_MBPS :>>>\n",
 			DRIVER_NAME);
 		pyld_sz = sizeof(uint32_t);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -253,8 +245,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 	case WAN_IOC_POLL_TETHERING_STATS:
 		IPAWANDBG_LOW("got WAN_IOCTL_POLL_TETHERING_STATS :>>>\n");
 		pyld_sz = sizeof(struct wan_ioctl_poll_tethering_stats);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -275,8 +266,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 		IPAWANDBG_LOW("device %s got WAN_IOCTL_SET_DATA_QUOTA :>>>\n",
 			DRIVER_NAME);
 		pyld_sz = sizeof(struct wan_ioctl_set_data_quota);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -297,43 +287,10 @@ static long ipa3_wan_ioctl(struct file *filp,
 		}
 		break;
 
-#ifdef IPA_DATA_WARNING_QUOTA
-	case WAN_IOC_SET_DATA_QUOTA_WARNING:
-		IPAWANDBG_LOW("device %s got WAN_IOC_SET_DATA_QUOTA_WARNING :>>>\n",
-			DRIVER_NAME);
-		pyld_sz = sizeof(struct wan_ioctl_set_data_quota_warning);
-		if (pyld_sz > _IOC_SIZE(cmd)) {
-			IPAWANERR("SET_DATA_QUOTA_WARNING failed, invalid params\n");
-			retval = -EINVAL;
-			break;
-		}
-		param = memdup_user((const void __user *)arg, pyld_sz);
-		if (IS_ERR(param)) {
-			retval = PTR_ERR(param);
-			break;
-		}
-		rc = rmnet_ipa3_set_data_quota_warning(
-			(struct wan_ioctl_set_data_quota_warning *)param);
-		if (rc != 0) {
-			IPAWANERR("SET_DATA_QUOTA_WARNING failed\n");
-			if (rc == -ENODEV)
-				retval = -ENODEV;
-			else
-				retval = -EFAULT;
-			break;
-		}
-		if (copy_to_user((u8 *)arg, param, pyld_sz)) {
-			retval = -EFAULT;
-			break;
-		}
-		break;
-#endif
-
 	case WAN_IOC_SET_TETHER_CLIENT_PIPE:
 		IPAWANDBG_LOW("got WAN_IOC_SET_TETHER_CLIENT_PIPE :>>>\n");
 		pyld_sz = sizeof(struct wan_ioctl_set_tether_client_pipe);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -349,8 +306,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 	case WAN_IOC_QUERY_TETHER_STATS:
 		IPAWANDBG_LOW("got WAN_IOC_QUERY_TETHER_STATS :>>>\n");
 		pyld_sz = sizeof(struct wan_ioctl_query_tether_stats);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -372,8 +328,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 	case WAN_IOC_QUERY_TETHER_STATS_ALL:
 		IPAWANDBG_LOW("got WAN_IOC_QUERY_TETHER_STATS_ALL :>>>\n");
 		pyld_sz = sizeof(struct wan_ioctl_query_tether_stats_all);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -396,8 +351,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 		IPAWANDBG_LOW("device %s got WAN_IOC_RESET_TETHER_STATS :>>>\n",
 			DRIVER_NAME);
 		pyld_sz = sizeof(struct wan_ioctl_reset_tether_stats);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -415,8 +369,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 		IPAWANDBG_LOW("device %s got WAN_IOC_NOTIFY_WAN_STATE :>>>\n",
 			DRIVER_NAME);
 		pyld_sz = sizeof(struct wan_ioctl_notify_wan_state);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -438,8 +391,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 	case WAN_IOC_ENABLE_PER_CLIENT_STATS:
 		IPAWANDBG_LOW("got WAN_IOC_ENABLE_PER_CLIENT_STATS :>>>\n");
 		pyld_sz = sizeof(bool);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -454,18 +406,14 @@ static long ipa3_wan_ioctl(struct file *filp,
 	case WAN_IOC_QUERY_PER_CLIENT_STATS:
 		IPAWANDBG_LOW("got WAN_IOC_QUERY_PER_CLIENT_STATS :>>>\n");
 		pyld_sz = sizeof(struct wan_ioctl_query_per_client_stats);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
 		}
-		if (ipa3_ctx->ipa_hw_type >= IPA_HW_v4_5)
-			retval = rmnet_ipa3_query_per_client_stats_v2(
-			  (struct wan_ioctl_query_per_client_stats *)param);
-		else
-			retval = rmnet_ipa3_query_per_client_stats(
-			  (struct wan_ioctl_query_per_client_stats *)param);
+
+		retval = rmnet_ipa3_query_per_client_stats(
+			(struct wan_ioctl_query_per_client_stats *)param);
 		if (retval) {
 			IPAWANERR("WAN_IOC_QUERY_PER_CLIENT_STATS failed\n");
 			break;
@@ -480,8 +428,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 	case WAN_IOC_SET_LAN_CLIENT_INFO:
 		IPAWANDBG_LOW("got WAN_IOC_SET_LAN_CLIENT_INFO :>>>\n");
 		pyld_sz = sizeof(struct wan_ioctl_lan_client_info);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -497,8 +444,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 	case WAN_IOC_CLEAR_LAN_CLIENT_INFO:
 		IPAWANDBG_LOW("got WAN_IOC_CLEAR_LAN_CLIENT_INFO :>>>\n");
 		pyld_sz = sizeof(struct wan_ioctl_lan_client_info);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -515,8 +461,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 	case WAN_IOC_SEND_LAN_CLIENT_MSG:
 		IPAWANDBG_LOW("got WAN_IOC_SEND_LAN_CLIENT_MSG :>>>\n");
 		pyld_sz = sizeof(struct wan_ioctl_send_lan_client_msg);
-		param = vmemdup_user((const void __user *)arg, pyld_sz);
-
+		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
 			break;
@@ -525,14 +470,6 @@ static long ipa3_wan_ioctl(struct file *filp,
 			(struct wan_ioctl_send_lan_client_msg *)
 			param)) {
 			IPAWANERR("IOC_SEND_LAN_CLIENT_MSG failed\n");
-			retval = -EFAULT;
-			break;
-		}
-		break;
-	case WAN_IOC_NOTIFY_NAT_MOVE_RES:
-		IPAWANDBG_LOW("got WAN_IOC_NOTIFY_NAT_MOVE_RES :>>>\n");
-		if (rmnet_ipa3_notify_nat_move_res(arg)) {
-			IPAWANERR("WAN_IOC_NOTIFY_NAT_MOVE_RES failed\n");
 			retval = -EFAULT;
 			break;
 		}
@@ -564,8 +501,7 @@ static long ipa3_wan_ioctl(struct file *filp,
 		retval = -ENOTTY;
 	}
 	if (!IS_ERR(param))
-		kvfree(param);
-
+		kfree(param);
 	return retval;
 }
 

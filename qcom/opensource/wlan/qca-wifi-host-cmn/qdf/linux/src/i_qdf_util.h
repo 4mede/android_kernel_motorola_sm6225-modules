@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -170,7 +169,10 @@ static inline bool __qdf_is_macaddr_equal(struct qdf_mac_addr *mac_addr1,
 	return 0 == memcmp(mac_addr1, mac_addr2, QDF_MAC_ADDR_SIZE);
 }
 
-#define __qdf_in_interrupt in_interrupt
+/**
+ * qdf_in_interrupt - returns true if in interrupt context
+ */
+#define qdf_in_interrupt          in_interrupt
 
 #define __qdf_min(_a, _b) min(_a, _b)
 #define __qdf_max(_a, _b) max(_a, _b)
@@ -501,13 +503,4 @@ int __qdf_fls(uint32_t x)
 	return fls(x);
 }
 
-/**
- * __qdf_get_smp_processor_id() - Get the current CPU id
- *
- * Return: current CPU id
- */
-static inline int __qdf_get_smp_processor_id(void)
-{
-	return smp_processor_id();
-}
 #endif /*_I_QDF_UTIL_H*/

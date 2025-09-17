@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -73,63 +72,6 @@ bool wlan_serialization_is_cmd_present_in_pending_queue(
 	wlan_serialization_release_lock(&pdev_queue->pdev_queue_lock);
 error:
 	return status;
-}
-
-bool wlan_ser_is_non_scan_cmd_type_in_vdev_queue(struct wlan_objmgr_vdev *vdev,
-				enum wlan_serialization_cmd_type cmd_type)
-{
-	bool found = false;
-	qdf_list_t *queue;
-	struct wlan_objmgr_pdev *pdev;
-	struct wlan_ser_pdev_obj *ser_pdev_obj;
-	struct wlan_ser_vdev_obj *ser_vdev_obj;
-	struct wlan_serialization_pdev_queue *pdev_queue;
-
-	if (!vdev) {
-		ser_err("invalid cmd");
-		goto error;
-	}
-
-	if (cmd_type < WLAN_SER_CMD_NONSCAN) {
-		ser_err("invalid cmd type %d", cmd_type);
-		goto error;
-	}
-
-	pdev = wlan_vdev_get_pdev(vdev);
-	if (!pdev) {
-		ser_err("invalid pdev");
-		goto error;
-	}
-
-	ser_pdev_obj = wlan_serialization_get_pdev_obj(pdev);
-	if (!ser_pdev_obj) {
-		ser_err("invalid ser pdev obj");
-		goto error;
-	}
-
-	pdev_queue = wlan_serialization_get_pdev_queue_obj(ser_pdev_obj,
-							   cmd_type);
-	if (!pdev_queue) {
-		ser_err("pdev_queue is invalid");
-		goto error;
-	}
-	ser_vdev_obj = wlan_serialization_get_vdev_obj(vdev);
-	if (!ser_vdev_obj) {
-		ser_err("invalid ser vdev obj");
-		goto error;
-	}
-
-	wlan_serialization_acquire_lock(&pdev_queue->pdev_queue_lock);
-	queue = wlan_serialization_get_list_from_vdev_queue(ser_vdev_obj,
-							    cmd_type, false);
-	if (wlan_serialization_find_cmd(queue, WLAN_SER_MATCH_CMD_TYPE_VDEV,
-					NULL, cmd_type, NULL, vdev,
-					WLAN_SER_VDEV_NODE))
-		found = true;
-
-	wlan_serialization_release_lock(&pdev_queue->pdev_queue_lock);
-error:
-	return found;
 }
 
 bool wlan_serialization_is_cmd_present_in_active_queue(
@@ -909,36 +851,6 @@ void wlan_ser_purge_pdev_cmd_cb(struct wlan_objmgr_psoc *psoc,
 	wlan_serialization_purge_all_pdev_cmd(pdev);
 }
 
-static inline enum scm_scan_status
-wlan_get_scan_status_from_serialization_status(enum
-					       wlan_serialization_cmd_status
-					       status)
-{
-	enum scm_scan_status scan_status;
-
-	switch (status) {
-	case WLAN_SER_CMD_IN_PENDING_LIST:
-		scan_status = SCAN_IS_PENDING;
-		break;
-	case WLAN_SER_CMD_IN_ACTIVE_LIST:
-		scan_status = SCAN_IS_ACTIVE;
-		break;
-	case WLAN_SER_CMDS_IN_ALL_LISTS:
-		scan_status = SCAN_IS_ACTIVE_AND_PENDING;
-		break;
-	case WLAN_SER_CMD_NOT_FOUND:
-		scan_status = SCAN_NOT_IN_PROGRESS;
-		break;
-	default:
-		scm_warn("invalid serialization status %d", status);
-		QDF_ASSERT(0);
-		scan_status = SCAN_NOT_IN_PROGRESS;
-		break;
-	}
-
-	return scan_status;
-}
-
 void wlan_serialization_purge_all_cmd(struct wlan_objmgr_psoc *psoc)
 {
 	wlan_objmgr_iterate_obj_list(psoc, WLAN_PDEV_OP,
@@ -1093,32 +1005,4 @@ QDF_STATUS wlan_ser_vdev_queue_disable(struct wlan_objmgr_vdev *vdev)
 		  wlan_vdev_get_id(vdev));
 
 	return QDF_STATUS_SUCCESS;
-}
-
-enum scm_scan_status
-wlan_get_vdev_status(struct wlan_objmgr_vdev *vdev)
-{
-	enum wlan_serialization_cmd_status status;
-
-	if (!vdev) {
-		ser_err("null vdev");
-		return SCAN_NOT_IN_PROGRESS;
-	}
-	status = wlan_serialization_vdev_scan_status(vdev);
-
-	return wlan_get_scan_status_from_serialization_status(status);
-}
-
-enum scm_scan_status
-wlan_get_pdev_status(struct wlan_objmgr_pdev *pdev)
-{
-	enum wlan_serialization_cmd_status status;
-
-	if (!pdev) {
-		ser_err("null pdev");
-		return SCAN_NOT_IN_PROGRESS;
-	}
-	status = wlan_serialization_pdev_scan_status(pdev);
-
-	return wlan_get_scan_status_from_serialization_status(status);
 }

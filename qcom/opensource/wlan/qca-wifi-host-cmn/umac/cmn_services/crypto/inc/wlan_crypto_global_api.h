@@ -659,6 +659,29 @@ uint16_t wlan_crypto_get_keyid(uint8_t *data, int hdrlen);
 void wlan_crypto_restore_keys(struct wlan_objmgr_vdev *vdev);
 
 /**
+ * wlan_crypto_check_open_none - called by ucfg to check for open security
+ * @psoc: psoc pointer
+ * @vdev_id: vdev id
+ *
+ * This function gets called from ucfg to check open security.
+ *
+ * Return: true or false
+ */
+bool wlan_crypto_check_open_none(struct wlan_objmgr_psoc *psoc,
+				 uint8_t vedv_id);
+
+/**
+ * wlan_crypto_check_wep - called by ucfg to check for WEP security
+ * @psoc: psoc pointer
+ * @vdev_id: vdev id
+ *
+ * This function gets called from ucfg to check WEP security.
+ *
+ * Return: true or false
+ */
+bool wlan_crypto_check_wep(struct wlan_objmgr_psoc *psoc, uint8_t vedv_id);
+
+/**
  * wlan_crypto_check_rsn_match - called by ucfg to check for RSN match
  * @psoc: psoc pointer
  * @vdev_id: vdev id
@@ -1046,7 +1069,7 @@ wlan_crypto_selective_clear_sae_single_pmk_entries(
 		struct wlan_objmgr_vdev *vdev, struct qdf_mac_addr *conn_bssid);
 
 /**
- * wlan_crypto_set_sae_single_pmk_bss_cap - Set the peer SAE sinlge pmk
+ * wlan_crypto_set_sae_single_pmk_bss_cap - Set the peer SAE single pmk
  * feature supported status
  * @vdev: Vdev
  * @bssid: BSSID for which the flag is to be set
@@ -1058,7 +1081,7 @@ void wlan_crypto_set_sae_single_pmk_bss_cap(struct wlan_objmgr_vdev *vdev,
 					    bool single_pmk_capable_bss);
 
 /**
- * wlan_crypto_set_sae_single_pmk_bss_cap - Set the peer SAE sinlge pmk info
+ * wlan_crypto_set_sae_single_pmk_info - Set the peer SAE single pmk info
  * @vdev: Vdev
  * @roam_sync_pmksa: pmk info for roamed AP
  */

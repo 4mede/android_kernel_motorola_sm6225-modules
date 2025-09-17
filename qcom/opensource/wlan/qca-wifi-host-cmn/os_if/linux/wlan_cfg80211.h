@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -32,7 +32,6 @@
 #include <qca_vendor.h>
 #include <qdf_nbuf.h>
 #include "qal_devcfg.h"
-#include "wlan_osif_features.h"
 
 #define osif_alert(params...) \
 	QDF_TRACE_FATAL(QDF_MODULE_ID_OS_IF, params)
@@ -48,8 +47,6 @@
 	QDF_TRACE_DEBUG(QDF_MODULE_ID_OS_IF, params)
 #define osif_rl_debug(params...) \
 	QDF_TRACE_DEBUG_RL(QDF_MODULE_ID_OS_IF, params)
-#define osif_err_rl(params...) \
-	QDF_TRACE_ERROR_RL(QDF_MODULE_ID_OS_IF, params)
 
 #define osif_nofl_alert(params...) \
 	QDF_TRACE_FATAL_NO_FL(QDF_MODULE_ID_OS_IF, params)
@@ -142,9 +139,10 @@
  * @QCA_NL80211_VENDOR_SUBCMD_WIFI_FW_STATS_INDEX: Wifi FW stats index
  * @QCA_NL80211_VENDOR_SUBCMD_MBSSID_TX_VDEV_STATUS_INDEX:
  *	MBSSID TX VDEV status index
- * @QCA_NL80211_VENDOR_SUBCMD_THERMAL_INDEX: Report thermal event index
  * @QCA_NL80211_VENDOR_SUBCMD_CONFIG_TWT_INDEX: TWT config index
  * @QCA_NL80211_VENDOR_SUBCMD_PEER_CFR_CAPTURE_CFG_INDEX: CFR data event index
+ * @QCA_NL80211_VENDOR_SUBCMD_DRIVER_DISCONNECT_REASON_INDEX:
+ *	Driver disconnect reason index
  */
 
 enum qca_nl80211_vendor_subcmds_index {
@@ -237,15 +235,12 @@ enum qca_nl80211_vendor_subcmds_index {
 	QCA_NL80211_VENDOR_SUBCMD_UPDATE_SSID_INDEX,
 	QCA_NL80211_VENDOR_SUBCMD_WIFI_FW_STATS_INDEX,
 	QCA_NL80211_VENDOR_SUBCMD_MBSSID_TX_VDEV_STATUS_INDEX,
-	QCA_NL80211_VENDOR_SUBCMD_THERMAL_INDEX,
+	QCA_NL80211_VENDOR_SUBCMD_DRIVER_DISCONNECT_REASON_INDEX,
 #ifdef WLAN_SUPPORT_TWT
 	QCA_NL80211_VENDOR_SUBCMD_CONFIG_TWT_INDEX,
 #endif
 #ifdef WLAN_CFR_ENABLE
 	QCA_NL80211_VENDOR_SUBCMD_PEER_CFR_CAPTURE_CFG_INDEX,
-#endif
-#ifdef WLAN_FEATURE_CONNECTIVITY_LOGGING
-	QCA_NL80211_VENDOR_SUBCMD_DIAG_EVENT_INDEX,
 #endif
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 	QCA_NL80211_VENDOR_SUBCMD_ROAM_EVENTS_INDEX,
@@ -304,16 +299,10 @@ nla_fail:
 /* For kernel version <= 4.20, driver needs to provide policy */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0))
 #define VENDOR_NLA_POLICY_MAC_ADDR NLA_POLICY_ETH_ADDR
-#define VENDOR_NLA_POLICY_IPV4_ADDR NLA_POLICY_EXACT_LEN(QDF_IPV4_ADDR_SIZE)
-#define VENDOR_NLA_POLICY_IPV6_ADDR NLA_POLICY_EXACT_LEN(QDF_IPV6_ADDR_SIZE)
 #else
 #define VENDOR_NLA_POLICY_MAC_ADDR \
 	{.type = NLA_UNSPEC, .len = QDF_MAC_ADDR_SIZE}
 #define NLA_EXACT_LEN NLA_UNSPEC
-#define VENDOR_NLA_POLICY_IPV4_ADDR \
-	{.type = NLA_EXACT_LEN, .len = QDF_IPV4_ADDR_SIZE}
-#define VENDOR_NLA_POLICY_IPV6_ADDR \
-	{.type = NLA_EXACT_LEN, .len = QDF_IPV6_ADDR_SIZE}
 #endif /*End of (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 20, 0) */
 
 #if defined(NBUF_MEMORY_DEBUG) && defined(NETLINK_BUF_TRACK)
@@ -459,61 +448,4 @@ wlan_cfg80211_nla_put_u64(struct sk_buff *skb, int attrtype, u64 value)
 	return nla_put_u64_64bit(skb, attrtype, value, NL80211_ATTR_PAD);
 }
 #endif
-
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0))
-static inline ssize_t
-wlan_cfg80211_nla_strscpy(char *dst, const struct nlattr *nla, size_t dstsize)
-{
-	return nla_strlcpy(dst, nla, dstsize);
-}
-#else
-static inline ssize_t
-wlan_cfg80211_nla_strscpy(char *dst, const struct nlattr *nla, size_t dstsize)
-{
-	return nla_strscpy(dst, nla, dstsize);
-}
-#endif
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
-static inline int wlan_cfg80211_register_netdevice(struct net_device *dev)
-{
-	return cfg80211_register_netdevice(dev);
-}
-#else
-static inline int wlan_cfg80211_register_netdevice(struct net_device *dev)
-{
-	return register_netdevice(dev);
-}
-#endif
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
-static inline void wlan_cfg80211_unregister_netdevice(struct net_device *dev)
-{
-	cfg80211_unregister_netdevice(dev);
-}
-#else
-static inline void wlan_cfg80211_unregister_netdevice(struct net_device *dev)
-{
-	unregister_netdevice(dev);
-}
-#endif
-
-#ifdef CFG80211_SINGLE_NETDEV_MULTI_LINK_SUPPORT
-static inline
-void wlan_cfg80211_ch_switch_notify(struct net_device *dev,
-				    struct cfg80211_chan_def *chandef,
-				    unsigned int link_id)
-{
-	cfg80211_ch_switch_notify(dev, chandef, link_id);
-}
-#else
-static inline
-void wlan_cfg80211_ch_switch_notify(struct net_device *dev,
-				    struct cfg80211_chan_def *chandef,
-				    unsigned int link_id)
-{
-	cfg80211_ch_switch_notify(dev, chandef);
-}
-#endif
-
 #endif

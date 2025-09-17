@@ -523,7 +523,8 @@ cm_roam_scan_offload_fill_lfr3_config(struct wlan_objmgr_vdev *vdev,
 	 * Instead of making another infra, send the RSN-CAPS in MSB of
 	 * beacon Caps.
 	 */
-	rsn_caps = rso_cfg->orig_sec_info.rsn_caps;
+	/* RSN caps with global user MFP which can be used for cross-AKM roam */
+	rsn_caps = rso_cfg->rso_rsn_caps;
 
 	/* Fill LFR3 specific self capabilities for roam scan mode TLV */
 	self_caps.ess = 1;
@@ -1001,6 +1002,7 @@ cm_roam_scan_offload_rssi_thresh(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 	struct wlan_mlme_psoc_ext_obj *mlme_obj;
 	struct wlan_mlme_lfr_cfg *lfr_cfg;
 	struct rso_config_params *rso_config;
+	struct wlan_objmgr_vdev *vdev;
 
 	mlme_obj = mlme_get_psoc_ext_obj(psoc);
 	if (!mlme_obj)
@@ -1032,6 +1034,40 @@ cm_roam_scan_offload_rssi_thresh(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 	else
 		params->hi_rssi_scan_rssi_delta =
 			rso_cfg->cfg_param.hi_rssi_scan_rssi_delta;
+	/*
+	 * When the STA operating band is 2.4/5 GHz and if the high RSSI delta
+	 * is configured through vendor command then the priority should be
+	 * given to it and the high RSSI delta value will be overridden with it.
+	 */
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
+						    WLAN_MLME_CM_ID);
+	if (!vdev) {
+		mlme_err("Cannot set high RSSI offset as vdev object is NULL for vdev %d",
+			 vdev_id);
+	} else {
+		qdf_freq_t op_freq;
+
+		op_freq = wlan_get_operation_chan_freq(vdev);
+		if (!WLAN_REG_IS_6GHZ_CHAN_FREQ(op_freq)) {
+			uint8_t roam_high_rssi_delta;
+
+			roam_high_rssi_delta =
+				wlan_cm_get_roam_scan_high_rssi_offset(psoc);
+			if (roam_high_rssi_delta)
+				params->hi_rssi_scan_rssi_delta =
+							roam_high_rssi_delta;
+			/*
+			 * Firmware will use this flag to enable 5 to 6 GHz
+			 * high RSSI roam
+			 */
+			if (roam_high_rssi_delta &&
+			    WLAN_REG_IS_5GHZ_CH_FREQ(op_freq))
+				params->flags |=
+					ROAM_SCAN_RSSI_THRESHOLD_FLAG_ROAM_HI_RSSI_EN_ON_5G;
+		}
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_CM_ID);
+	}
+
 	params->hi_rssi_scan_rssi_ub =
 		rso_cfg->cfg_param.hi_rssi_scan_rssi_ub;
 	params->raise_rssi_thresh_5g = lfr_cfg->rssi_boost_threshold_5g;
@@ -1621,6 +1657,13 @@ cm_check_band_freq_match(enum band_info band, qdf_freq_t freq)
 		return true;
 
 	if (band == BAND_5G && WLAN_REG_IS_5GHZ_CH_FREQ(freq))
+		return true;
+
+	/*
+	 * Not adding the band check for now as band_info will be soon
+	 * replaced with reg_wifi_band enum
+	 */
+	if (WLAN_REG_IS_6GHZ_CHAN_FREQ(freq))
 		return true;
 
 	return false;
@@ -2240,6 +2283,8 @@ cm_roam_scan_offload_fill_scan_params(struct wlan_objmgr_psoc *psoc,
 	/* Parameters updated after association is complete */
 	wlan_scan_cfg_get_passive_dwelltime(psoc,
 					    &scan_params->dwell_time_passive);
+	wlan_scan_cfg_get_min_dwelltime_6g(psoc,
+					   &scan_params->min_dwell_time_6ghz);
 	/*
 	 * Here is the formula,
 	 * T(HomeAway) = N * T(dwell) + (N+1) * T(cs)
@@ -3289,6 +3334,59 @@ cm_akm_roam_allowed(struct wlan_objmgr_psoc *psoc,
 
 	return QDF_STATUS_SUCCESS;
 }
+
+QDF_STATUS cm_set_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc,
+					     uint8_t vdev_id,
+					     uint8_t param_value)
+{
+	struct rso_config *rso_cfg;
+	struct wlan_objmgr_vdev *vdev;
+	struct wlan_roam_offload_scan_rssi_params *roam_rssi_params;
+	QDF_STATUS status = QDF_STATUS_E_INVAL;
+	qdf_freq_t op_freq;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
+						    WLAN_MLME_CM_ID);
+	if (!vdev) {
+		mlme_err("vdev object is NULL for vdev %d", vdev_id);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	op_freq = wlan_get_operation_chan_freq(vdev);
+	if (WLAN_REG_IS_6GHZ_CHAN_FREQ(op_freq)) {
+		mlme_err("vdev:%d High RSSI offset can't be set in 6 GHz band",
+			 vdev_id);
+		goto rel_vdev_ref;
+	}
+
+	rso_cfg = wlan_cm_get_rso_config(vdev);
+	if (!rso_cfg)
+		goto rel_vdev_ref;
+
+	roam_rssi_params = qdf_mem_malloc(sizeof(*roam_rssi_params));
+	if (!roam_rssi_params)
+		goto rel_vdev_ref;
+
+	wlan_cm_set_roam_scan_high_rssi_offset(psoc, param_value);
+	qdf_mem_zero(roam_rssi_params, sizeof(*roam_rssi_params));
+	cm_roam_scan_offload_rssi_thresh(psoc, vdev_id,
+					 roam_rssi_params, rso_cfg);
+	mlme_debug("vdev:%d Configured high RSSI delta=%d, 5 GHZ roam flag=%d",
+		   vdev_id, roam_rssi_params->hi_rssi_scan_rssi_delta,
+		   (roam_rssi_params->flags &
+		    ROAM_SCAN_RSSI_THRESHOLD_FLAG_ROAM_HI_RSSI_EN_ON_5G));
+
+	status = wlan_cm_tgt_send_roam_scan_offload_rssi_params(
+							vdev, roam_rssi_params);
+	if (QDF_IS_STATUS_ERROR(status))
+		mlme_err("fail to set roam scan high RSSI offset");
+
+	qdf_mem_free(roam_rssi_params);
+rel_vdev_ref:
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_CM_ID);
+
+	return status;
+}
 #endif
 
 #ifdef WLAN_ADAPTIVE_11R
@@ -3616,7 +3714,7 @@ cm_roam_switch_to_deinit(struct wlan_objmgr_pdev *pdev,
 			if (QDF_IS_STATUS_ERROR(status))
 				mlme_err("ROAM: Unable to clear roam scan mode");
 		}
-
+		break;
 	case WLAN_ROAM_INIT:
 		break;
 
@@ -3993,7 +4091,7 @@ cm_roam_switch_to_roam_start(struct wlan_objmgr_pdev *pdev,
 					    WLAN_ROAMING_IN_PROG);
 			break;
 		}
-		/* fallthrough */
+		fallthrough;
 	case WLAN_ROAM_INIT:
 	case WLAN_ROAM_DEINIT:
 	case WLAN_ROAM_SYNCH_IN_PROG:
@@ -4055,7 +4153,7 @@ cm_roam_switch_to_roam_sync(struct wlan_objmgr_pdev *pdev,
 		 * transition to WLAN_ROAM_SYNCH_IN_PROG not allowed otherwise
 		 * if we're already RSO stopped, fall through to return failure
 		 */
-		/* fallthrough */
+		fallthrough;
 	case WLAN_ROAM_INIT:
 	case WLAN_ROAM_DEINIT:
 	case WLAN_ROAM_SYNCH_IN_PROG:
@@ -5129,6 +5227,7 @@ QDF_STATUS cm_start_roam_invoke(struct wlan_objmgr_psoc *psoc,
 	struct qdf_mac_addr connected_bssid;
 	uint8_t vdev_id = vdev->vdev_objmgr.vdev_id;
 	bool roam_offload_enabled = cm_roam_offload_enabled(psoc);
+	struct rso_config *rso_cfg;
 
 	roam_control_bitmap = mlme_get_operations_bitmap(psoc, vdev_id);
 	if (roam_offload_enabled && (roam_control_bitmap ||
@@ -5147,6 +5246,10 @@ QDF_STATUS cm_start_roam_invoke(struct wlan_objmgr_psoc *psoc,
 		return QDF_STATUS_E_FAILURE;
 	}
 
+	rso_cfg = wlan_cm_get_rso_config(vdev);
+	if (!rso_cfg)
+		return QDF_STATUS_E_NULL_VALUE;
+
 	/* Ignore BSSID and channel validation for FW host roam */
 	if (source == CM_ROAMING_FW)
 		goto send_evt;
@@ -5157,13 +5260,17 @@ QDF_STATUS cm_start_roam_invoke(struct wlan_objmgr_psoc *psoc,
 			qdf_mem_free(cm_req);
 			return QDF_STATUS_E_NOSUPPORT;
 		}
+
 		cm_req->roam_req.req.forced_roaming = true;
+		if (source == CM_ROAMING_HOST)
+			rso_cfg->is_forced_roaming = true;
 		source = CM_ROAMING_NUD_FAILURE;
 		goto send_evt;
 	}
 
 	if (qdf_is_macaddr_broadcast(bssid)) {
 		qdf_copy_macaddr(&cm_req->roam_req.req.bssid, bssid);
+		qdf_copy_macaddr(&rso_cfg->roam_invoke_bssid, bssid);
 		mlme_debug("Roam only if better candidate found else stick to current AP");
 		goto send_evt;
 	}
@@ -5186,6 +5293,15 @@ QDF_STATUS cm_start_roam_invoke(struct wlan_objmgr_psoc *psoc,
 
 send_evt:
 	cm_req->roam_req.req.source = source;
+
+	/* Storing source information in rso cfg as if FW aborts
+	 * roam host will delete roam req from queue.
+	 * In roam invoke failure, host will read rso cfg params
+	 * information and disconnect if needed.
+	 */
+	if (source == CM_ROAMING_HOST ||
+	    source == CM_ROAMING_NUD_FAILURE)
+		rso_cfg->roam_invoke_source = source;
 
 	cm_req->roam_req.req.vdev_id = vdev_id;
 	/*

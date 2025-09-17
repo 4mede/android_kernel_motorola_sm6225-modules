@@ -81,11 +81,6 @@ struct ipahal_rt_rule_gen_params {
  * @retain_hdr: to retain the removed header in header removal
  * @id: Rule ID
  * @cnt_idx: stats counter index
- * @close_aggr_irq_mod: close aggregation/coalescing and close GSI
- *  interrupt moderation
- * @ttl_update: bool to indicate whether TTL update is needed or not.
- * @qos_class: QOS classification value.
- * @skip_ingress: bool to skip ingress policing.
  * @eq_attrib: Equations and their params in the rule
  * @rule_size: Rule size in memory
  */
@@ -98,10 +93,6 @@ struct ipahal_rt_rule_entry {
 	bool retain_hdr;
 	u32 id;
 	u8 cnt_idx;
-	u8 close_aggr_irq_mod;
-	u8 ttl_update;
-	u8 qos_class;
-	u8 skip_ingress;
 	struct ipa_ipfltri_rule_eq eq_attrib;
 	u32 rule_size;
 };
@@ -315,14 +306,6 @@ int ipahal_rt_parse_hw_rule(u8 *rule_addr,
  */
 int ipahal_flt_parse_hw_rule(u8 *rule_addr,
 	struct ipahal_flt_rule_entry *rule);
-
-/*
- * ipa_fltrt_get_aligned_lcl_bdy_size() - Calculate real SRAM block aligned size
- *  required for flt table bodies
- * @num_lcl_tbls: [in] Number of the tables
- * @total_sz_lcl_tbls: [in] The size in driver cashe
- */
-u32 ipa_fltrt_get_aligned_lcl_bdy_size(u32 num_lcl_tbls, u32 total_sz_lcl_tbls);
 
 
 #endif /* _IPAHAL_FLTRT_H_ */

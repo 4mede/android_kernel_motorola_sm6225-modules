@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -20,6 +21,9 @@
 #include "htc_internal.h"
 #include "htc_credit_history.h"
 #include <qdf_nbuf.h>           /* qdf_nbuf_t */
+
+/* HTC Control message receive timeout msec */
+#define HTC_CONTROL_RX_TIMEOUT     6000
 
 #if defined(WLAN_DEBUG) || defined(DEBUG)
 void debug_dump_bytes(uint8_t *buffer, uint16_t length, char *pDescription)
@@ -394,6 +398,7 @@ QDF_STATUS htc_rx_completion_handler(void *Context, qdf_nbuf_t netbuf,
 			uint16_t message_id;
 			HTC_UNKNOWN_MSG *htc_msg;
 			bool wow_nack;
+			uint16_t reason_code;
 
 			/* remove HTC header */
 			qdf_nbuf_pull_head(netbuf, HTC_HDR_LENGTH);
@@ -430,6 +435,7 @@ QDF_STATUS htc_rx_completion_handler(void *Context, qdf_nbuf_t netbuf,
 				/* Requester will clear this flag */
 				target->CtrlResponseProcessing = true;
 				UNLOCK_HTC_RX(target);
+
 				qdf_event_set(&target->ctrl_response_valid);
 				break;
 #ifdef HTC_MSG_WAKEUP_FROM_SUSPEND_ID
@@ -451,24 +457,28 @@ QDF_STATUS htc_rx_completion_handler(void *Context, qdf_nbuf_t netbuf,
 #endif
 			case HTC_MSG_SEND_SUSPEND_COMPLETE:
 				wow_nack = false;
+				reason_code = 0;
 				htc_credit_record(HTC_SUSPEND_ACK,
 					pEndpoint->TxCredits,
 					HTC_PACKET_QUEUE_DEPTH(
 					&pEndpoint->TxQueue));
 				target->HTCInitInfo.TargetSendSuspendComplete(
 					target->HTCInitInfo.target_psoc,
-					wow_nack);
+					wow_nack, reason_code);
 
 				break;
 			case HTC_MSG_NACK_SUSPEND:
 				wow_nack = true;
+				reason_code = HTC_GET_FIELD(htc_msg,
+							    HTC_UNKNOWN_MSG,
+							    METADATA);
 				htc_credit_record(HTC_SUSPEND_ACK,
 					pEndpoint->TxCredits,
 					HTC_PACKET_QUEUE_DEPTH(
 					&pEndpoint->TxQueue));
 				target->HTCInitInfo.TargetSendSuspendComplete(
 					target->HTCInitInfo.target_psoc,
-					wow_nack);
+					wow_nack, reason_code);
 				break;
 			}
 
@@ -615,7 +625,7 @@ QDF_STATUS htc_wait_recv_ctrl_message(HTC_TARGET *target)
 
 	/* Wait for BMI request/response transaction to complete */
 	if (qdf_wait_single_event(&target->ctrl_response_valid,
-				  (target->HTCInitInfo.htc_ready_timeout_ms))) {
+				  HTC_CONTROL_RX_TIMEOUT)) {
 		AR_DEBUG_PRINTF(ATH_DEBUG_ERR,
 			("Failed to receive control message\n"));
 		return QDF_STATUS_E_FAILURE;

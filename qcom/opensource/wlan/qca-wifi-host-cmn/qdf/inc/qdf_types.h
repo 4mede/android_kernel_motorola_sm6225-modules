@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -367,6 +367,7 @@ typedef bool (*qdf_irqlocked_func_t)(void *);
  * @QDF_MODULE_ID_DISA: DISA (encryption test) module ID
  * @QDF_MODULE_ID_GREEN_AP: Green AP related logging
  * @QDF_MODULE_ID_FTM: FTM module ID
+ * @QDF_MODULE_ID_EXTAP: Extender AP module ID
  * @QDF_MODULE_ID_FD: FILS discovery logging
  * @QDF_MODULE_ID_OCB: OCB module ID
  * @QDF_MODULE_ID_IPA: IPA module ID
@@ -378,7 +379,7 @@ typedef bool (*qdf_irqlocked_func_t)(void *);
  * @QDF_MODULE_ID_SM_ENGINE: SM engine module ID
  * @QDF_MODULE_ID_CMN_MLME: CMN MLME module ID
  * @QDF_MODULE_ID_CFR: CFR module ID
- * @QDF_MODULE_ID_DP_TX_CAPTURE: Tx capture enhancement feature ID
+ * @QDF_MODULE_ID_TX_CAPTURE: Tx capture enhancement feature ID
  * @QDF_MODULE_ID_INTEROP_ISSUES_AP: interop issues ap module ID
  * @QDF_MODULE_ID_BLACKLIST_MGR: Blacklist Manager module
  * @QDF_MODULE_ID_QLD: QCA Live Debug module ID
@@ -395,33 +396,6 @@ typedef bool (*qdf_irqlocked_func_t)(void *);
  * @QDF_MODULE_ID_MSCS: MSCS feature ID
  * @QDF_MODULE_ID_GPIO: GPIO configuration module ID
  * @QDF_MODULE_ID_DIAG: Host diag module ID
- * @QDF_MODULE_ID_DP_INIT: INIT/DEINIT path of datapath module ID
- * @QDF_MODULE_ID_DP_TX: TX path of datapath module ID
- * @QDF_MODULE_ID_DP_RX: RX path of datapath module ID
- * @QDF_MODULE_ID_DP_STATS: TX/RX stats, AST stats module ID
- * @QDF_MODULE_ID_DP_HTT: Firmware to host DP event handling module ID
- * @QDF_MODULE_ID_DP_PEER: DP peer module ID
- * @QDF_MODULE_ID_DP_RX_ERROR: Packet handling from WBM release ring module ID
- * @QDF_MODULE_ID_DP_HTT_TX_STATS: FW to host Tx  PPDU stats module ID
- * @QDF_MODULE_ID_DP_RX_MON_STATUS: RX mon status ring module ID
- * @QDF_MODULE_ID_DP_RX_MON_DEST: Monitor ode processing module ID
- * @QDF_MODULE_ID_DP_REO: REO command status module ID
- * @QDF_MODULE_ID_DP_TX_COMP: TX completion module ID
- * @QDF_MODULE_ID_DP_VDEV: DP Vdev module ID
- * @QDF_MODULE_ID_DP_CDP: Configuration module ID
- * @QDF_MODULE_ID_TSO: TSO module ID
- * @QDF_MODULE_ID_ME: Multicast Enhancement module ID
- * @QDF_MODULE_ID_QWRAP: QWRAP module ID
- * @QDF_MODULE_ID_DBDC_REP: DBDC repeater module ID
- * @QDF_MODULE_ID_EXT_AP: Extended AP module ID
- * @QDF_MODULE_ID_MLO: MLO Manager module ID
- * @QDF_MODULE_ID_MLOIE: MLO related IE protocol processing module ID
- * @QDF_MODULE_ID_MBSS: MBSS Framework module ID
- * @QDF_MODULE_ID_MON: Monitor module ID
- * @QDF_MODULE_ID_MGMT_RX_REO: Management rx-reorder module ID
- * @QDF_MODULE_ID_AFC: AFC module ID
- * @QDF_MODULE_ID_WIFI_RADAR: WIFI RADAR module ID
- * @QDF_MODULE_ID_TWT: TWT module ID
  * @QDF_MODULE_ID_ANY: anything
  * @QDF_MODULE_ID_MAX: Max place holder module ID
  *
@@ -524,6 +498,7 @@ typedef enum {
 	QDF_MODULE_ID_DISA,
 	QDF_MODULE_ID_GREEN_AP,
 	QDF_MODULE_ID_FTM,
+	QDF_MODULE_ID_EXTAP,
 	QDF_MODULE_ID_FD,
 	QDF_MODULE_ID_OCB,
 	QDF_MODULE_ID_IPA,
@@ -536,7 +511,7 @@ typedef enum {
 	QDF_MODULE_ID_CMN_MLME,
 	QDF_MODULE_ID_BSSCOLOR,
 	QDF_MODULE_ID_CFR,
-	QDF_MODULE_ID_DP_TX_CAPTURE,
+	QDF_MODULE_ID_TX_CAPTURE,
 	QDF_MODULE_ID_INTEROP_ISSUES_AP,
 	QDF_MODULE_ID_BLACKLIST_MGR,
 	QDF_MODULE_ID_QLD,
@@ -553,33 +528,6 @@ typedef enum {
 	QDF_MODULE_ID_MSCS,
 	QDF_MODULE_ID_GPIO,
 	QDF_MODULE_ID_DIAG,
-	QDF_MODULE_ID_DP_INIT,
-	QDF_MODULE_ID_DP_TX,
-	QDF_MODULE_ID_DP_RX,
-	QDF_MODULE_ID_DP_STATS,
-	QDF_MODULE_ID_DP_HTT,
-	QDF_MODULE_ID_DP_PEER,
-	QDF_MODULE_ID_DP_RX_ERROR,
-	QDF_MODULE_ID_DP_HTT_TX_STATS,
-	QDF_MODULE_ID_DP_RX_MON_STATUS,
-	QDF_MODULE_ID_DP_RX_MON_DEST,
-	QDF_MODULE_ID_DP_REO,
-	QDF_MODULE_ID_DP_TX_COMP,
-	QDF_MODULE_ID_DP_VDEV,
-	QDF_MODULE_ID_DP_CDP,
-	QDF_MODULE_ID_TSO,
-	QDF_MODULE_ID_ME,
-	QDF_MODULE_ID_QWRAP,
-	QDF_MODULE_ID_DBDC_REP,
-	QDF_MODULE_ID_EXT_AP,
-	QDF_MODULE_ID_MLO,
-	QDF_MODULE_ID_MLOIE,
-	QDF_MODULE_ID_MBSS,
-	QDF_MODULE_ID_MON,
-	QDF_MODULE_ID_MGMT_RX_REO,
-	QDF_MODULE_ID_AFC,
-	QDF_MODULE_ID_WIFI_RADAR,
-	QDF_MODULE_ID_TWT,
 	QDF_MODULE_ID_ANY,
 	QDF_MODULE_ID_MAX,
 } QDF_MODULE_ID;
@@ -1373,12 +1321,10 @@ struct qdf_tso_info_t {
  * enum qdf_suspend_type - type of suspend
  * @QDF_SYSTEM_SUSPEND: System suspend triggered wlan suspend
  * @QDF_RUNTIME_SUSPEND: Runtime pm inactivity timer triggered wlan suspend
- * @QDF_UNIT_TEST_WOW_SUSPEND: WoW unit test suspend
  */
 enum qdf_suspend_type {
 	QDF_SYSTEM_SUSPEND,
-	QDF_RUNTIME_SUSPEND,
-	QDF_UNIT_TEST_WOW_SUSPEND
+	QDF_RUNTIME_SUSPEND
 };
 
 /**
@@ -1406,18 +1352,11 @@ enum qdf_suspend_type {
  * @QDF_WMI_BUF_SEQUENCE_MISMATCH: WMI Tx completion buffer sequence mismatch
  * @QDF_HAL_REG_WRITE_FAILURE: HAL register writing failures
  * @QDF_SUSPEND_NO_CREDIT: host lack of credit after suspend
- * @QCA_HANG_BUS_FAILURE: Bus failure
  * @QDF_TASKLET_CREDIT_LATENCY_DETECT: tasklet or credit latency happened
  * @QDF_RX_REG_PKT_ROUTE_ERR: MSDU buf errors exceed thresh in REO err path
  * @QDF_VDEV_SM_OUT_OF_SYNC: Vdev SM is out of sync and connect req received
  * when already connected
  * @QDF_STATS_REQ_TIMEDOUT: Stats request timedout
- * @QDF_RSO_STOP_RSP_TIMEOUT: Firmware hasn't sent RSO stop response
- * @QDF_HOST_WAKEUP_REASON_PAGEFAULT: Host wakeup because of pagefault
- * @QDF_SCHED_TIMEOUT: Scheduler watchdog timedout
- * @QDF_SELF_PEER_DEL_FAILED: Failed to send self peer deletion cmd to fw
- * @QDF_DEL_SELF_STA_FAILED: Received del self sta without del bss
- * @QDF_FLUSH_LOGS : Recovery needed when sending flush completion to userspace
  */
 enum qdf_hang_reason {
 	QDF_REASON_UNSPECIFIED,
@@ -1443,18 +1382,10 @@ enum qdf_hang_reason {
 	QDF_WMI_BUF_SEQUENCE_MISMATCH,
 	QDF_HAL_REG_WRITE_FAILURE,
 	QDF_SUSPEND_NO_CREDIT,
-	QCA_HANG_BUS_FAILURE,
 	QDF_TASKLET_CREDIT_LATENCY_DETECT,
 	QDF_RX_REG_PKT_ROUTE_ERR,
 	QDF_VDEV_SM_OUT_OF_SYNC,
 	QDF_STATS_REQ_TIMEDOUT,
-	QDF_TX_DESC_LEAK,
-	QDF_RSO_STOP_RSP_TIMEOUT,
-	QDF_HOST_WAKEUP_REASON_PAGEFAULT,
-	QDF_SCHED_TIMEOUT,
-	QDF_SELF_PEER_DEL_FAILED,
-	QDF_DEL_SELF_STA_FAILED,
-	QDF_FLUSH_LOGS,
 };
 
 /**
@@ -1517,12 +1448,10 @@ enum qdf_context_mode {
  * enum qdf_dp_tx_rx_status - TX/RX packet status
  * @QDF_TX_RX_STATUS_INVALID: default invalid status
  * @QDF_TX_RX_STATUS_OK: successfully sent + acked
- * @QDF_TX_RX_STATUS_DISCARD: queued but not sent over air
- * @QDF_TX_RX_STATUS_NO_ACK: packet sent but no ack received
- * @QDF_TX_RX_STATUS_DROP: packet dropped due to congestion
+ * @QDF_TX_RX_STATUS_FW_DISCARD: packet not sent
+ * @QDF_TX_RX_STATUS_NO_ACK: packet sent but no ack
+ * @QDF_TX_RX_STATUS_DROP: packet dropped in host
  * @QDF_TX_RX_STATUS_DOWNLOAD_SUCC: packet delivered to target
- * @QDF_TX_RX_STATUS_DEFAULT: default status
- * @QDF_TX_RX_STATUS_MAX:
  */
 enum qdf_dp_tx_rx_status {
 	QDF_TX_RX_STATUS_INVALID,
@@ -1531,24 +1460,28 @@ enum qdf_dp_tx_rx_status {
 	QDF_TX_RX_STATUS_NO_ACK,
 	QDF_TX_RX_STATUS_DROP,
 	QDF_TX_RX_STATUS_DOWNLOAD_SUCC,
-	QDF_TX_RX_STATUS_DEFAULT,
-	QDF_TX_RX_STATUS_MAX
+	QDF_TX_RX_STATUS_MAX,
 };
 
 /**
- * enum qdf_pkt_type - TX/RX packet type
- * @QDF_TX_MGMT_PKT: Tx Management Packet
- * @QDF_TX_DATA_PKT: Tx data Packet
- * @QDF_RX_MGMT_PKT: Rx Management Packet
- * @QDF_RX_DATA_PKT: Rx data Packet
- * @QDF_INVALID_PKT: Invalid Packet type
+ * enum qdf_dp_tx_comp_status - TX COMPL packet status
+ * @QDF_TX_COMP_STATUS_OK: successfully sent + acked
+ * @QDF_TX_COMP_STATUS_STAT_DISCARD: packet not sent in FW
+ * @QDF_TX_COMP_STATUS_STAT_NO_ACK: packet sent but no ack
+ * @QDF_TX_COMP_STATUS_STAT_POSTPONE: equal HTT_TX_COMPL_IND_STAT_POSTPONE
+ * @QDF_TX_COMP_STATUS_STAT_PEER_DEL: equal HTT_TX_COMPL_IND_STAT_PEER_DEL
+ * @QDF_TX_COMP_STATUS_STAT_DROP: packet dropped in FW
+ * @QDF_TX_COMP_STATUS_STAT_INSPECT: equal HTT_TX_COMPL_IND_STAT_HOST_INSPECT
  */
-enum qdf_pkt_type {
-	QDF_TX_MGMT_PKT,
-	QDF_TX_DATA_PKT,
-	QDF_RX_MGMT_PKT,
-	QDF_RX_DATA_PKT,
-	QDF_INVALID_PKT
+enum qdf_dp_tx_comp_status {
+	QDF_TX_COMP_STATUS_OK,
+	QDF_TX_COMP_STATUS_STAT_DISCARD,
+	QDF_TX_COMP_STATUS_STAT_NO_ACK,
+	QDF_TX_COMP_STATUS_STAT_POSTPONE,
+	QDF_TX_COMP_STATUS_STAT_PEER_DEL,
+	QDF_TX_COMP_STATUS_STAT_DROP,
+	QDF_TX_COMP_STATUS_STAT_INSPECT,
+	QDF_TX_COMP_STATUS_STAT_MAX,
 };
 
 /**
@@ -1560,68 +1493,4 @@ enum qdf_dp_a_status {
 	QDF_A_STATUS_ERROR = -1,
 	QDF_A_STATUS_OK,
 };
-
-/**
- * enum qdf_iommu_attr- qdf iommu domain attribute
- * @QDF_DOMAIN_ATTR_GEOMETRY: Domain attribute geometry
- * @QDF_DOMAIN_ATTR_PAGING: Domain attribute paging
- * @QDF_DOMAIN_ATTR_WINDOWS: Domain attribute windows
- * @QDF_DOMAIN_ATTR_FSL_PAMU_STASH: Domain attribute fsl pamu stash
- * @QDF_DOMAIN_ATTR_FSL_PAMU_ENABLE: Domain attribute fsl pamu enable
- * @QDF_DOMAIN_ATTR_FSL_PAMUV1: Domain attribute fsl pamu v1
- * @QDF_DOMAIN_ATTR_NESTING: Domain attribute Nesting
- * @QDF_DOMAIN_ATTR_DMA_USE_FLUSH_QUEUE: Domain attribute dma use flush queue
- * @QDF_DOMAIN_ATTR_PT_BASE_ADDR: Domain attribute pt base address
- * @QDF_DOMAIN_ATTR_CONTEXT_BANK: Domain attribute context bank
- * @QDF_DOMAIN_ATTR_DYNAMIC: Domain attribute dynamic
- * @QDF_DOMAIN_ATTR_TTBR0: Domain attribute TTBR0
- * @QDF_DOMAIN_ATTR_CONTEXTIDR: Domain attribute contextidr
- * @QDF_DOMAIN_ATTR_PROCID: Domain attribute procid
- * @QDF_DOMAIN_ATTR_NON_FATAL_FAULTS: Domain attribute non fatal faults
- * @QDF_DOMAIN_ATTR_S1_BYPASS: Domain attribute S1 bypass
- * @QDF_DOMAIN_ATTR_ATOMIC: Domain attribute atomic
- * @QDF_DOMAIN_ATTR_SECURE_VMID: Domain attribute secure cmid
- * @QDF_DOMAIN_ATTR_FAST: Domain attribute fast
- * @QDF_DOMAIN_ATTR_PGTBL_INFO: Domain attribute pgtbl info
- * @QDF_DOMAIN_ATTR_USE_UPSTREAM_HINT: Domain attribute use upsteram hint
- * @QDF_DOMAIN_ATTR_EARLY_MAP: Domain attribute early map
- * @QDF_DOMAIN_ATTR_PAGE_TABLE_IS_COHERENT: Domain attribute page table
- * is coherrent
- * @QDF_DOMAIN_ATTR_PAGE_TABLE_FORCE_COHERENT: Domain attribute page table
- * force coherrent
- * @QDF_DOMAIN_ATTR_USE_LLC_NWA: Domain attribute use llc nwa
- * @QDF_DOMAIN_ATTR_SPLIT_TABLES: Domain attribute split tables
- * @QDF_DOMAIN_ATTR_FAULT_MODEL_NO_CFRE: Domain attribute fault model no cfre
- * @QDF_DOMAIN_ATTR_FAULT_MODEL_NO_STALL: Domain attribute fault model no stall
- * @QDF_DOMAIN_ATTR_FAULT_MODEL_HUPCF: Domain attribute fault model hupcf
- * @QDF_DOMAIN_ATTR_MAX: Domain attribute max
- */
-enum qdf_iommu_attr {
-	QDF_DOMAIN_ATTR_GEOMETRY,
-	QDF_DOMAIN_ATTR_PAGING,
-	QDF_DOMAIN_ATTR_WINDOWS,
-	QDF_DOMAIN_ATTR_FSL_PAMU_STASH,
-	QDF_DOMAIN_ATTR_FSL_PAMU_ENABLE,
-	QDF_DOMAIN_ATTR_FSL_PAMUV1,
-	QDF_DOMAIN_ATTR_NESTING,
-	QDF_DOMAIN_ATTR_DMA_USE_FLUSH_QUEUE,
-	QDF_DOMAIN_ATTR_CONTEXT_BANK,
-	QDF_DOMAIN_ATTR_NON_FATAL_FAULTS,
-	QDF_DOMAIN_ATTR_S1_BYPASS,
-	QDF_DOMAIN_ATTR_ATOMIC,
-	QDF_DOMAIN_ATTR_SECURE_VMID,
-	QDF_DOMAIN_ATTR_FAST,
-	QDF_DOMAIN_ATTR_PGTBL_INFO,
-	QDF_DOMAIN_ATTR_USE_UPSTREAM_HINT,
-	QDF_DOMAIN_ATTR_EARLY_MAP,
-	QDF_DOMAIN_ATTR_PAGE_TABLE_IS_COHERENT,
-	QDF_DOMAIN_ATTR_PAGE_TABLE_FORCE_COHERENT,
-	QDF_DOMAIN_ATTR_USE_LLC_NWA,
-	QDF_DOMAIN_ATTR_SPLIT_TABLES,
-	QDF_DOMAIN_ATTR_FAULT_MODEL_NO_CFRE,
-	QDF_DOMAIN_ATTR_FAULT_MODEL_NO_STALL,
-	QDF_DOMAIN_ATTR_FAULT_MODEL_HUPCF,
-	QDF_DOMAIN_ATTR_MAX,
-};
-
 #endif /* __QDF_TYPES_H */

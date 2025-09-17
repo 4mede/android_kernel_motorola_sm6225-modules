@@ -38,6 +38,8 @@
 #define JOIN_PROBE_REQ_TIMER_MS              200
 #define MAX_JOIN_PROBE_REQ                   5
 
+#define MAX_WAKELOCK_FOR_BSS_COLOR_CHANGE    2000
+
 /*
  * Following time is used to program WOW_TIMER_PATTERN to FW so that FW will
  * wake host up to do graceful disconnect in case PEER remains un-authorized
@@ -149,6 +151,7 @@ struct sae_auth_retry {
  * @peer_set_key_wakelock: wakelock to protect peer set key op with firmware
  * @peer_set_key_runtime_wakelock: runtime pm wakelock for set key
  * @is_key_wakelock_set: flag to check if key wakelock is pending to release
+ * @assoc_rsp: assoc rsp IE received during connection
  */
 struct peer_mlme_priv_obj {
 	uint8_t last_pn_valid;
@@ -167,6 +170,7 @@ struct peer_mlme_priv_obj {
 	qdf_wake_lock_t peer_set_key_wakelock;
 	qdf_runtime_lock_t peer_set_key_runtime_wakelock;
 	bool is_key_wakelock_set;
+	struct element_info assoc_rsp;
 };
 
 /**
@@ -447,6 +451,9 @@ struct mlme_ap_config {
  * @is_usr_ps_enabled: Is Power save enabled
  * @notify_co_located_ap_upt_rnr: Notify co located AP to update RNR or not
  * @mlme_ap: SAP related vdev private configurations
+ * @bss_color_change_wakelock: wakelock to complete bss color change
+ *				operation on bss color collision detection
+ * @bss_color_change_runtime_lock: runtime lock to complete bss color change
  */
 struct mlme_legacy_priv {
 	bool chan_switch_in_progress;
@@ -492,6 +499,8 @@ struct mlme_legacy_priv {
 	bool is_usr_ps_enabled;
 	bool notify_co_located_ap_upt_rnr;
 	struct mlme_ap_config mlme_ap;
+	qdf_wake_lock_t bss_color_change_wakelock;
+	qdf_runtime_lock_t bss_color_change_runtime_lock;
 };
 
 /**
@@ -722,6 +731,25 @@ bool mlme_get_reconn_after_assoc_timeout_flag(struct wlan_objmgr_psoc *psoc,
  * Return: Returns a pointer to the peer disconnect IEs present in vdev object
  */
 struct element_info *mlme_get_peer_disconnect_ies(struct wlan_objmgr_vdev *vdev);
+
+/**
+ * mlme_free_peer_assoc_rsp_ie() - Free the peer Assoc resp IE
+ * @peer_priv: Peer priv object
+ *
+ * Return: None
+ */
+void mlme_free_peer_assoc_rsp_ie(struct peer_mlme_priv_obj *peer_priv);
+
+/**
+ * mlme_set_peer_assoc_rsp_ie() - Cache Assoc resp IE send to peer
+ * @psoc: soc object
+ * @peer_addr: Mac address of requesting peer
+ * @ie: pointer for assoc resp IEs
+ *
+ * Return: None
+ */
+void mlme_set_peer_assoc_rsp_ie(struct wlan_objmgr_psoc *psoc,
+				uint8_t *peer_addr, struct element_info *ie);
 
 /**
  * mlme_set_peer_pmf_status() - set pmf status of peer

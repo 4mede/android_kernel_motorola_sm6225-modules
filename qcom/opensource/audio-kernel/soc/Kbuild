@@ -10,7 +10,7 @@ ifeq ($(KERNEL_BUILD), 1)
 	# These are configurable via Kconfig for kernel-based builds
 	# Need to explicitly configure for Android-based builds
 	ifeq ($(TARGET_SUPPORT), sa525m)
-		AUDIO_ROOT := $(shell pwd)/../../../../sm6225-modules/qcom/opensource/audio-kernel
+		AUDIO_ROOT := $(shell pwd)/../../../../vendor/qcom/opensource/audio-kernel
 	else
 		AUDIO_BLD_DIR := $(shell pwd)/kernel/msm-5.4
 		AUDIO_ROOT := $(AUDIO_BLD_DIR)/techpack/audio
@@ -255,3 +255,6 @@ swr_ctrl_dlkm-y := $(SWR_CTRL_OBJS)
 
 obj-$(CONFIG_WCD_SPI_AC) += wcd_spi_acc_ctl_dlkm.o
 wcd_spi_acc_ctl_dlkm-y := $(WCD_SPI_ACC_CTL_OBJS)
+
+# inject some build related information
+DEFINES += -DBUILD_TIMESTAMP=\"$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')\"

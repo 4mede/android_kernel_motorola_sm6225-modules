@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -101,10 +101,10 @@ target_if_vdev_mgr_rsp_timer_stop(struct wlan_objmgr_psoc *psoc,
 	return QDF_STATUS_E_FAILURE;
 }
 
-QDF_STATUS
-target_if_vdev_mgr_rsp_timer_start(struct wlan_objmgr_psoc *psoc,
-				   struct vdev_response_timer *vdev_rsp,
-				   enum wlan_vdev_mgr_tgt_if_rsp_bit set_bit)
+static QDF_STATUS target_if_vdev_mgr_rsp_timer_start(
+				struct wlan_objmgr_psoc *psoc,
+				struct vdev_response_timer *vdev_rsp,
+				enum wlan_vdev_mgr_tgt_if_rsp_bit set_bit)
 {
 	uint8_t rsp_pos;
 	uint8_t vdev_id;
@@ -253,11 +253,6 @@ target_if_vdev_mlme_id_2_wmi(uint32_t cfg_id)
 	case WLAN_MLME_CFG_HE_OPS:
 		wmi_id = wmi_vdev_param_set_heop;
 		break;
-#ifdef WLAN_FEATURE_11BE
-	case WLAN_MLME_CFG_EHT_OPS:
-		wmi_id = wmi_vdev_param_set_ehtop;
-		break;
-#endif
 	case WLAN_MLME_CFG_RTS_THRESHOLD:
 		wmi_id = wmi_vdev_param_rts_threshold;
 		break;
@@ -311,12 +306,6 @@ target_if_vdev_mlme_id_2_wmi(uint32_t cfg_id)
 		break;
 	case WLAN_MLME_CFG_RX_DECAP_TYPE:
 		wmi_id = wmi_vdev_param_rx_decap_type;
-		break;
-	case WLAN_MLME_CFG_ENABLE_DISABLE_RTT_RESPONDER_ROLE:
-		wmi_id = wmi_vdev_param_enable_disable_rtt_responder_role;
-		break;
-	case WLAN_MLME_CFG_ENABLE_DISABLE_RTT_INITIATOR_ROLE:
-		wmi_id = wmi_vdev_param_enable_disable_rtt_initiator_role;
 		break;
 	default:
 		wmi_id = cfg_id;
@@ -1047,47 +1036,6 @@ static QDF_STATUS target_if_vdev_mgr_multiple_vdev_restart_req_cmd(
 	return status;
 }
 
-static QDF_STATUS target_if_vdev_mgr_multiple_vdev_set_param_cmd(
-				struct wlan_objmgr_pdev *pdev,
-				struct multiple_vdev_set_param *param)
-{
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	struct wmi_unified *wmi_handle;
-	struct wlan_objmgr_psoc *psoc;
-	int param_id;
-
-	if (!pdev || !param) {
-		mlme_err("Invalid input");
-		return QDF_STATUS_E_INVAL;
-	}
-
-	psoc = wlan_pdev_get_psoc(pdev);
-	if (!psoc) {
-		mlme_err("PSOC is NULL");
-		return QDF_STATUS_E_INVAL;
-	}
-
-	wmi_handle = get_wmi_unified_hdl_from_pdev(pdev);
-	if (!wmi_handle) {
-		mlme_err("PDEV WMI Handle is NULL!");
-		return QDF_STATUS_E_INVAL;
-	}
-
-	if (param->num_vdevs > WLAN_UMAC_PDEV_MAX_VDEVS) {
-		mlme_err("param->num_vdevs: %u exceed the limit",
-			 param->num_vdevs);
-		return QDF_STATUS_E_INVAL;
-	}
-
-	param_id = target_if_vdev_mlme_id_2_wmi(param->param_id);
-	param->param_id = param_id;
-
-	status = wmi_unified_send_multiple_vdev_set_param_cmd(wmi_handle,
-							      param);
-
-	return status;
-}
-
 static QDF_STATUS target_if_vdev_mgr_beacon_send(
 					struct wlan_objmgr_vdev *vdev,
 					struct beacon_params *param)
@@ -1228,41 +1176,6 @@ static void target_if_vdev_register_tx_fils(
 }
 #endif
 
-#ifdef WLAN_FEATURE_DYNAMIC_MAC_ADDR_UPDATE
-static QDF_STATUS
-target_if_vdev_mgr_set_mac_address_send(struct qdf_mac_addr mac_addr,
-					struct qdf_mac_addr mld_addr,
-					struct wlan_objmgr_vdev *vdev)
-{
-	struct set_mac_addr_params params = {0};
-	struct wmi_unified *wmi_handle;
-
-	wmi_handle = target_if_vdev_mgr_wmi_handle_get(vdev);
-	if (!wmi_handle) {
-		mlme_err("Failed to get WMI handle!");
-		return QDF_STATUS_E_INVAL;
-	}
-
-	params.vdev_id = wlan_vdev_get_id(vdev);
-	params.mac_addr = mac_addr;
-	params.mld_addr = mld_addr;
-
-	return wmi_unified_send_set_mac_addr(wmi_handle, &params);
-}
-
-static void target_if_vdev_register_set_mac_address(
-		struct wlan_lmac_if_mlme_tx_ops *mlme_tx_ops)
-{
-	mlme_tx_ops->vdev_send_set_mac_addr =
-				target_if_vdev_mgr_set_mac_address_send;
-}
-#else
-static void target_if_vdev_register_set_mac_address(
-		struct wlan_lmac_if_mlme_tx_ops *mlme_tx_ops)
-{
-}
-#endif
-
 QDF_STATUS
 target_if_vdev_mgr_register_tx_ops(struct wlan_lmac_if_tx_ops *tx_ops)
 {
@@ -1303,8 +1216,6 @@ target_if_vdev_mgr_register_tx_ops(struct wlan_lmac_if_tx_ops *tx_ops)
 			target_if_vdev_mgr_peer_flush_tids_send;
 	mlme_tx_ops->multiple_vdev_restart_req_cmd =
 			target_if_vdev_mgr_multiple_vdev_restart_req_cmd;
-	mlme_tx_ops->multiple_vdev_set_param_cmd =
-			target_if_vdev_mgr_multiple_vdev_set_param_cmd;
 	mlme_tx_ops->beacon_cmd_send = target_if_vdev_mgr_beacon_send;
 	mlme_tx_ops->beacon_tmpl_send = target_if_vdev_mgr_beacon_tmpl_send;
 	mlme_tx_ops->vdev_set_param_send =
@@ -1331,6 +1242,5 @@ target_if_vdev_mgr_register_tx_ops(struct wlan_lmac_if_tx_ops *tx_ops)
 			target_if_wake_lock_deinit;
 	mlme_tx_ops->vdev_mgr_rsp_timer_stop =
 			target_if_vdev_mgr_rsp_timer_stop;
-	target_if_vdev_register_set_mac_address(mlme_tx_ops);
 	return QDF_STATUS_SUCCESS;
 }

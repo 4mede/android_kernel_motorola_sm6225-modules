@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -158,7 +157,7 @@ typedef enum wlan_crypto_auth_mode {
 	WLAN_CRYPTO_AUTH_SAE      = 9,
 	WLAN_CRYPTO_AUTH_FILS_SK  = 10,
 	/** Keep WLAN_CRYPTO_AUTH_MAX at the end. */
-	WLAN_CRYPTO_AUTH_MAX,
+	WLAN_CRYPTO_AUTH_MAX      = WLAN_CRYPTO_AUTH_FILS_SK,
 } wlan_crypto_auth_mode;
 
 /* crypto capabilities */
@@ -224,7 +223,7 @@ typedef enum wlan_crypto_key_mgmt {
 	WLAN_CRYPTO_KEY_MGMT_FT_PSK_SHA384         = 25,
 	WLAN_CRYPTO_KEY_MGMT_PSK_SHA384            = 26,
 	/** Keep WLAN_CRYPTO_KEY_MGMT_MAX at the end. */
-	WLAN_CRYPTO_KEY_MGMT_MAX,
+	WLAN_CRYPTO_KEY_MGMT_MAX   = WLAN_CRYPTO_KEY_MGMT_FT_IEEE8021X_SHA384,
 } wlan_crypto_key_mgmt;
 
 enum wlan_crypto_key_type {
@@ -423,8 +422,6 @@ struct wlan_crypto_req_key {
  * @defaultkey: function pointer to set default key
  * @set_key: converged function pointer to set key in hw
  * @getpn: function pointer to get current pn value of peer
- * @register_events: function pointer to register wmi event handler
- * @deregister_events: function pointer to deregister wmi event handler
  */
 
 struct wlan_lmac_if_crypto_tx_ops {
@@ -444,8 +441,6 @@ struct wlan_lmac_if_crypto_tx_ops {
 			      enum wlan_crypto_key_type key_type);
 	QDF_STATUS(*getpn)(struct wlan_objmgr_vdev *vdev,
 			   uint8_t *macaddr, uint32_t key_type);
-	QDF_STATUS (*register_events)(struct wlan_objmgr_psoc *psoc);
-	QDF_STATUS (*deregister_events)(struct wlan_objmgr_psoc *psoc);
 };
 
 /**

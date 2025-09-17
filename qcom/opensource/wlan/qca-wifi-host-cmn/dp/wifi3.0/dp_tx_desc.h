@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -92,19 +92,6 @@ do {                                                   \
 } while (0)
 #endif /* !QCA_LL_TX_FLOW_CONTROL_V2 */
 #define MAX_POOL_BUFF_COUNT 10000
-
-#ifdef DP_TX_TRACKING
-static inline void dp_tx_desc_set_magic(struct dp_tx_desc_s *tx_desc,
-					uint32_t magic_pattern)
-{
-	tx_desc->magic = magic_pattern;
-}
-#else
-static inline void dp_tx_desc_set_magic(struct dp_tx_desc_s *tx_desc,
-					uint32_t magic_pattern)
-{
-}
-#endif
 
 QDF_STATUS dp_tx_desc_pool_alloc(struct dp_soc *soc, uint8_t pool_id,
 				 uint16_t num_elem);
@@ -264,16 +251,19 @@ dp_tx_adjust_flow_pool_state(struct dp_soc *soc,
 		soc->pause_cb(pool->flow_pool_id,
 			      WLAN_NETIF_PRIORITY_QUEUE_OFF,
 			      WLAN_DATA_FLOW_CTRL_PRI);
+		/* fallthrough */
 
 	case FLOW_POOL_VO_PAUSED:
 		soc->pause_cb(pool->flow_pool_id,
 			      WLAN_NETIF_VO_QUEUE_OFF,
 			      WLAN_DATA_FLOW_CTRL_VO);
+		/* fallthrough */
 
 	case FLOW_POOL_VI_PAUSED:
 		soc->pause_cb(pool->flow_pool_id,
 			      WLAN_NETIF_VI_QUEUE_OFF,
 			      WLAN_DATA_FLOW_CTRL_VI);
+		/* fallthrough */
 
 	case FLOW_POOL_BE_BK_PAUSED:
 		soc->pause_cb(pool->flow_pool_id,
@@ -311,8 +301,7 @@ dp_tx_desc_alloc(struct dp_soc *soc, uint8_t desc_pool_id)
 			tx_desc = dp_tx_get_desc_flow_pool(pool);
 			tx_desc->pool_id = desc_pool_id;
 			tx_desc->flags = DP_TX_DESC_FLAG_ALLOCATED;
-			dp_tx_desc_set_magic(tx_desc,
-					     DP_TX_MAGIC_PATTERN_INUSE);
+
 			is_pause = dp_tx_is_threshold_reached(pool,
 							      pool->avail_desc);
 
@@ -402,8 +391,6 @@ dp_tx_desc_free(struct dp_soc *soc, struct dp_tx_desc_s *tx_desc,
 	tx_desc->vdev_id = DP_INVALID_VDEV_ID;
 	tx_desc->nbuf = NULL;
 	tx_desc->flags = 0;
-	dp_tx_desc_set_magic(tx_desc, DP_TX_MAGIC_PATTERN_FREE);
-	tx_desc->timestamp = 0;
 	dp_tx_put_desc_flow_pool(pool, tx_desc);
 	switch (pool->status) {
 	case FLOW_POOL_ACTIVE_PAUSED:
@@ -516,8 +503,6 @@ dp_tx_desc_alloc(struct dp_soc *soc, uint8_t desc_pool_id)
 			tx_desc = dp_tx_get_desc_flow_pool(pool);
 			tx_desc->pool_id = desc_pool_id;
 			tx_desc->flags = DP_TX_DESC_FLAG_ALLOCATED;
-			dp_tx_desc_set_magic(tx_desc,
-					     DP_TX_MAGIC_PATTERN_INUSE);
 			if (qdf_unlikely(pool->avail_desc < pool->stop_th)) {
 				pool->status = FLOW_POOL_ACTIVE_PAUSED;
 				qdf_spin_unlock_bh(&pool->flow_pool_lock);
@@ -570,8 +555,6 @@ dp_tx_desc_free(struct dp_soc *soc, struct dp_tx_desc_s *tx_desc,
 	tx_desc->vdev_id = DP_INVALID_VDEV_ID;
 	tx_desc->nbuf = NULL;
 	tx_desc->flags = 0;
-	dp_tx_desc_set_magic(tx_desc, DP_TX_MAGIC_PATTERN_FREE);
-	tx_desc->timestamp = 0;
 	dp_tx_put_desc_flow_pool(pool, tx_desc);
 	switch (pool->status) {
 	case FLOW_POOL_ACTIVE_PAUSED:
@@ -883,7 +866,7 @@ static inline void dp_tx_desc_update_fast_comp_flag(struct dp_soc *soc,
 static inline struct dp_tx_desc_s *dp_tx_desc_find(struct dp_soc *soc,
 		uint8_t pool_id, uint16_t page_id, uint16_t offset)
 {
-	struct dp_tx_desc_pool_s *tx_desc_pool = &soc->tx_desc[pool_id];
+	struct dp_tx_desc_pool_s *tx_desc_pool = &((soc)->tx_desc[(pool_id)]);
 
 	return tx_desc_pool->desc_pages.cacheable_pages[page_id] +
 		tx_desc_pool->elem_size * offset;

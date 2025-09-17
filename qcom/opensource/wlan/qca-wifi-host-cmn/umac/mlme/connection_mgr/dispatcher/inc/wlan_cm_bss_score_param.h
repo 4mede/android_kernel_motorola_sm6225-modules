@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -41,17 +41,6 @@
  * @oce_ap_tx_pwr_weightage: OCE AP tx power weigtage
  * @oce_subnet_id_weightage: OCE subnet id weigtage
  * @sae_pk_ap_weightage: SAE-PK AP weigtage
- * @eht_caps_weightage: EHT caps weightage
- * @mlo_weightage: MLO weightage
- * @joint_rssi_alpha: Joint RSSI alpha value
- * @joint_esp_alpha: Joint ESP alpha value
- * @joint_oce_alpha: Joint OCE alpha value
- * @low_band_rssi_boost: Flag to assign higher alpha weightage low band RSSI
- * @low_band_esp_boost: Flag to assign higher alpha weightage low band esp
- * @low_band_oce_boost: Flag to assign higher alpha weightage low band oce
- * @wlm_indication_weightage: WLM indication weightage
- * @emlsr_weightage: eMLSR weightage
- * @security_weightage: Security weightage
  */
 struct weight_cfg {
 	uint8_t rssi_weightage;
@@ -68,20 +57,6 @@ struct weight_cfg {
 	uint8_t oce_ap_tx_pwr_weightage;
 	uint8_t oce_subnet_id_weightage;
 	uint8_t sae_pk_ap_weightage;
-#ifdef WLAN_FEATURE_11BE_MLO
-	uint8_t eht_caps_weightage;
-	uint8_t mlo_weightage;
-	uint8_t joint_rssi_alpha;
-	uint8_t joint_esp_alpha;
-	uint8_t joint_oce_alpha;
-	uint8_t low_band_rssi_boost:1,
-		low_band_esp_boost:1,
-		low_band_oce_boost:1,
-		reserved:5;
-	uint8_t wlm_indication_weightage;
-	uint8_t emlsr_weightage;
-#endif
-	uint8_t security_weightage;
 };
 
 /**
@@ -142,82 +117,6 @@ struct per_slot_score {
 	uint32_t score_pcnt15_to_12;
 };
 
-#ifndef WLAN_FEATURE_11BE
-#define CM_20MHZ_BW_INDEX                  0
-#define CM_40MHZ_BW_INDEX                  1
-#define CM_80MHZ_BW_INDEX                  2
-#define CM_160MHZ_BW_INDEX                 3
-#define CM_MAX_BW_INDEX                    4
-
-#define CM_NSS_1x1_INDEX                   0
-#define CM_NSS_2x2_INDEX                   1
-#define CM_NSS_3x3_INDEX                   2
-#define CM_NSS_4x4_INDEX                   3
-#define CM_MAX_NSS_INDEX                   4
-#else
-enum cm_bw_idx {
-	CM_20MHZ_BW_INDEX = 0,
-	CM_40MHZ_BW_INDEX = 1,
-	CM_80MHZ_BW_INDEX = 2,
-	CM_160MHZ_BW_INDEX = 3,
-	CM_320MHZ_BW_INDEX = 4,
-	CM_80MHZ_BW_20MHZ_PUNCTURE_INDEX = 5,
-	CM_160MHZ_BW_40MHZ_PUNCTURE_INDEX = 6,
-	CM_160MHZ_BW_20MHZ_PUNCTURE_INDEX = 7,
-	CM_320MHZ_BW_40MHZ_80MHZ_PUNCTURE_INDEX = 8,
-	CM_320MHZ_BW_80MHZ_PUNCTURE_INDEX = 9,
-	CM_320MHZ_BW_40MHZ_PUNCTURE_INDEX = 10,
-#ifdef WLAN_FEATURE_11BE_MLO
-	CM_MLO_20_PLUS_20MHZ_BW_INDEX = 11,
-	CM_MLO_20_PLUS_40MHZ_BW_INDEX = 12,
-	CM_MLO_40_PLUS_40MHZ_BW_INDEX = 13,
-	CM_MLO_20_PLUS_80MHZ_BW_20MHZ_PUNCTURE_INDEX = 14,
-	CM_MLO_20_PLUS_80MHZ_BW_INDEX = 15,
-	CM_MLO_40_PLUS_80MHZ_BW_20MHZ_PUNCTURE_INDEX = 16,
-	CM_MLO_40_PLUS_80MHZ_BW_INDEX = 17,
-	CM_MLO_80_PLUS_80MHZ_BW_40MHZ_PUNCTURE_INDEX = 18,
-	CM_MLO_80_PLUS_80MHZ_BW_20MHZ_PUNCTURE_INDEX = 19,
-	CM_MLO_80_PLUS_80MHZ_BW_INDEX = 20,
-	CM_MLO_20_PLUS_160HZ_BW_40MHZ_PUNCTURE_INDEX = 21,
-	CM_MLO_20_PLUS_160HZ_BW_20MHZ_PUNCTURE_INDEX = 22,
-	CM_MLO_20_PLUS_160HZ_BW_INDEX = 23,
-	CM_MLO_40_PLUS_160HZ_BW_40MHZ_PUNCTURE_INDEX = 24,
-	CM_MLO_40_PLUS_160HZ_BW_20MHZ_PUNCTURE_INDEX = 25,
-	CM_MLO_40_PLUS_160HZ_BW_INDEX = 26,
-	CM_MLO_80_PLUS_160HZ_BW_60MHZ_PUNCTURE_INDEX = 27,
-	CM_MLO_80_PLUS_160HZ_BW_40MHZ_PUNCTURE_INDEX = 28,
-	CM_MLO_80_PLUS_160HZ_BW_20MHZ_PUNCTURE_INDEX = 29,
-	CM_MLO_80_PLUS_160HZ_BW_INDEX = 30,
-	CM_MLO_160_PLUS_160HZ_BW_80MHZ_PUNCTURE_INDEX = 31,
-	CM_MLO_160_PLUS_160HZ_BW_60MHZ_PUNCTURE_INDEX = 32,
-	CM_MLO_160_PLUS_160HZ_BW_40MHZ_PUNCTURE_INDEX = 33,
-	CM_MLO_160_PLUS_160HZ_BW_20MHZ_PUNCTURE_INDEX = 34,
-	CM_MLO_160_PLUS_160HZ_BW_INDEX = 35,
-#endif
-	CM_MAX_BW_INDEX
-};
-
-enum cm_nss_idx {
-	CM_NSS_1x1_INDEX,
-	CM_NSS_2x2_INDEX,
-	CM_NSS_3x3_INDEX,
-	CM_NSS_4x4_INDEX,
-#ifdef WLAN_FEATURE_11BE_MLO
-	CM_NSS_2x2_PLUS_2x2_INDEX,
-	CM_NSS_4x4_PLUS_4x4_INDEX,
-#endif
-	CM_MAX_NSS_INDEX
-};
-#endif
-
-enum cm_security_idx {
-	CM_SECURITY_WPA_INDEX,
-	CM_SECURITY_WPA2_INDEX,
-	CM_SECURITY_WPA3_INDEX,
-	CM_SECURITY_WPA_OPEN_WEP_INDEX,
-	CM_MAX_SECURITY_INDEX
-};
-
 /**
  * struct scoring_cfg - Scoring related configuration
  * @weight_cfg: weigtage config for config
@@ -231,31 +130,23 @@ enum cm_security_idx {
  * @check_assoc_disallowed: Should assoc be disallowed if MBO OCE IE indicate so
  * @vendor_roam_score_algorithm: Preferred ETP vendor roam score algorithm
  * @check_6ghz_security: check security for 6Ghz candidate
- * @relaxed_6ghz_conn_policy: check for 6Ghz relaxed connection policy
+ * @standard_6ghz_conn_policy: check for 6 GHz standard connection policy
  * @key_mgmt_mask_6ghz: user configurable mask for 6ghz AKM
- * @mlsr_link_selection: MLSR link selection config
- * @roam_tgt_score_cap: Roam score capability
- * @security_weight_per_index: security weight per index
  */
 struct scoring_cfg {
 	struct weight_cfg weight_config;
 	struct rssi_config_score rssi_score;
 	struct per_slot_score esp_qbss_scoring;
 	struct per_slot_score oce_wan_scoring;
-	uint32_t bandwidth_weight_per_index[qdf_ceil(CM_MAX_BW_INDEX, 4)];
-	uint32_t nss_weight_per_index[qdf_ceil(CM_MAX_NSS_INDEX, 4)];
+	uint32_t bandwidth_weight_per_index;
+	uint32_t nss_weight_per_index;
 	uint32_t band_weight_per_index;
-	uint8_t is_bssid_hint_priority:1,
-		 check_assoc_disallowed:1,
-		 vendor_roam_score_algorithm:1,
-		 check_6ghz_security:1,
-		 relaxed_6ghz_conn_policy:1;
+	bool is_bssid_hint_priority;
+	bool check_assoc_disallowed;
+	bool vendor_roam_score_algorithm;
+	uint8_t check_6ghz_security;
+	uint8_t standard_6ghz_conn_policy:1;
 	uint32_t key_mgmt_mask_6ghz;
-#ifdef WLAN_FEATURE_11BE_MLO
-	uint8_t mlsr_link_selection;
-#endif
-	uint32_t roam_tgt_score_cap;
-	uint32_t security_weight_per_index;
 };
 
 /**
@@ -403,23 +294,17 @@ void wlan_cm_set_6ghz_key_mgmt_mask(struct wlan_objmgr_psoc *psoc,
  */
 uint32_t wlan_cm_get_6ghz_key_mgmt_mask(struct wlan_objmgr_psoc *psoc);
 
+void wlan_cm_set_standard_6ghz_conn_policy(struct wlan_objmgr_psoc *psoc,
+					   bool value);
+
 /**
- * wlan_cm_set_relaxed_6ghz_conn_policy() - Set 6Ghz relaxed connection policy
- * @psoc: pointer to psoc object
- * @value: value to be set
- *
- * Return: void
- */
-void wlan_cm_set_relaxed_6ghz_conn_policy(struct wlan_objmgr_psoc *psoc,
-					  bool value);
-/**
- * wlan_cm_get_relaxed_6ghz_conn_policy() - Get 6Ghz relaxed connection policy
- *                                          flag
+ * wlan_cm_get_standard_6ghz_conn_policy() - Get 6Ghz standard connection
+ *					     policy
  * @psoc: pointer to psoc object
  *
  * Return: value
  */
-bool wlan_cm_get_relaxed_6ghz_conn_policy(struct wlan_objmgr_psoc *psoc);
+bool wlan_cm_get_standard_6ghz_conn_policy(struct wlan_objmgr_psoc *psoc);
 
 #else
 static inline bool
@@ -445,6 +330,18 @@ bool wlan_cm_get_check_6ghz_security(struct wlan_objmgr_psoc *psoc)
 }
 
 static inline
+void wlan_cm_set_standard_6ghz_conn_policy(struct wlan_objmgr_psoc *psoc,
+					   uint32_t value)
+{
+}
+
+static inline
+bool wlan_cm_get_standard_6ghz_conn_policy(struct wlan_objmgr_psoc *psoc)
+{
+	return false;
+}
+
+static inline
 void wlan_cm_set_6ghz_key_mgmt_mask(struct wlan_objmgr_psoc *psoc,
 				    uint32_t value) {}
 
@@ -452,17 +349,6 @@ static inline
 uint32_t wlan_cm_get_6ghz_key_mgmt_mask(struct wlan_objmgr_psoc *psoc)
 {
 	return DEFAULT_KEYMGMT_6G_MASK;
-}
-
-static inline
-void wlan_cm_set_relaxed_6ghz_conn_policy(struct wlan_objmgr_psoc *psoc,
-					  bool value)
-{}
-
-static inline
-bool wlan_cm_get_relaxed_6ghz_conn_policy(struct wlan_objmgr_psoc *psoc)
-{
-	return false;
 }
 #endif
 

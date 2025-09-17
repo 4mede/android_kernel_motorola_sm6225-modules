@@ -27,6 +27,74 @@
 #include "wlan_crypto_aes_i.h"
 #endif
 
+/* IEEE 802.11 defines */
+#define WLAN_FC0_PVER      0x0003
+#define WLAN_FC1_DIR_MASK  0x03
+#define WLAN_FC1_TODS      0x01
+#define WLAN_FC1_FROMDS    0x02
+#define WLAN_FC1_DSTODS    0x03
+#define WLAN_FC1_MOREFRAG  0x04
+#define WLAN_FC1_RETRY     0x08
+#define WLAN_FC1_PWRMGT    0x10
+#define WLAN_FC1_MOREDATA  0x20
+#define WLAN_FC1_ISWEP     0x40
+#define WLAN_FC1_ORDER     0x80
+
+#define WLAN_FC0_GET_TYPE(fc)    (((fc) & 0x0c) >> 2)
+#define WLAN_FC0_GET_STYPE(fc)   (((fc) & 0xf0) >> 4)
+
+#define WLAN_INVALID_MGMT_SEQ   0xffff
+#define WLAN_SEQ_MASK           0x0fff
+#define WLAN_QOS_TID_MASK       0x0f
+#define WLAN_GET_SEQ_FRAG(seq) ((seq) & (BIT(3) | BIT(2) | BIT(1) | BIT(0)))
+#define WLAN_GET_SEQ_SEQ(seq) \
+	(((seq) & (~(BIT(3) | BIT(2) | BIT(1) | BIT(0)))) >> 4)
+
+#define WLAN_FC0_TYPE_MGMT        0
+#define WLAN_FC0_TYPE_CTRL        1
+#define WLAN_FC0_TYPE_DATA        2
+
+/* management */
+#define WLAN_FC0_STYPE_ASSOC_REQ      0
+#define WLAN_FC0_STYPE_ASSOC_RESP     1
+#define WLAN_FC0_STYPE_REASSOC_REQ    2
+#define WLAN_FC0_STYPE_REASSOC_RESP   3
+#define WLAN_FC0_STYPE_PROBE_REQ      4
+#define WLAN_FC0_STYPE_PROBE_RESP     5
+#define WLAN_FC0_STYPE_BEACON         8
+#define WLAN_FC0_STYPE_ATIM           9
+#define WLAN_FC0_STYPE_DISASSOC      10
+#define WLAN_FC0_STYPE_AUTH          11
+#define WLAN_FC0_STYPE_DEAUTH        12
+#define WLAN_FC0_STYPE_ACTION        13
+
+/* control */
+#define WLAN_FC0_STYPE_PSPOLL        10
+#define WLAN_FC0_STYPE_RTS           11
+#define WLAN_FC0_STYPE_CTS           12
+#define WLAN_FC0_STYPE_ACK           13
+#define WLAN_FC0_STYPE_CFEND         14
+#define WLAN_FC0_STYPE_CFENDACK      15
+
+/* data */
+#define WLAN_FC0_STYPE_DATA                0
+#define WLAN_FC0_STYPE_DATA_CFACK          1
+#define WLAN_FC0_STYPE_DATA_CFPOLL         2
+#define WLAN_FC0_STYPE_DATA_CFACKPOLL      3
+#define WLAN_FC0_STYPE_NULLFUNC            4
+#define WLAN_FC0_STYPE_CFACK               5
+#define WLAN_FC0_STYPE_CFPOLL              6
+#define WLAN_FC0_STYPE_CFACKPOLL           7
+#define WLAN_FC0_STYPE_QOS_DATA            8
+#define WLAN_FC0_STYPE_QOS_DATA_CFACK      9
+#define WLAN_FC0_STYPE_QOS_DATA_CFPOLL    10
+#define WLAN_FC0_STYPE_QOS_DATA_CFACKPOLL 11
+#define WLAN_FC0_STYPE_QOS_NULL           12
+#define WLAN_FC0_STYPE_QOS_CFPOLL         14
+#define WLAN_FC0_STYPE_QOS_CFACKPOLL      15
+
+#define WLAN_TID_SIZE                    17
+#define WLAN_NONQOS_SEQ                  16
 
 /* Number of bits per byte */
 #define CRYPTO_NBBY  8
@@ -105,10 +173,6 @@ static inline void wlan_crypto_put_be64(u8 *a, u64 val)
 	((tx_ops)->crypto_tx_ops.set_key)
 #define WLAN_CRYPTO_TX_OPS_GETPN(tx_ops) \
 	((tx_ops)->crypto_tx_ops.getpn)
-#define WLAN_CRYPTO_TX_OPS_REGISTER_EVENTS(tx_ops) \
-	((tx_ops)->crypto_tx_ops.register_events)
-#define WLAN_CRYPTO_TX_OPS_DEREGISTER_EVENTS(tx_ops) \
-	((tx_ops)->crypto_tx_ops.deregister_events)
 
 /* unalligned little endian access */
 #ifndef LE_READ_2
@@ -252,7 +316,7 @@ static inline void wlan_crypto_put_be64(u8 *a, u64 val)
 #define HAS_UCAST_CIPHER(_param, _c)  ((_param)->ucastcipherset & (1 << (_c)))
 
 #define UCIPHER_IS_CLEAR(_param)   \
-		((_param)->ucastcipherset == 0)
+		HAS_UCAST_CIPHER((_param), WLAN_CRYPTO_CIPHER_NONE)
 #define UCIPHER_IS_WEP(_param)     \
 		HAS_UCAST_CIPHER((_param), WLAN_CRYPTO_CIPHER_WEP)
 #define UCIPHER_IS_TKIP(_param)    \
@@ -276,7 +340,7 @@ static inline void wlan_crypto_put_be64(u8 *a, u64 val)
 			((_param)->mcastcipherset &= (~(1)<<(_c)))
 
 #define MCIPHER_IS_CLEAR(_param)   \
-		((_param)->mcastcipherset == 0)
+		HAS_MCAST_CIPHER((_param), WLAN_CRYPTO_CIPHER_NONE)
 #define MCIPHER_IS_WEP(_param)     \
 		HAS_MCAST_CIPHER((_param), WLAN_CRYPTO_CIPHER_WEP)
 #define MCIPHER_IS_TKIP(_param)    \
@@ -292,7 +356,8 @@ static inline void wlan_crypto_put_be64(u8 *a, u64 val)
 #define MCIPHER_IS_SMS4(_param)    \
 		HAS_MCAST_CIPHER((_param), WLAN_CRYPTO_CIPHER_WAPI_SMS4)
 
-#define RESET_MGMT_CIPHERS(_param)   ((_param)->mgmtcipherset = 0)
+#define RESET_MGMT_CIPHERS(_param)   ((_param)->mgmtcipherset = \
+					(1 << WLAN_CRYPTO_CIPHER_NONE))
 #define SET_MGMT_CIPHER(_param, _c)  ((_param)->mgmtcipherset |= (1 << (_c)))
 #define HAS_MGMT_CIPHER(_param, _c)  ((_param)->mgmtcipherset & (1 << (_c)))
 #define IS_MGMT_CIPHER(_c)      ((_c == WLAN_CRYPTO_CIPHER_AES_CMAC) || \
@@ -302,8 +367,6 @@ static inline void wlan_crypto_put_be64(u8 *a, u64 val)
 
 #define IS_FILS_CIPHER(_c)      ((_c) == WLAN_CRYPTO_CIPHER_FILS_AEAD)
 
-#define MGMT_CIPHER_IS_CLEAR(_param)   \
-		((_param)->mgmtcipherset == 0)
 #define MGMT_CIPHER_IS_CMAC(_param)    \
 		HAS_MGMT_CIPHER((_param), WLAN_CRYPTO_CIPHER_AES_CMAC)
 #define MGMT_CIPHER_IS_CMAC256(_param) \
@@ -313,7 +376,8 @@ static inline void wlan_crypto_put_be64(u8 *a, u64 val)
 #define MGMT_CIPHER_IS_GMAC256(_param) \
 		HAS_MGMT_CIPHER((_param), WLAN_CRYPTO_CIPHER_AES_GMAC_256)
 
-#define RESET_KEY_MGMT(_param)   ((_param)->key_mgmt = 0)
+#define RESET_KEY_MGMT(_param)   ((_param)->key_mgmt = \
+					(1 << WLAN_CRYPTO_KEY_MGMT_NONE))
 #define SET_KEY_MGMT(_param, _c)  ((_param)->key_mgmt |= (1 << (_c)))
 #define HAS_KEY_MGMT(_param, _c)  ((_param)->key_mgmt & (1 << (_c)))
 
@@ -358,33 +422,6 @@ struct wlan_crypto_mmie {
 } __packed;
 
 /**
- * struct crypto_add_key_result - add key result structure
- * @vdev_id: unique id identifying the VDEV
- * @key_ix: key index
- * @key_flags: key flags
- * @status: status of add key
- * @peer_macaddr: MAC address of the peer
- *
- * Structure used for add key result.
- */
-struct crypto_add_key_result {
-	uint32_t vdev_id;
-	uint32_t key_ix;
-	uint32_t key_flags;
-	uint32_t status;
-	uint8_t peer_macaddr[QDF_MAC_ADDR_SIZE];
-};
-
-/**
- * typedef crypto_add_key_callback - add key callback
- * @context: opaque context that the client can use to associate the
- *  callback with the request
- * @result: result of add key
- */
-typedef void (*crypto_add_key_callback)(void *context,
-					struct crypto_add_key_result *result);
-
-/**
  * struct wlan_crypto_comp_priv - crypto component private structure
  * @crypto_params:    crypto params for the peer
  * @key:              key buffers for this peer
@@ -395,9 +432,6 @@ typedef void (*crypto_add_key_callback)(void *context,
  * @def_igtk_tx_keyid default igtk key used for this peer
  * @def_bigtk_tx_keyid default bigtk key used for this peer
  * @fils_aead_set     fils params for this peer
- * @add_key_ctx: Opaque context to be used by the caller to associate the
- *  add key request with the response
- * @add_key_cb: Callback function to be called with the add key result
  *
  */
 struct wlan_crypto_comp_priv {
@@ -410,8 +444,6 @@ struct wlan_crypto_comp_priv {
 	uint8_t def_igtk_tx_keyid;
 	uint8_t def_bigtk_tx_keyid;
 	uint8_t fils_aead_set;
-	void *add_key_ctx;
-	crypto_add_key_callback add_key_cb;
 };
 
 /**
