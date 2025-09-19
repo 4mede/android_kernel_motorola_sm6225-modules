@@ -55,7 +55,7 @@ ifneq ($(WLAN_CHIPSET),)
 ifneq ($(findstring vendor,$(LOCAL_PATH)),)
 
 ifneq ($(findstring opensource,$(LOCAL_PATH)),)
-	WLAN_BLD_DIR := $(BOARD_OPENSOURCE_DIR)/wlan
+	WLAN_BLD_DIR := sm6225-modules/qcom/opensource/wlan
 endif # opensource
 
 # Multi-ko check
