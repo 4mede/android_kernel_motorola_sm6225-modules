@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _IPAHAL_REG_H_
@@ -43,6 +44,7 @@ enum ipahal_reg_name {
 	IPA_STATE,
 	IPA_STATE_RX_ACTIVE,
 	IPA_STATE_TX0,
+	IPA_STATE_TSP,
 	IPA_STATE_AGGR_ACTIVE,
 	IPA_COUNTER_CFG,
 	IPA_STATE_GSI_TLV,
@@ -98,6 +100,8 @@ enum ipahal_reg_name {
 	IPA_DST_RSRC_GRP_23_RSRC_TYPE_n,
 	IPA_DST_RSRC_GRP_45_RSRC_TYPE_n,
 	IPA_DST_RSRC_GRP_67_RSRC_TYPE_n,
+	IPA_RSRC_GRP_CFG,
+	IPA_RSRC_GRP_CFG_EXT,
 	IPA_RX_HPS_CLIENTS_MIN_DEPTH_0,
 	IPA_RX_HPS_CLIENTS_MIN_DEPTH_1,
 	IPA_RX_HPS_CLIENTS_MAX_DEPTH_0,
@@ -142,6 +146,42 @@ enum ipahal_reg_name {
 	IPA_ENDP_GSI_CFG_TLV_n,
 	IPA_COAL_EVICT_LRU,
 	IPA_COAL_QMAP_CFG,
+	IPA_FLAVOR_0,
+	IPA_FLAVOR_9,
+	IPA_STATE_AGGR_ACTIVE_n,
+	IPA_AGGR_FORCE_CLOSE_n,
+	IPA_STAT_QUOTA_MASK_EE_n_REG_k,
+	IPA_SUSPEND_IRQ_INFO_EE_n_REG_k,
+	IPA_SUSPEND_IRQ_CLR_EE_n_REG_k,
+	IPA_SUSPEND_IRQ_EN_EE_n_REG_k,
+	IPA_STAT_TETHERING_MASK_EE_n_REG_k,
+	IPA_STAT_DROP_CNT_MASK_EE_n_REG_k,
+	IPA_FILT_ROUT_CACHE_FLUSH,
+	IPA_FILTER_CACHE_CFG_n,
+	IPA_ROUTER_CACHE_CFG_n,
+	IPA_NAT_UC_EXTERNAL_CFG,
+	IPA_NAT_UC_LOCAL_CFG,
+	IPA_NAT_UC_SHARED_CFG,
+	IPA_CONN_TRACK_UC_EXTERNAL_CFG,
+	IPA_CONN_TRACK_UC_LOCAL_CFG,
+	IPA_CONN_TRACK_UC_SHARED_CFG,
+	IPA_ULSO_CFG_IP_ID_MIN_VALUE_n,
+	IPA_ULSO_CFG_IP_ID_MAX_VALUE_n,
+	IPA_ENDP_INIT_ULSO_CFG_n,
+	IPA_ENDP_INIT_NAT_EXC_SUPPRESS_n,
+	IPA_TSP_QM_EXTERNAL_BADDR_LSB,
+	IPA_TSP_QM_EXTERNAL_BADDR_MSB,
+	IPA_TSP_QM_EXTERNAL_SIZE,
+	IPA_TSP_INGRESS_POLICING_CFG,
+	IPA_TSP_EGRESS_POLICING_CFG,
+	IPA_STAT_TSP_DROP_BASE,
+	IPA_STATE_QMNGR_QUEUE_NONEMPTY,
+	IPA_RAM_INGRESS_POLICER_DB_BASE_ADDR,
+	IPA_RAM_EGRESS_SHAPING_PROD_DB_BASE_ADDR,
+	IPA_RAM_EGRESS_SHAPING_TC_DB_BASE_ADDR,
+	IPA_COAL_MASTER_CFG,
+	IPA_IPV4_NAT_EXC_SUPPRESS_ROUT_TABLE_INDX,
+	IPA_IPV6_CONN_TRACK_EXC_SUPPRESS_ROUT_TABLE_INDX,
 	IPA_REG_MAX,
 };
 
@@ -333,6 +373,7 @@ struct ipahal_reg_timers_pulse_gran_cfg {
 	enum ipa_timers_time_gran_type gran_0;
 	enum ipa_timers_time_gran_type gran_1;
 	enum ipa_timers_time_gran_type gran_2;
+	enum ipa_timers_time_gran_type gran_3;
 };
 
 /*
@@ -443,6 +484,16 @@ struct ipahal_reg_fltrt_hash_tuple {
 };
 
 /*
+* struct ipahal_reg_fltrt_cache_tuple - IPA cache tuple register
+* @flt: cache tuple info for flt\rt
+* @undefinedX: Undefined/Unused bit fields set of the register
+*/
+struct ipahal_reg_fltrt_cache_tuple {
+	struct ipahal_reg_hash_tuple tuple;
+	u32 undefined;
+};
+
+/*
  * enum ipahal_reg_dbg_cnt_type - Debug Counter Type
  * DBG_CNT_TYPE_IPV4_FLTR - Count IPv4 filtering rules
  * DBG_CNT_TYPE_IPV4_ROUT - Count IPv4 routing rules
@@ -480,17 +531,46 @@ struct ipahal_reg_debug_cnt_ctrl {
 };
 
 /*
- * struct ipahal_reg_rsrc_grp_cfg - Min/Max values for two rsrc groups
+ * struct ipahal_reg_rsrc_grp_xy_cfg - Min/Max values for two rsrc groups
  * @x_min - first group min value
  * @x_max - first group max value
  * @y_min - second group min value
  * @y_max - second group max value
  */
-struct ipahal_reg_rsrc_grp_cfg {
+struct ipahal_reg_rsrc_grp_xy_cfg {
 	u32 x_min;
 	u32 x_max;
 	u32 y_min;
 	u32 y_max;
+};
+
+/*
+ * struct ipahal_reg_rsrc_grp_cfg - General configuration of resource group behavior
+ * @src_grp_index - Index of special source resource group
+ * @src_grp_valid - Set to 1 if a special source resrouce group exists
+ * @dst_pipe_index - Index of special destination pipe
+ * @dst_pipe_valid - Set to 1 if a special destination pipe exists
+ * @dst_grp_index - Index of special destination resource group
+ * @dst_grp_valid - Set to 1 if a special destination resrouce group exists
+ */
+struct ipahal_reg_rsrc_grp_cfg {
+	u8 src_grp_index;
+	bool src_grp_valid;
+	u8 dst_pipe_index;
+	bool dst_pipe_valid;
+	u8 dst_grp_index;
+	bool dst_grp_valid;
+};
+
+/*
+ * struct ipahal_reg_rsrc_grp_cfg_ext - General configuration of resource group behavior extended
+ * @index - Index of 2nd-priority special source resource group.
+ * 	Will be chosen only in case 1st-level priority group is not requesting service.
+ * @valid - Set to 1 if a 2nd-priority special source resrouce group exists
+ */
+struct ipahal_reg_rsrc_grp_cfg_ext {
+	u8 index;
+	bool valid;
 };
 
 /*
@@ -555,6 +635,16 @@ struct ipahal_reg_fltrt_hash_flush {
 	bool v6_flt;
 	bool v4_rt;
 	bool v4_flt;
+};
+
+/*
+* struct ipahal_reg_fltrt_cache_flush - Flt/Rt flush configuration
+* @rt - Flush Routing cache
+* @flt - Flush Filtering cache
+*/
+struct ipahal_reg_fltrt_cache_flush {
+	bool rt;
+	bool flt;
 };
 
 /*
@@ -633,6 +723,7 @@ struct ipahal_reg_tx_cfg {
 	u32 pa_mask_en;
 	bool dual_tx_enable;
 	bool sspnd_pa_no_start_state;
+	bool holb_sticky_drop_en;
 };
 
 /*
@@ -678,12 +769,32 @@ struct ipahal_reg_state_coal_master {
 /*
  * struct ipahal_reg_coal_evict_lru - IPA_COAL_EVICT_LRU register
  * @coal_vp_lru_thrshld: Connection that is opened below  this val
- *			 will not get evicted
+ *			 will not get evicted. valid till v5_2.
  * @coal_eviction_en: Enable eviction
+ * @coal_vp_lru_gran_sel: select the appropiate granularity out of 4 options
+ * Valid from v5_5.
+ * @coal_vp_lru_udp_thrshld: Coalescing eviction threshold. LRU VP
+ * stickness/inactivity defined by this threshold fot UDP connectiom.
+ * 0 mean all UDP's non sticky. Valid from v5_5.
+ * @coal_vp_lru_tcp_thrshld: Coalescing eviction threshold. LRU VP
+ * stickness/inactivity defined by this threshold fot TCP connection.
+ * 0 mean all TCP's non sticky. Valid from v5_5.
+ * @coal_vp_lru_udp_thrshld_en: Coalescing eviction enable for UDP connections
+ * when UDP pacjet arrived. 0-disable these evictions. Valid from v5_5.
+ * @coal_vp_lru_tcp_thrshld_en: Coalescing eviction enable for TCP connections
+ * when TCP pacjet arrived. 0-disable these evictions. Valid from v5_5.
+ * @coal_vp_lru_tcp_num: configured TCP NUM value , SW define when TCP/UDP will
+ * treat as exceed during eviction process. Valid from v5_5.
  */
 struct ipahal_reg_coal_evict_lru {
 	u32 coal_vp_lru_thrshld;
 	bool coal_eviction_en;
+	u8 coal_vp_lru_gran_sel;
+	u8 coal_vp_lru_udp_thrshld;
+	u8 coal_vp_lru_tcp_thrshld;
+	bool coal_vp_lru_udp_thrshld_en;
+	bool coal_vp_lru_tcp_thrshld_en;
+	bool coal_vp_lru_tcp_num;
 };
 
 /*
@@ -695,6 +806,137 @@ struct ipahal_reg_coal_evict_lru {
  */
 struct ipahal_reg_coal_qmap_cfg {
 	u32 mux_id_byte_sel;
+};
+
+/*
+ * struct ipahal_reg_coal_master_cfg - IPA_COAL_MASTER_CFG register
+ * @coal_ipv4_id_ignore: 1 - global ignore IPV4 ID checks regardles DF,
+ * val 0 -keep checks according to DF/MF  conditions.
+ * @coal_enhanced_ipv4_id_en: 1 - if (DF == 1 && MF == 0 && frag_offset == 0)
+ * Coalescingwill ignore IPv4 identification field, else legacy behaviour
+ * is used.
+ * 0 - Coalescing will use original legacy IPv4 identification field check.
+ * @coal_force_to_default: 1 - force any new packet that arrives to coal master
+ * to default pipe, and close any open frames with the same tuple
+ * 0 - regular coalescing activity.
+ */
+struct ipahal_reg_coal_master_cfg {
+	bool coal_ipv4_id_ignore;
+	bool coal_enhanced_ipv4_id_en;
+	bool coal_force_to_default;
+};
+
+/*
+ * struct ipahal_ipa_flavor_0 - IPA_FLAVOR_0 register
+ * @ipa_pipes: Number of supported pipes
+ * @ipa_cons_pipes: Number of consumer pipes
+ * @ipa_prod_pipes: Number of producer pipes
+ * @ipa_prod_lowest: Number of first producer pipe
+ */
+struct ipahal_ipa_flavor_0 {
+	u8 ipa_pipes;
+	u8 ipa_cons_pipes;
+	u8 ipa_prod_pipes;
+	u8 ipa_prod_lowest;
+};
+
+/*
+ * struct ipahal_ipa_flavor_9 - IPA_FLAVOR_9 register
+ * @ipa_tsp_max_ingr_tc: Maximal number of ingress (consumer-based) traffic-classes.
+ *                       Does not include invalid traffic-class 0x00.
+ * @ipa_tsp_max_egr_tc: Maximal number of egress (producer-based) traffic-classes.
+ *                      Does not include invalid traffic-class 0x00.
+ * @ipa_tsp_max_prod: Maximal number of TSP-enabled producers.
+ * @reserved: Reserved
+ */
+struct ipahal_ipa_flavor_9 {
+	u8 ipa_tsp_max_ingr_tc;
+	u8 ipa_tsp_max_egr_tc;
+	u8 ipa_tsp_max_prod;
+	u8 reserved;
+};
+
+/*
+ * struct ipahal_ipa_state_tsp - TSP engine state register
+ * @traffic_shaper_idle: Traffic-Shaper module IDLE indication
+ * @traffic_shaper_fifo_empty: Traffic-Shaper FIFO empty indication
+ * @queue_mngr_idle: QMNGR overall IDLE indication
+ * @queue_mngr_head_idle: QMNGR head module IDLE indication
+ * @queue_mngr_shared_idle: QMNGR shared module IDLE indication
+ * @queue_mngr_tail_idle: QMNGR tail module IDLE indication
+ * @queue_mngr_block_ctrl_idle: Block control module IDLE indication
+ */
+struct ipahal_ipa_state_tsp {
+	bool traffic_shaper_idle;
+	bool traffic_shaper_fifo_empty;
+	bool queue_mngr_idle;
+	bool queue_mngr_head_idle;
+	bool queue_mngr_shared_idle;
+	bool queue_mngr_tail_idle;
+	bool queue_mngr_block_ctrl_idle;
+};
+
+/*
+ * struct ipahal_reg_nat_uc_local_cfg -  IPA_NAT_UC_EXTERNAL_CFG register
+ * @nat_uc_external_table_addr_lsb: 32 LSb bits of system-memory address of
+ * external UC-activation entry table.
+ */
+struct ipahal_reg_nat_uc_external_cfg {
+	u32 nat_uc_external_table_addr_lsb;
+};
+
+/*
+ * struct ipahal_reg_nat_uc_local_cfg - IPA_NAT_UC_LOCAL_CFG register
+ * @nat_uc_local_table_addr_lsb: 32 LSb bits of local address of local
+ * UC-activation entry table. Address is memory-map based,
+ * i.e. includes IPA address from chip level.
+ */
+struct ipahal_reg_nat_uc_local_cfg {
+	u32 nat_uc_local_table_addr_lsb;
+};
+
+/*
+ * struct ipahal_reg_nat_uc_shared_cfg -  IPA_NAT_UC_SHARED_CFG register
+ * @nat_uc_external_table_addr_msb: 16 MSb of external UC-ativation entry table.
+ * @nat_uc_local_table_addr_msb: 16 MSb bits of local UC-ativation entry table.
+ */
+struct ipahal_reg_nat_uc_shared_cfg {
+	u32 nat_uc_local_table_addr_msb;
+	u32 nat_uc_external_table_addr_msb;
+};
+
+/*
+ * struct ipahal_reg_conn_track_uc_local_cfg - IPA_conn_track_UC_EXTERNAL_CFG
+ * register
+ * @conn_track_uc_external_table_addr_lsb: 32 LSb bits of system-memory address
+ * of external UC-activation entry table.
+ */
+struct ipahal_reg_conn_track_uc_external_cfg {
+	u32 conn_track_uc_external_table_addr_lsb;
+};
+
+/*
+ * struct ipahal_reg_conn_track_uc_local_cfg - IPA_conn_track_UC_LOCAL_CFG
+ * register
+ * @conn_track_uc_local_table_addr_lsb: 32 LSb bits of local address of local
+ * UC-activation entry table. Address is memory-map based,
+ * i.e. includes IPA address from chip level.
+ */
+struct ipahal_reg_conn_track_uc_local_cfg {
+	u32 conn_track_uc_local_table_addr_lsb;
+};
+
+/*
+ * struct ipahal_reg_conn_track_uc_shared_cfg -  IPA_conn_track_UC_SHARED_CFG
+ * register
+ * @conn_track_uc_external_table_addr_msb: 16 MSb of external UC-ativation
+ * entry table.
+ * @conn_track_uc_local_table_addr_msb: 16 MSb bits of local UC-ativation
+ * entry table.
+ */
+struct ipahal_reg_conn_track_uc_shared_cfg {
+	u16 conn_track_uc_local_table_addr_msb;
+	u16 conn_track_uc_external_table_addr_msb;
 };
 
 /*
@@ -721,9 +963,31 @@ u32 ipahal_read_reg_n(enum ipahal_reg_name reg, u32 n);
 u32 ipahal_read_reg_mn(enum ipahal_reg_name reg, u32 m, u32 n);
 
 /*
+* ipahal_read_reg_nk() - Read from n/k parameterized reg
+*/
+static inline u32 ipahal_read_reg_nk(enum ipahal_reg_name reg, u32 n, u32 k)
+{
+	return ipahal_read_reg_mn(reg, k, n);
+}
+
+/*
+* ipahal_read_ep_reg_n() - Get n parameterized reg value according to ep
+*/
+u32 ipahal_read_ep_reg_n(enum ipahal_reg_name reg, u32 n, u32 ep_num);
+
+/*
  * ipahal_write_reg_mn() - Write to m/n parameterized reg a raw value
  */
 void ipahal_write_reg_mn(enum ipahal_reg_name reg, u32 m, u32 n, u32 val);
+
+/*
+* ipahal_write_reg_nk() - Write to n/k parameterized reg a raw value
+*/
+static inline void ipahal_write_reg_nk(
+	enum ipahal_reg_name reg, u32 n, u32 k, u32 val)
+{
+	ipahal_write_reg_mn(reg, k, n, val);
+}
 
 /*
  * ipahal_write_reg_n() - Write to n parameterized reg a raw value
@@ -754,12 +1018,28 @@ static inline u32 ipahal_read_reg(enum ipahal_reg_name reg)
 }
 
 /*
+ * ipahal_read_ep_reg() - Get the raw value of a ep reg
+ */
+u32 ipahal_read_ep_reg(enum ipahal_reg_name reg, u32 ep_num);
+
+/*
  * ipahal_write_reg() - Write to reg a raw value
  */
 static inline void ipahal_write_reg(enum ipahal_reg_name reg,
 	u32 val)
 {
 	ipahal_write_reg_mn(reg, 0, 0, val);
+}
+
+/*
+ * ipahal_write_reg_mask() - Overwrite a masked raw value in reg
+ */
+static inline void ipahal_write_reg_mask(enum ipahal_reg_name reg, u32 val, u32 mask)
+{
+	u32 new_val = ipahal_read_reg(reg);
+	new_val &= !mask;
+	new_val &= (val & mask);
+	ipahal_write_reg(reg, val);
 }
 
 /*
@@ -780,9 +1060,24 @@ static inline void ipahal_write_reg_fields(enum ipahal_reg_name reg,
 }
 
 /*
+ * ipahal_write_ep_reg() - Write to ep reg a raw value
+ */
+void ipahal_write_ep_reg(enum ipahal_reg_name reg, u32 ep_num, u32 val);
+
+/*
+ * ipahal_write_ep_reg_n() - Write to ep reg a raw value
+ */
+void ipahal_write_ep_reg_n(enum ipahal_reg_name reg, u32 n, u32 ep_num, u32 val);
+
+/*
  * Get the offset of a m/n parameterized register
  */
 u32 ipahal_get_reg_mn_ofst(enum ipahal_reg_name reg, u32 m, u32 n);
+
+/*
+* Get the offset of a n,k register
+*/
+u32 ipahal_get_reg_nk_offset(enum ipahal_reg_name reg, u32 n, u32 l);
 
 /*
  * Get the offset of a n parameterized register
@@ -791,6 +1086,11 @@ static inline u32 ipahal_get_reg_n_ofst(enum ipahal_reg_name reg, u32 n)
 {
 	return ipahal_get_reg_mn_ofst(reg, 0, n);
 }
+
+/*
+ * Get the offset of a ep register according to ep index
+ */
+u32 ipahal_get_ep_reg_offset(enum ipahal_reg_name reg, u32 ep_num);
 
 /*
  * Get the offset of a register
@@ -820,6 +1120,10 @@ void ipahal_get_aggr_force_close_valmask(int ep_idx,
 	struct ipahal_reg_valmask *valmask);
 void ipahal_get_fltrt_hash_flush_valmask(
 	struct ipahal_reg_fltrt_hash_flush *flush,
+	struct ipahal_reg_valmask *valmask);
+
+void ipahal_get_fltrt_cache_flush_valmask(
+	struct ipahal_reg_fltrt_cache_flush *flush,
 	struct ipahal_reg_valmask *valmask);
 
 #endif /* _IPAHAL_REG_H_ */

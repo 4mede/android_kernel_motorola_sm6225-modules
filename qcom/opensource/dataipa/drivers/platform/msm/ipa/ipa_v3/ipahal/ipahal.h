@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _IPAHAL_H_
@@ -24,6 +25,7 @@ enum ipahal_imm_cmd_name {
 	IPA_IMM_CMD_HDR_INIT_LOCAL,
 	IPA_IMM_CMD_HDR_INIT_SYSTEM,
 	IPA_IMM_CMD_REGISTER_WRITE,
+	IPA_IMM_CMD_REGISTER_READ,
 	IPA_IMM_CMD_NAT_DMA,
 	IPA_IMM_CMD_IP_PACKET_INIT,
 	IPA_IMM_CMD_DMA_SHARED_MEM,
@@ -31,6 +33,7 @@ enum ipahal_imm_cmd_name {
 	IPA_IMM_CMD_DMA_TASK_32B_ADDR,
 	IPA_IMM_CMD_TABLE_DMA,
 	IPA_IMM_CMD_IP_V6_CT_INIT,
+	IPA_IMM_CMD_IP_PACKET_INIT_EX,
 	IPA_IMM_CMD_MAX,
 };
 
@@ -230,6 +233,63 @@ struct ipahal_imm_cmd_ip_packet_init {
 };
 
 /*
+ * struct ipahal_imm_cmd_ip_packet_init_ex - IP_PACKET_INIT_EX cmd payload
+ * @frag_disable: true - disabled. overrides IPA_ENDP_CONFIG_n:FRAG_OFFLOAD_EN
+ * @filter_disable: true - disabled, false - enabled
+ * @nat_disable: true - disabled, false - enabled
+ * @route_disable: true - disabled, false - enabled
+ * @hdr_removal_insertion_disable: true - disabled, false - enabled
+ * @cs_disable: true - disabled, false - enabled
+ * @quota_tethering_stats_disable: true - disabled, false - enabled
+ * fields @flt_rt_tbl_idx - @flt_retain_hdr are a logical software translation
+ * of ipa5_0_flt_rule_hw_hdr/ipa5_5_flt_rule_hw_hdr
+ * fields @rt_pipe_dest_idx - @rt_system are a logical software translation
+ * ipa5_0_rt_rule_hw_hdr/ipa5_5_flt_rule_hw_hdr
+ * @dpl_disable: true - disabled, false - enabled, valid from IPAv5_5.
+ * @flt_ext_hdr: true - flt ext_hdr enabled, false - disabled. Note all fields of
+ * ext header are valid in immediate command irrespective of this flag.
+ * fields @flt_ttl - @flt_qos_class are a logical software translation
+ * of ipa5_5_flt_rule_hw_hdr_ext.
+ * @rt_ext_hdr: true - rt ext_hdr enabled, false - disabled. Note all fields of
+ * ext header are valid in immediate command irrespective of this flag.
+ * fields @rt_ttl - @rt_skip_ingress are a logical software translation
+ * ipa5_5_rt_rule_hw_hdr_ext
+ */
+struct ipahal_imm_cmd_ip_packet_init_ex {
+	bool frag_disable;
+	bool filter_disable;
+	bool nat_disable;
+	bool route_disable;
+	bool hdr_removal_insertion_disable;
+	bool cs_disable;
+	bool quota_tethering_stats_disable;
+	u8 flt_rt_tbl_idx;
+	u8 flt_stats_cnt_idx;
+	u8 flt_priority;
+	bool flt_close_aggr_irq_mod;
+	u8 flt_action;
+	u8 flt_pdn_idx;
+	bool flt_set_metadata;
+	bool flt_retain_hdr;
+	u8 rt_pipe_dest_idx;
+	u8 rt_stats_cnt_idx;
+	u8 rt_priority;
+	bool rt_close_aggr_irq_mod;
+	u16 rt_hdr_offset;
+	bool rt_proc_ctx;
+	bool rt_retain_hdr;
+	bool rt_system;
+	bool dpl_disable;
+	bool flt_ext_hdr;
+	bool flt_ttl;
+	u8 flt_qos_class;
+	bool rt_ext_hdr;
+	bool rt_ttl;
+	u8 rt_qos_class;
+	bool rt_skip_ingress;
+};
+
+/*
  * enum ipa_pipeline_clear_option - Values for pipeline clear waiting options
  * @IPAHAL_HPS_CLEAR: Wait for HPS clear. All queues except high priority queue
  *  shall not be serviced until HPS is clear of packets or immediate commands.
@@ -265,6 +325,22 @@ struct ipahal_imm_cmd_register_write {
 	u32 offset;
 	u32 value;
 	u32 value_mask;
+	bool skip_pipeline_clear;
+	enum ipahal_pipeline_clear_option pipeline_clear_options;
+};
+
+/*
+ * struct ipahal_imm_cmd_register_read - REGISTER_READ cmd payload
+ * Read value from register. Allows reg changes to be synced with data packet
+ *  and other immediate commands. Can be used to access the sram
+ * @offset: offset from IPA base address - Lower 16bit of the IPA reg addr
+ * @sys_addr: Address in system memory for storing register value
+ * @skip_pipeline_clear: if to skip pipeline clear waiting (don't wait)
+ * @pipeline_clear_option: options for pipeline clear waiting
+ */
+struct ipahal_imm_cmd_register_read {
+	u32 offset;
+	u32 sys_addr;
 	bool skip_pipeline_clear;
 	enum ipahal_pipeline_clear_option pipeline_clear_options;
 };
@@ -369,6 +445,32 @@ struct ipahal_imm_cmd_pyld *ipahal_construct_imm_cmd(
 	enum ipahal_imm_cmd_name cmd, const void *params, bool is_atomic_ctx);
 
 /*
+ * ipahal_modify_imm_cmd() - Modify immdiate command in an existing buffer
+ * This function modifies an existing imm cmd buffer
+ * @cmd_name: [in] Immediate command name
+ * @cmd_data: [in] Constructed immediate command buffer data
+ * @params: [in] Structure with specific IMM params
+ * @params_mask: [in] Same structure, but the fields filled with 0,
+ *  if they should not be changed, or any non-zero for fields to be updated
+ */
+int ipahal_modify_imm_cmd(
+	enum ipahal_imm_cmd_name cmd,
+	const void *cmd_data,
+	const void *params,
+	const void *params_mask);
+
+/*
+ * ipa_imm_cmd_modify_ip_packet_init_ex_dest_pipe() -
+ *   Modify ip_packet_init_ex immdiate command pipe_dest_idx field
+ * This function modifies an existing imm cmd buffer
+ * @cmd_data: [in] Constructed immediate command buffer data
+ * @pipe_dest_idx: [in] destination pipe index to set
+ */
+void ipa_imm_cmd_modify_ip_packet_init_ex_dest_pipe(
+	const void *cmd_data,
+	u64 pipe_dest_idx);
+
+/*
  * ipahal_construct_nop_imm_cmd() - Construct immediate comamnd for NO-Op
  * Core driver may want functionality to inject NOP commands to IPA
  *  to ensure e.g., PIPLINE clear before someother operation.
@@ -429,6 +531,7 @@ enum ipahal_pkt_status_exception {
 	IPAHAL_PKT_STATUS_EXCEPTION_IPTYPE,
 	IPAHAL_PKT_STATUS_EXCEPTION_PACKET_LENGTH,
 	IPAHAL_PKT_STATUS_EXCEPTION_PACKET_THRESHOLD,
+	IPAHAL_PKT_STATUS_EXCEPTION_TTL,
 	IPAHAL_PKT_STATUS_EXCEPTION_FRAG_RULE_MISS,
 	IPAHAL_PKT_STATUS_EXCEPTION_SW_FILT,
 	/*
@@ -437,6 +540,10 @@ enum ipahal_pkt_status_exception {
 	 */
 	IPAHAL_PKT_STATUS_EXCEPTION_NAT,
 	IPAHAL_PKT_STATUS_EXCEPTION_IPV6CT,
+	IPAHAL_PKT_STATUS_EXCEPTION_UCP,
+	IPAHAL_PKT_STATUS_EXCEPTION_INVALID_PIPE,
+	IPAHAL_PKT_STATUS_EXCEPTION_RQOS,
+	IPAHAL_PKT_STATUS_EXCEPTION_HDRI,
 	IPAHAL_PKT_STATUS_EXCEPTION_CSUM,
 	IPAHAL_PKT_STATUS_EXCEPTION_MAX,
 };
@@ -482,11 +589,17 @@ enum ipahal_pkt_status_mask {
 	IPAHAL_PKT_STATUS_MASK_CKSUM_PROCESS_SHFT,
 	IPAHAL_PKT_STATUS_MASK_AGGR_PROCESS_SHFT,
 	IPAHAL_PKT_STATUS_MASK_DEST_EOT_SHFT,
+	IPAHAL_PKT_STATUS_MASK_OPENED_FRAME_SHFT =
+		IPAHAL_PKT_STATUS_MASK_DEST_EOT_SHFT,
 	IPAHAL_PKT_STATUS_MASK_DEAGGR_PROCESS_SHFT,
 	IPAHAL_PKT_STATUS_MASK_DEAGG_FIRST_SHFT,
 	IPAHAL_PKT_STATUS_MASK_SRC_EOT_SHFT,
 	IPAHAL_PKT_STATUS_MASK_PREV_EOT_SHFT,
+	IPAHAL_PKT_STATUS_MASK_RQOS_NAS_SHFT =
+		IPAHAL_PKT_STATUS_MASK_PREV_EOT_SHFT,
 	IPAHAL_PKT_STATUS_MASK_BYTE_LIMIT_SHFT,
+	IPAHAL_PKT_STATUS_MASK_RQOS_AS_SHFT =
+		IPAHAL_PKT_STATUS_MASK_BYTE_LIMIT_SHFT,
 };
 
 /*
@@ -563,6 +676,17 @@ enum ipahal_pkt_status_nat_type {
  * @ip_id: IP packet IP ID number.
  * @tlated_ip_addr: IP address.
  * @ip_cksum_diff: IP packet checksum difference.
+ * @hdr_ret: l2 header retained flag, indicates whether l2 header is retained
+ * or not.
+ * @ll: low latency indication.
+ * @tsp: Traffic shaping policing flag, indicates traffic class info
+ * overwrites tag info.
+ * @ttl_dec: ttl update flag, indicates whether ttl is updated.
+ * @nat_exc_suppress: nat exception supress flag, indicates whether
+ * nat exception is suppressed.
+ * @ingress_tc: Ingress traffic class index.
+ * @egress_tc: Egress traffic class index.
+ * @pd: router disabled ingress policer.
  */
 struct ipahal_pkt_status {
 	u64 tag_info;
@@ -602,7 +726,14 @@ struct ipahal_pkt_status {
 	u16 ip_id;
 	u32 tlated_ip_addr;
 	u16 ip_cksum_diff;
-
+	bool hdr_ret;
+	bool ll;
+	bool tsp;
+	bool ttl_dec;
+	bool nat_exc_suppress;
+	u8 ingress_tc;
+	u8 egress_tc;
+	bool pd;
 };
 
 /*
@@ -668,20 +799,19 @@ void ipahal_cp_hdr_to_hw_buff(void *base, u32 offset, u8 *hdr, u32 hdr_len);
  * @base: dma base address
  * @offset: offset from base address where the data will be copied
  * @hdr_len: the length of the header
- * @is_hdr_proc_ctx: header is located in phys_base (true) or hdr_base_addr
- * @phys_base: memory location in DDR
  * @hdr_base_addr: base address in table
  * @offset_entry: offset from hdr_base_addr in table
  * @l2tp_params: l2tp parameters
+ * @eogre_params: eogre parameters
  * @generic_params: generic proc_ctx params
  * @is_64: Indicates whether header base address/dma base address is 64 bit.
  */
 int ipahal_cp_proc_ctx_to_hw_buff(enum ipa_hdr_proc_type type,
 		void *base, u32 offset, u32 hdr_len,
-		bool is_hdr_proc_ctx, dma_addr_t phys_base,
 		u64 hdr_base_addr,
 		struct ipa_hdr_offset_entry *offset_entry,
 		struct ipa_l2tp_hdr_proc_ctx_params *l2tp_params,
+		struct ipa_eogre_hdr_proc_ctx_params *eogre_params,
 		struct ipa_eth_II_to_eth_II_ex_procparams *generic_params,
 		bool is_64);
 
@@ -694,8 +824,314 @@ int ipahal_cp_proc_ctx_to_hw_buff(enum ipa_hdr_proc_type type,
 int ipahal_get_proc_ctx_needed_len(enum ipa_hdr_proc_type type);
 
 int ipahal_init(enum ipa_hw_type ipa_hw_type, void __iomem *base,
-	struct device *ipa_pdev);
+    u32 ipa_cfg_offset, struct device *ipa_pdev);
 void ipahal_destroy(void);
 void ipahal_free_dma_mem(struct ipa_mem_buffer *mem);
+
+/*
+* ipahal_test_ep_bit() - return true if a ep bit is set
+*/
+bool ipahal_test_ep_bit(u32 reg_val, u32 ep_num);
+
+/*
+* ipahal_get_ep_bit() - get ep bit set in the right offset
+*/
+u32 ipahal_get_ep_bit(u32 ep_num);
+
+/*
+* ipahal_get_ep_reg_idx() - get ep reg index according to ep num
+*/
+u32 ipahal_get_ep_reg_idx(u32 ep_num);
+
+/*
+ * ***************************************************************
+ *
+ * To follow, a generalized qmap header manipulation API.
+ *
+ * ***************************************************************
+ */
+/**
+ * qmap_hdr_v4_5 -
+ *
+ * @cd -
+ * @qmap_next_hdr -
+ * @pad -
+ * @mux_id -
+ * @packet_len_with_pad -
+ * @hdr_type -
+ * @coal_next_hdr -
+ * @zero_checksum -
+ *
+ * The following bit layout is when the data are in host order.
+ *
+ * FIXME FINDME Need to be reordered properly to reflect network
+ *              ordering as seen by little endian host (qmap_hdr_v5_5
+ *              below proplerly done).
+ */
+struct qmap_hdr_v4_5 {
+	/*
+	 * 32 bits of qmap header to follow
+	 */
+	u64 cd: 1;
+	u64 qmap_next_hdr: 1;
+	u64 pad: 6;
+	u64 mux_id: 8;
+	u64 packet_len_with_pad: 16;
+	/*
+	 * 32 bits of coalescing frame header to follow
+	 */
+	u64 hdr_type: 7;
+	u64 coal_next_hdr: 1;
+	u64 zero_checksum: 1;
+	u64 rsrvd1: 7;
+	u64 rsrvd2: 16;
+} __packed;
+
+/**
+ * qmap_hdr_v5_0 -
+ *
+ * @cd -
+ * @qmap_next_hdr -
+ * @pad -
+ * @mux_id -
+ * @packet_len_with_pad -
+ * @hdr_type -
+ * @coal_next_hdr -
+ * @ip_id_cfg -
+ * @zero_checksum -
+ * @additional_hdr_size -
+ * @segment_size -
+ *
+ * The following bit layout is when the data are in host order.
+ *
+ * FIXME FINDME Need to be reordered properly to reflect network
+ *              ordering as seen by little endian host (qmap_hdr_v5_5
+ *              below proplerly done).
+ */
+struct qmap_hdr_v5_0 {
+	/*
+	 * 32 bits of qmap header to follow
+	 */
+	u64 cd: 1;
+	u64 qmap_next_hdr: 1;
+	u64 pad: 6;
+	u64 mux_id: 8;
+	u64 packet_len_with_pad: 16;
+	/*
+	 * 32 bits of coalescing frame header to follow
+	 */
+	u64 hdr_type: 7;
+	u64 coal_next_hdr: 1;
+	u64 ip_id_cfg: 1;
+	u64 zero_checksum: 1;
+	u64 rsrvd: 1;
+	u64 additional_hdr_size: 5;
+	u64 segment_size: 16;
+} __packed;
+
+/**
+ * qmap_hdr_v5_5 -
+ *
+ * @cd -
+ * @qmap_next_hdr -
+ * @pad -
+ * @mux_id -
+ * @packet_len_with_pad -
+ * @hdr_type -
+ * @coal_next_hdr -
+ * @chksum_valid -
+ * @num_nlos -
+ * @inc_ip_id -
+ * @rnd_ip_id -
+ * @close_value -
+ * @close_type -
+ * @vcid -
+ *
+ * NOTE:
+ *
+ *   The layout below is different when compared against
+ *   documentation, which shows the fields as they are in network byte
+ *   order - and network byte order is how we receive the data from
+ *   the IPA.  To avoid using cycles converting from network to host
+ *   order, we've defined the stucture below such that we can access
+ *   the correct fields while the data are still in network order.
+ */
+struct qmap_hdr_v5_5 {
+	/*
+	 * 32 bits of qmap header to follow
+	 */
+	u8 pad: 6;
+	u8 qmap_next_hdr: 1;
+	u8 cd: 1;
+	u8 mux_id;
+	u16 packet_len_with_pad;
+	/*
+	 * 32 bits of coalescing frame header to follow
+	 */
+	u8 coal_next_hdr: 1;
+	u8 hdr_type: 7;
+	u8 rsrvd1: 2;
+	u8 rnd_ip_id: 1;
+	u8 inc_ip_id: 1;
+	u8 num_nlos: 3;
+	u8 chksum_valid: 1;
+
+	u8 close_type: 4;
+	u8 close_value: 4;
+	u8 rsrvd2: 4;
+	u8 vcid: 4;
+} __packed;
+
+/**
+ * qmap_hdr_u -
+ *
+ * The following is a union of all of the qmap versions above.
+ *
+ * NOTE WELL: REMEMBER to keep it in sync with the bit strucure
+ *            definitions above.
+ */
+union qmap_hdr_u {
+	struct qmap_hdr_v4_5 qmap4_5;
+	struct qmap_hdr_v5_0 qmap5_0;
+	struct qmap_hdr_v5_5 qmap5_5;
+	u32                  words[2]; /* these used to flip from ntoh and hton */
+} __packed;
+
+/**
+ * qmap_hdr_data -
+ *
+ * The following is an aggregation of the qmap header bit structures
+ * above.
+ *
+ * NOTE WELL: REMEMBER to keep it in sync with the bit structure
+ *            definitions above.
+ */
+struct qmap_hdr_data {
+	/*
+	 * Data from qmap header to follow
+	 */
+	u8 cd;
+	u8 qmap_next_hdr;
+	u8 pad;
+	u8 mux_id;
+	u16 packet_len_with_pad;
+	/*
+	 * Data from coalescing frame header to follow
+	 */
+	u8 hdr_type;
+	u8 coal_next_hdr;
+	u8 ip_id_cfg;
+	u8 zero_checksum;
+	u8 additional_hdr_size;
+	u16 segment_size;
+	u8 chksum_valid;
+	u8 num_nlos;
+	u8 inc_ip_id;
+	u8 rnd_ip_id;
+	u8 close_value;
+	u8 close_type;
+	u8 vcid;
+};
+
+/**
+ * FUNCTION: ipahal_qmap_parse()
+ *
+ * The following function to be called when version specific qmap parsing is
+ * required.
+ *
+ * ARGUMENTS:
+ *
+ *   unparsed_qmap
+ *
+ *     The QMAP header off of a freshly recieved data packet.  As per
+ *     the architecture documentation, the data contained herein will
+ *     be in network order.
+ *
+ *   qmap_data_rslt
+ *
+ *     A location to store the parsed data from unparsed_qmap above.
+ */
+int ipahal_qmap_parse(
+	const void*           unparsed_qmap,
+	struct qmap_hdr_data* qmap_data_rslt);
+
+
+/**
+ * FUNCTION: ipahal_qmap_ntoh()
+ *
+ * The following function will take a QMAP header, which you know is
+ * in network order, and convert it to host order.
+ *
+ * NOTE WELL: Once in host order, the data will align with the bit
+ *            descriptions in the headers above.
+ *
+ * ARGUMENTS:
+ *
+ *   src_data_from_packet
+ *
+ *     The QMAP header off of a freshly recieved data packet.  As per
+ *     the architecture documentation, the data contained herein will
+ *     be in network order.
+ *
+ *  dst_result
+ *
+ *    A location to where the original data will be copied, then
+ *    converted to host order.
+ */
+static inline void ipahal_qmap_ntoh(
+	const void*       src_data_from_packet,
+	union qmap_hdr_u* dst_result)
+{
+	/*
+	 * Nothing to do, since we define the bit fields in the
+	 * structure, such that we can access them correctly while
+	 * keeping the data in network order...
+	 */
+	if (src_data_from_packet && dst_result) {
+		memcpy(
+			dst_result,
+			src_data_from_packet,
+			sizeof(union qmap_hdr_u));
+	}
+}
+
+/**
+ * FUNCTION: ipahal_qmap_hton()
+ *
+ * The following function will take QMAP data, that you've assembled
+ * in host otder (ie. via using the bit structures definitions above),
+ * and convert it to network order.
+ *
+ * This function is to be used for QMAP data destined for network
+ * transmission.
+ *
+ * ARGUMENTS:
+ *
+ *   src_data_from_host
+ *
+ *     QMAP data in host order.
+ *
+ *  dst_result
+ *
+ *    A location to where the host ordered data above will be copied,
+ *    then converted to network order.
+ */
+static inline void ipahal_qmap_hton(
+	union qmap_hdr_u* src_data_from_host,
+	void*             dst_result)
+{
+	if (src_data_from_host && dst_result) {
+		memcpy(
+			dst_result,
+			src_data_from_host,
+			sizeof(union qmap_hdr_u));
+		/*
+		 * Reusing variable below to do the host to network swap...
+		 */
+		src_data_from_host = (union qmap_hdr_u*) dst_result;
+		src_data_from_host->words[0] = htonl(src_data_from_host->words[0]);
+		src_data_from_host->words[1] = htonl(src_data_from_host->words[1]);
+	}
+}
 
 #endif /* _IPAHAL_H_ */

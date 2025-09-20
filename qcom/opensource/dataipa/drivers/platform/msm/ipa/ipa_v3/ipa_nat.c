@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/device.h>
@@ -9,7 +9,12 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/uaccess.h>
+#include <linux/version.h>
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+#include <linux/dma-map-ops.h>
+#else /* Legacy */
 #include <linux/dma-noncoherent.h>
+#endif
 #include "ipa_i.h"
 #include "ipahal.h"
 #include "ipahal_nat.h"
@@ -125,24 +130,13 @@ static int ipa3_nat_ipv6ct_mmap(
 		(struct ipa3_nat_ipv6ct_common_mem *)filp->private_data;
 	unsigned long vsize = vma->vm_end - vma->vm_start;
 	struct ipa_smmu_cb_ctx *cb = ipa3_get_smmu_ctx(IPA_SMMU_CB_AP);
-
-	struct ipa3_nat_mem          *nm_ptr = (struct ipa3_nat_mem *) dev;
+	struct ipa3_nat_mem          *nm_ptr;
 	struct ipa3_nat_mem_loc_data *mld_ptr;
 	enum ipa3_nat_mem_in          nmi;
 
 	int result = 0;
 
-	nmi = nm_ptr->last_alloc_loc;
-
 	IPADBG("In\n");
-
-	if (!IPA_VALID_NAT_MEM_IN(nmi)) {
-		IPAERR_RL("Bad ipa3_nat_mem_in type\n");
-		result = -EPERM;
-		goto bail;
-	}
-
-	mld_ptr = &nm_ptr->mem_loc[nmi];
 
 	if (!dev->is_dev_init) {
 		IPAERR("Attempt to mmap %s before dev init\n",
@@ -152,29 +146,6 @@ static int ipa3_nat_ipv6ct_mmap(
 	}
 
 	mutex_lock(&dev->lock);
-
-	if (!mld_ptr->vaddr) {
-		IPAERR_RL("Attempt to mmap %s before the memory allocation\n",
-				  dev->name);
-		result = -EPERM;
-		goto unlock;
-	}
-
-	if (mld_ptr->is_mapped) {
-		IPAERR("%s already mapped, only 1 mapping supported\n",
-			   dev->name);
-		result = -EINVAL;
-		goto unlock;
-	}
-
-	if (nmi == IPA_NAT_MEM_IN_SRAM) {
-		if (dev->phys_mem_size == 0 || dev->phys_mem_size > vsize) {
-			IPAERR_RL("%s err vsize(0x%X) phys_mem_size(0x%X)\n",
-			  dev->name, vsize, dev->phys_mem_size);
-			result = -EINVAL;
-			goto unlock;
-		}
-	}
 
 	/*
 	 * Check if no smmu or non dma coherent
@@ -188,32 +159,74 @@ static int ipa3_nat_ipv6ct_mmap(
 			pgprot_noncached(vma->vm_page_prot);
 	}
 
-	mld_ptr->base_address = NULL;
+	if (dev->is_nat_mem) {
 
-	IPADBG("Mapping %s\n", ipa3_nat_mem_in_as_str(nmi));
+		nm_ptr = (struct ipa3_nat_mem *) dev;
+		nmi    = nm_ptr->last_alloc_loc;
 
-	if (nmi == IPA_NAT_MEM_IN_DDR) {
-
-		IPADBG("map sz=0x%zx into vma size=0x%08x\n",
-				  mld_ptr->table_alloc_size,
-				  vsize);
-
-		result =
-			dma_mmap_coherent(
-				ipa3_ctx->pdev,
-				vma,
-				mld_ptr->vaddr,
-				mld_ptr->dma_handle,
-				mld_ptr->table_alloc_size);
-
-		if (result) {
-			IPAERR("dma_mmap_coherent failed. Err:%d\n", result);
+		if (!IPA_VALID_NAT_MEM_IN(nmi)) {
+			IPAERR_RL("Bad ipa3_nat_mem_in type\n");
+			result = -EPERM;
 			goto unlock;
 		}
 
-		mld_ptr->base_address = mld_ptr->vaddr;
-	} else {
+		mld_ptr = &nm_ptr->mem_loc[nmi];
+
+		if (!mld_ptr->vaddr) {
+			IPAERR_RL(
+			 "Attempt to mmap %s before the memory allocation\n",
+			 dev->name);
+			result = -EPERM;
+			goto unlock;
+		}
+
+		if (mld_ptr->is_mapped) {
+			IPAERR("%s already mapped, only 1 mapping supported\n",
+				   dev->name);
+			result = -EINVAL;
+			goto unlock;
+		}
+
 		if (nmi == IPA_NAT_MEM_IN_SRAM) {
+			if (dev->phys_mem_size == 0 ||
+				dev->phys_mem_size > vsize) {
+				IPAERR_RL(
+				 "%s err vsize(0x%X) phys_mem_size(0x%X)\n",
+				 dev->name, vsize, dev->phys_mem_size);
+				result = -EINVAL;
+				goto unlock;
+			}
+		}
+
+		mld_ptr->base_address = NULL;
+
+		IPADBG("Mapping V4 NAT: %s\n",
+			   ipa3_nat_mem_in_as_str(nmi));
+
+		if (nmi == IPA_NAT_MEM_IN_DDR) {
+
+			IPADBG("map sz=0x%zx -> vma size=0x%08x\n",
+				   mld_ptr->table_alloc_size,
+				   vsize);
+
+			result =
+				dma_mmap_coherent(
+					ipa3_ctx->pdev,
+					vma,
+					mld_ptr->vaddr,
+					mld_ptr->dma_handle,
+					mld_ptr->table_alloc_size);
+
+			if (result) {
+				IPAERR(
+				 "dma_mmap_coherent failed. Err:%d\n",
+				 result);
+				goto unlock;
+			}
+
+			mld_ptr->base_address = mld_ptr->vaddr;
+
+		} else { /* nmi == IPA_NAT_MEM_IN_SRAM */
 
 			IPADBG("map phys_mem_size(0x%08X) -> vma sz(0x%08X)\n",
 				   dev->phys_mem_size, vsize);
@@ -231,9 +244,52 @@ static int ipa3_nat_ipv6ct_mmap(
 
 			mld_ptr->base_address = mld_ptr->vaddr;
 		}
-	}
 
-	mld_ptr->is_mapped = true;
+		mld_ptr->is_mapped = true;
+
+	} else { /* dev->is_ipv6ct_mem */
+
+		if (!dev->vaddr) {
+			IPAERR_RL(
+			 "Attempt to mmap %s before the memory allocation\n",
+			 dev->name);
+			result = -EPERM;
+			goto unlock;
+		}
+
+		if (dev->is_mapped) {
+			IPAERR("%s already mapped, only 1 mapping supported\n",
+				   dev->name);
+			result = -EINVAL;
+			goto unlock;
+		}
+
+		dev->base_address = NULL;
+
+		IPADBG("Mapping V6 CT: %s\n",
+			   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_DDR));
+
+		IPADBG("map sz=0x%zx -> vma size=0x%08x\n",
+			   dev->table_alloc_size,
+			   vsize);
+
+		result =
+			dma_mmap_coherent(
+				ipa3_ctx->pdev,
+				vma,
+				dev->vaddr,
+				dev->dma_handle,
+				dev->table_alloc_size);
+
+		if (result) {
+			IPAERR("dma_mmap_coherent failed. Err:%d\n", result);
+			goto unlock;
+		}
+
+		dev->base_address = dev->vaddr;
+
+		dev->is_mapped = true;
+	}
 
 	vma->vm_ops = &ipa3_nat_ipv6ct_remap_vm_ops;
 
@@ -533,11 +589,13 @@ static int ipa3_nat_ipv6ct_allocate_mem(
 
 		nm_ptr = (struct ipa3_nat_mem *) dev;
 
-		if (table_alloc->size <= IPA_NAT_PHYS_MEM_SIZE) {
+		if (sram_compatible && table_alloc->size <= IPA_NAT_PHYS_MEM_SIZE) {
 			/*
 			 * CAN fit in SRAM, hence we'll use SRAM...
+			 * And SRAM allowed
 			 */
-			IPADBG("V4 NAT will reside in: %s\n",
+			IPADBG("V4 NAT with size 0x%08X will reside in: %s\n",
+				   table_alloc->size,
 				   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_SRAM));
 
 			if (nm_ptr->sram_in_use) {
@@ -577,9 +635,10 @@ static int ipa3_nat_ipv6ct_allocate_mem(
 		} else {
 
 			/*
-			 * CAN NOT fit in SRAM, hence we'll allocate DDR...
+			 * CAN NOT fit in SRAM OR SRAM not allowed, hence we'll allocate DDR...
 			 */
-			IPADBG("V4 NAT will reside in: %s\n",
+			IPADBG("V4 NAT with size 0x%08X will reside in: %s\n",
+				   table_alloc->size,
 				   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_DDR));
 
 			if (nm_ptr->ddr_in_use) {
@@ -611,10 +670,11 @@ static int ipa3_nat_ipv6ct_allocate_mem(
 	} else {
 		if (nat_type == IPAHAL_NAT_IPV6CT) {
 
-			dev->table_alloc_size = table_alloc->size;
-
-			IPADBG("V6 NAT will reside in: %s\n",
+			IPADBG("V6 CT with size 0x%08X will reside in: %s\n",
+				   table_alloc->size,
 				   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_DDR));
+
+			dev->table_alloc_size = table_alloc->size;
 
 			dev->vaddr =
 				dma_alloc_coherent(
@@ -1155,12 +1215,20 @@ static int ipa3_nat_send_init_cmd(struct ipahal_imm_cmd_ip_v4_nat_init *cmd,
 	memset(cmd_pyld, 0, sizeof(cmd_pyld));
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
-	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1) {
+	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
+		&& !ipa3_ctx->ulso_wa) {
+		u32 offset = 0;
+
 		i = ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
 		reg_write_coal_close.skip_pipeline_clear = false;
 		reg_write_coal_close.pipeline_clear_options = IPAHAL_HPS_CLEAR;
-		reg_write_coal_close.offset = ipahal_get_reg_ofst(
-			IPA_AGGR_FORCE_CLOSE);
+		if (ipa3_ctx->ipa_hw_type < IPA_HW_v5_0)
+			offset = ipahal_get_reg_ofst(
+				IPA_AGGR_FORCE_CLOSE);
+		else
+			offset = ipahal_get_ep_reg_offset(
+				IPA_AGGR_FORCE_CLOSE_n, i);
+		reg_write_coal_close.offset = offset;
 		ipahal_get_aggr_force_close_valmask(i, &valmask);
 		reg_write_coal_close.value = valmask.val;
 		reg_write_coal_close.value_mask = valmask.mask;
@@ -1258,12 +1326,19 @@ static int ipa3_ipv6ct_send_init_cmd(struct ipahal_imm_cmd_ip_v6_ct_init *cmd)
 	memset(cmd_pyld, 0, sizeof(cmd_pyld));
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
-	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1) {
+	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
+		&& !ipa3_ctx->ulso_wa) {
+		u32 offset = 0;
 		i = ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
 		reg_write_coal_close.skip_pipeline_clear = false;
 		reg_write_coal_close.pipeline_clear_options = IPAHAL_HPS_CLEAR;
-		reg_write_coal_close.offset = ipahal_get_reg_ofst(
-			IPA_AGGR_FORCE_CLOSE);
+		if (ipa3_ctx->ipa_hw_type < IPA_HW_v5_0)
+			offset = ipahal_get_reg_ofst(
+				IPA_AGGR_FORCE_CLOSE);
+		else
+			offset = ipahal_get_ep_reg_offset(
+				IPA_AGGR_FORCE_CLOSE_n, i);
+		reg_write_coal_close.offset = offset;
 		ipahal_get_aggr_force_close_valmask(i, &valmask);
 		reg_write_coal_close.value = valmask.val;
 		reg_write_coal_close.value_mask = valmask.mask;
@@ -1932,12 +2007,20 @@ int ipa3_table_dma_cmd(
 	}
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
-	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1) {
+	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
+		&& !ipa3_ctx->ulso_wa) {
+		u32 offset = 0;
+
 		i = ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
 		reg_write_coal_close.skip_pipeline_clear = false;
 		reg_write_coal_close.pipeline_clear_options = IPAHAL_HPS_CLEAR;
-		reg_write_coal_close.offset = ipahal_get_reg_ofst(
-			IPA_AGGR_FORCE_CLOSE);
+		if (ipa3_ctx->ipa_hw_type < IPA_HW_v5_0)
+			offset = ipahal_get_reg_ofst(
+				IPA_AGGR_FORCE_CLOSE);
+		else
+			offset = ipahal_get_ep_reg_offset(
+				IPA_AGGR_FORCE_CLOSE_n, i);
+		reg_write_coal_close.offset = offset;
 		ipahal_get_aggr_force_close_valmask(i, &valmask);
 		reg_write_coal_close.value = valmask.val;
 		reg_write_coal_close.value_mask = valmask.mask;

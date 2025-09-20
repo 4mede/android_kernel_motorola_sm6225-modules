@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  */
 
 #ifndef _IPA_COMMON_I_H_
@@ -13,11 +13,20 @@
 #include <linux/ipa_uc_offload.h>
 #include <linux/ipa_wdi3.h>
 #include <linux/ipa_wigig.h>
+#include <linux/ipa_eth.h>
+#include <linux/ipa_usb.h>
 #include <linux/ratelimit.h>
+#include "ipa_stats.h"
 #include "gsi.h"
+
+#ifndef IPA_ETH_API_VER
+#define IPA_ETH_API_VER 1
+#endif
 
 #define WARNON_RATELIMIT_BURST 1
 #define IPA_RATELIMIT_BURST 1
+#define IPA_EP_ARR_SIZE 2
+#define IPA_EP_PER_REG 32
 
 #define __FILENAME__ \
 	(strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
@@ -164,9 +173,73 @@ do {\
 	(x < IPA_CLIENT_MAX && (x & 0x1) == 0)
 #define IPA_CLIENT_IS_CONS(x) \
 	(x < IPA_CLIENT_MAX && (x & 0x1) == 1)
+/*
+ * The following macro does two things:
+ *   1) It checks to see if client x is allocated, and
+ *   2) It assigns a value to index idx
+ */
+#define IPA_CLIENT_IS_MAPPED(x, idx) \
+	((idx = ipa3_get_ep_mapping(x)) != IPA_EP_NOT_ALLOCATED)
+/*
+ * Same behavior as the macro above; but in addition, determines if
+ * the client is valid as well.
+ */
+#define IPA_CLIENT_IS_MAPPED_VALID(x, idx) \
+	(IPA_CLIENT_IS_MAPPED(x, idx) && ipa3_ctx->ep[idx].valid == 1)
+#define IPA_CLIENT_IS_ETH_PROD(x) \
+	((x == ipa3_get_ep_mapping(IPA_CLIENT_ETHERNET_PROD)) || \
+	 (x == ipa3_get_ep_mapping(IPA_CLIENT_ETHERNET2_PROD)) || \
+	 (x == ipa3_get_ep_mapping(IPA_CLIENT_AQC_ETHERNET_PROD)) || \
+	 (x == ipa3_get_ep_mapping(IPA_CLIENT_RTK_ETHERNET_PROD)))
 
-#define IPA_GSI_CHANNEL_STOP_SLEEP_MIN_USEC (3000)
-#define IPA_GSI_CHANNEL_STOP_SLEEP_MAX_USEC (5000)
+#define IPA_GSI_CHANNEL_STOP_SLEEP_MIN_USEC (1000)
+#define IPA_GSI_CHANNEL_STOP_SLEEP_MAX_USEC (2000)
+
+#define STR_ETH_IFACE "eth"
+#define STR_ETH0_IFACE "eth0"
+#define STR_ETH1_IFACE "eth1"
+#define STR_RNDIS_IFACE "rndis"
+#define STR_ECM_IFACE "ecm"
+
+#define MINIDUMP_MASK 0x10000
+/**
+ * qmap_hdr -
+ * @next_hdr: 1 - there is a qmap extension header, 0 - opposite
+ * @cd: 0 - data, 1 - command
+ * @packet_len: length excluding qmap header
+ * @ext_next_hdr: always zero
+ * @hdr_type: type of extension header
+ * @additional_hdr_size: distance between end of qmap header to start of ip
+ * 		header
+ * @zero_checksum: 0 - compute checksum, 1 - zero checksum
+ * @ip_id_cfg: 0 - running ip id per segment, 1 - constant ip id
+ * @segment_size: maximum segment size for the segmentation operation
+ */
+struct qmap_hdr {
+    u16 pad: 6;
+    u16 next_hdr: 1;
+    u16 cd: 1;
+    u16 mux_id: 8;
+    u16 packet_len_with_pad: 16;
+    u16 ext_next_hdr: 1;
+    u16 hdr_type: 7;
+    u16 additional_hdr_size: 5;
+    u16 reserved: 1;
+    u16 zero_checksum: 1;
+    u16 ip_id_cfg: 1;
+    u16 segment_size: 16;
+} __packed;
+
+/**
+ * struct ipa_pkt_init_ex_hdr_ofst_set - header entry lookup parameters, if
+ * lookup was successful than the ep's pkt_init_ex offset will be set.
+ * @name: name of the header resource
+ * @ep:	[out] - the endpoint number to set the IC header offset
+ */
+struct ipa_pkt_init_ex_hdr_ofst_set {
+	char name[IPA_RESOURCE_NAME_MAX];
+	enum ipa_client_type ep;
+};
 
 enum ipa_active_client_log_type {
 	EP,
@@ -371,6 +444,7 @@ struct ipa_hdr_offset_entry {
 enum teth_tethering_mode {
 	TETH_TETHERING_MODE_RMNET,
 	TETH_TETHERING_MODE_MBIM,
+	TETH_TETHERING_MODE_RMNET_2,
 	TETH_TETHERING_MODE_MAX,
 };
 
@@ -438,7 +512,11 @@ struct IpaHwOffloadStatsAllocCmdData_t {
  * @ch_num: number of ch supported for given protocol
  */
 struct ipa_uc_dbg_ring_stats {
-	struct IpaHwRingStats_t ring[IPA_MAX_CH_STATS_SUPPORTED];
+	union {
+		struct IpaHwRingStats_t ring[IPA_MAX_CH_STATS_SUPPORTED];
+		struct ipa_uc_dbg_rtk_ring_stats
+			rtk[IPA_MAX_CH_STATS_SUPPORTED];
+	} u;
 	u8 num_ch;
 };
 
@@ -458,7 +536,7 @@ struct ipa_tz_unlock_reg_info {
  * @dma_addr: DMA address of this Rx packet
  */
 struct ipa_tx_suspend_irq_data {
-	u32 endpoints;
+	u32 endpoints[IPA_EP_ARR_SIZE];
 };
 
 extern const char *ipa_clients_strings[];
@@ -489,6 +567,10 @@ int ipa3_connect_mhi_pipe(struct ipa_mhi_connect_params_internal *in,
 		u32 *clnt_hdl);
 int ipa3_disconnect_mhi_pipe(u32 clnt_hdl);
 bool ipa3_mhi_stop_gsi_channel(enum ipa_client_type client);
+int ipa3_qmi_enable_force_clear_datapath_send(
+	struct ipa_enable_force_clear_datapath_req_msg_v01 *req);
+int ipa3_qmi_disable_force_clear_datapath_send(
+	struct ipa_disable_force_clear_datapath_req_msg_v01 *req);
 int ipa3_generate_tag_process(void);
 int ipa3_disable_sps_pipe(enum ipa_client_type client);
 int ipa3_mhi_reset_channel_internal(enum ipa_client_type client);
@@ -496,7 +578,8 @@ int ipa3_mhi_start_channel_internal(enum ipa_client_type client);
 bool ipa3_mhi_sps_channel_empty(enum ipa_client_type client);
 int ipa3_mhi_resume_channels_internal(enum ipa_client_type client,
 		bool LPTransitionRejected, bool brstmode_enabled,
-		union __packed gsi_channel_scratch ch_scratch, u8 index);
+		union __packed gsi_channel_scratch ch_scratch, u8 index,
+		bool is_switch_to_dbmode);
 int ipa3_mhi_query_ch_info(enum ipa_client_type client,
 		struct gsi_chan_info *ch_info);
 int ipa3_mhi_destroy_channel(enum ipa_client_type client);
@@ -539,11 +622,14 @@ int ipa3_conn_wdi3_pipes(struct ipa_wdi_conn_in_params *in,
 	struct ipa_wdi_conn_out_params *out,
 	ipa_wdi_meter_notifier_cb wdi_notify);
 
-int ipa3_disconn_wdi3_pipes(int ipa_ep_idx_tx, int ipa_ep_idx_rx);
+int ipa3_disconn_wdi3_pipes(int ipa_ep_idx_tx, int ipa_ep_idx_rx,
+	int ipa_ep_idx_tx1);
 
-int ipa3_enable_wdi3_pipes(int ipa_ep_idx_tx, int ipa_ep_idx_rx);
+int ipa3_enable_wdi3_pipes(int ipa_ep_idx_tx, int ipa_ep_idx_rx,
+	int ipa_ep_idx_tx1);
 
-int ipa3_disable_wdi3_pipes(int ipa_ep_idx_tx, int ipa_ep_idx_rx);
+int ipa3_disable_wdi3_pipes(int ipa_ep_idx_tx, int ipa_ep_idx_rx,
+	int ipa_ep_idx_tx1);
 
 const char *ipa_get_version_string(enum ipa_hw_type ver);
 int ipa3_start_gsi_channel(u32 clnt_hdl);
@@ -642,6 +728,12 @@ int ipa_cfg_ep_holb_by_client(enum ipa_client_type client,
 /*
 * Header removal / addition
 */
+int ipa3_add_hdr_hpc(struct ipa_ioc_add_hdr *hdrs);
+
+int ipa3_add_hdr_hpc_usr(struct ipa_ioc_add_hdr *hdrs, bool user_only);
+
+int ipa3_del_hdr_hpc(struct ipa_ioc_del_hdr *hdrs);
+
 int ipa3_add_hdr(struct ipa_ioc_add_hdr *hdrs);
 
 int ipa3_del_hdr(struct ipa_ioc_del_hdr *hdls);
@@ -649,6 +741,8 @@ int ipa3_del_hdr(struct ipa_ioc_del_hdr *hdls);
 int ipa3_add_hdr_usr(struct ipa_ioc_add_hdr *hdrs, bool user_only);
 
 int ipa3_reset_hdr(bool user_only);
+
+int ipa3_get_hdr(struct ipa_ioc_get_hdr *lookup);
 
 /*
 * Header Processing Context
@@ -712,6 +806,11 @@ int ipa3_nat_mdfy_pdn(struct ipa_ioc_nat_pdn_entry *mdfy_pdn);
 */
 int ipa3_rx_poll(u32 clnt_hdl, int budget);
 void ipa3_recycle_wan_skb(struct sk_buff *skb);
+
+/*
+ * Low lat data path
+ */
+int ipa3_low_lat_rx_poll(u32 clnt_hdl, int budget);
 
 /*
 * System pipes
@@ -785,5 +884,55 @@ int ipa3_get_smmu_params(struct ipa_smmu_in_params *in,
 * Returns: 0 on success, negative on failure
 */
 int ipa3_tz_unlock_reg(struct ipa_tz_unlock_reg_info *reg_info, u16 num_regs);
+
+int ipa_eth_rtk_connect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
+
+int ipa_eth_aqc_connect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
+
+int ipa_eth_emac_connect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
+
+int ipa_eth_rtk_disconnect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
+
+int ipa_eth_aqc_disconnect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
+
+int ipa_eth_emac_disconnect(
+	struct ipa_eth_client_pipe_info *pipe,
+	enum ipa_client_type client_type);
+
+#if IPA_ETH_API_VER < 2
+int ipa_eth_client_conn_evt(struct ipa_ecm_msg *msg);
+
+int ipa_eth_client_disconn_evt(struct ipa_ecm_msg *msg);
+
+#endif
+
+/* ULSO mode Query */
+bool ipa3_is_ulso_supported(void);
+
+/* IPA_PACKET_INIT_EX IC to pipe API */
+int ipa_set_pkt_init_ex_hdr_ofst(
+  struct ipa_pkt_init_ex_hdr_ofst_set *lookup, bool proc_ctx);
+
+/* IPA stats pm functions */
+int ipa_pm_get_scaling_bw_levels(struct ipa_lnx_clock_stats *clock_stats);
+int ipa_pm_get_aggregated_throughput(void);
+int ipa_pm_get_current_clk_vote(void);
+bool ipa_get_pm_client_stats_filled(struct pm_client_stats *pm_stats_ptr,
+	int pm_client_index);
+int ipa_pm_get_pm_clnt_throughput(enum ipa_client_type client_type);
+
+struct sk_buff* qmap_encapsulate_skb(struct sk_buff *skb, const struct qmap_hdr *qh);
+
+int ipa_hdrs_hpc_destroy(u32 hdr_hdl);
 
 #endif /* _IPA_COMMON_I_H_ */

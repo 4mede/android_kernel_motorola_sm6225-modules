@@ -28,6 +28,11 @@
  * rt rule.
  * @cnt_idx: if enable_stats is 1 and cnt_idx is 0, then cnt_idx
  * will be assigned by ipa driver.
+ * @close_aggr_irq_mod: close aggregation/coalescing and close GSI
+ *  interrupt moderation
+ * @ttl_update: bool to indicate whether TTL update is needed or not.
+ * @qos_class: QOS classification value.
+ * @skip_ingress: bool to skip ingress policing.
  */
 struct ipa_rt_rule_i {
 	enum ipa_client_type dst;
@@ -40,6 +45,10 @@ struct ipa_rt_rule_i {
 	u8 coalesce;
 	u8 enable_stats;
 	u8 cnt_idx;
+	u8 close_aggr_irq_mod;
+	u8 ttl_update;
+	u8 qos_class;
+	u8 skip_ingress;
 };
 
 /**
@@ -72,6 +81,10 @@ struct ipa_rt_rule_i {
  * flt rule.
  * @cnt_idx: if 0 means disable, otherwise use for index.
  * will be assigned by ipa driver.
+ * @close_aggr_irq_mod: close aggregation/coalescing and close GSI
+ *  interrupt moderation
+ * @ttl_update: bool to indicate whether TTL update is needed or not.
+ * @qos_class: QOS classification value.
  */
 struct ipa_flt_rule_i {
 	u8 retain_hdr;
@@ -89,6 +102,9 @@ struct ipa_flt_rule_i {
 	u8 pdn_idx;
 	u8 enable_stats;
 	u8 cnt_idx;
+	u8 close_aggr_irq_mod;
+	u8 ttl_update;
+	u8 qos_class;
 };
 
 #endif /* _IPA_DEFS_H_ */

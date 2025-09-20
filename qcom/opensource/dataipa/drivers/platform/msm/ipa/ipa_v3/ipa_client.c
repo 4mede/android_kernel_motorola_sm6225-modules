@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <asm/barrier.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include "ipa_i.h"
+#include "ipahal.h"
 #include <linux/msm_gsi.h>
 #include "gsi.h"
 
@@ -15,7 +17,8 @@
  * directional throughputs
  */
 #define IPA_POLL_AGGR_STATE_RETRIES_NUM 3
-#define IPA_POLL_AGGR_STATE_SLEEP_MSEC 1
+#define IPA_POLL_AGGR_STATE_SLEEP_USEC_MIN 1010
+#define IPA_POLL_AGGR_STATE_SLEEP_USEC_MAX 1050
 
 #define IPA_PKT_FLUSH_TO_US 100
 
@@ -62,17 +65,36 @@ int ipa3_enable_data_path(u32 clnt_hdl)
 		 * on other end from IPA hw.
 		 */
 		if ((ep->client == IPA_CLIENT_USB_DPL_CONS) ||
-				(ep->client == IPA_CLIENT_MHI_DPL_CONS)) {
-			holb_cfg.tmr_val = 0;
+				(ep->client == IPA_CLIENT_TPUT_CONS) ||
+				(ep->client == IPA_CLIENT_MHI_DPL_CONS) ||
+				(ep->client == IPA_CLIENT_MHI_QDSS_CONS)) {
 			holb_cfg.en = IPA_HOLB_TMR_EN;
+			holb_cfg.tmr_val = 0;
 		} else if (ipa3_ctx->ipa_hw_type == IPA_HW_v4_11 &&
 				(ep->client == IPA_CLIENT_WLAN1_CONS ||
 				ep->client == IPA_CLIENT_WLAN2_CONS ||
 				 ep->client == IPA_CLIENT_USB_CONS)) {
 			holb_cfg.en = IPA_HOLB_TMR_EN;
 			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
-		}
-		else {
+		} else if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_1 &&
+			ipa3_ctx->platform_type == IPA_PLAT_TYPE_APQ &&
+			ep->client == IPA_CLIENT_USB_CONS) {
+			holb_cfg.en = IPA_HOLB_TMR_EN;
+			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
+		} else if ((ipa3_ctx->ipa_hw_type == IPA_HW_v4_5) &&
+				(ep->client == IPA_CLIENT_USB_CONS)) {
+			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
+			holb_cfg.en = IPA_HOLB_TMR_EN;
+		} else if ((ipa3_ctx->ipa_hw_type >= IPA_HW_v5_2) &&
+				(ep->client == IPA_CLIENT_USB_CONS)) {
+			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
+			holb_cfg.en = IPA_HOLB_TMR_EN;
+		} else if ((ipa3_ctx->ipa_hw_type >= IPA_HW_v5_5) &&
+				(ep->client == IPA_CLIENT_APPS_WAN_CONS ||
+				ep->client == IPA_CLIENT_APPS_WAN_COAL_CONS)) {
+			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
+			holb_cfg.en = IPA_HOLB_TMR_EN;
+		} else {
 			holb_cfg.en = IPA_HOLB_TMR_DIS;
 			holb_cfg.tmr_val = 0;
 		}
@@ -104,6 +126,19 @@ int ipa3_disable_data_path(u32 clnt_hdl)
 
 	IPADBG("Disabling data path\n");
 	if (IPA_CLIENT_IS_CONS(ep->client)) {
+		/*
+		 * for RG10 workaround uC needs to be loaded before
+		 * pipe can be suspended in this case.
+		 */
+		if (ipa3_ctx->apply_rg10_wa && ipa3_uc_state_check()) {
+			IPADBG("uC is not loaded yet, waiting...\n");
+			res = wait_for_completion_timeout(
+					&ipa3_ctx->uc_loaded_completion_obj,
+					60 * HZ);
+			if (res == 0)
+				IPADBG("timeout waiting for uC load\n");
+		}
+
 		memset(&holb_cfg, 0, sizeof(holb_cfg));
 		holb_cfg.en = IPA_HOLB_TMR_EN;
 		holb_cfg.tmr_val = 0;
@@ -178,9 +213,10 @@ int ipa3_reset_gsi_channel(u32 clnt_hdl)
 
 	/*
 	 * Reset channel
-	 * If the reset called after stop, need to wait 1ms
+	 * If the reset called after stop, need to wait for about 1010us to 1050us
 	 */
-	msleep(IPA_POLL_AGGR_STATE_SLEEP_MSEC);
+	usleep_range(IPA_POLL_AGGR_STATE_SLEEP_USEC_MIN,
+		IPA_POLL_AGGR_STATE_SLEEP_USEC_MAX);
 	gsi_res = gsi_reset_channel(ep->gsi_chan_hdl);
 	if (gsi_res != GSI_STATUS_SUCCESS) {
 		IPAERR("Error resetting channel: %d\n", gsi_res);
@@ -368,7 +404,7 @@ int ipa3_smmu_map_peer_buff(u64 iova, u32 size, bool map, struct sg_table *sgt,
 	enum ipa_smmu_cb_type cb_type)
 {
 	struct iommu_domain *smmu_domain;
-	int res;
+	int res, ret = 0;
 	phys_addr_t phys;
 	unsigned long va;
 	struct scatterlist *sg;
@@ -409,7 +445,8 @@ int ipa3_smmu_map_peer_buff(u64 iova, u32 size, bool map, struct sg_table *sgt,
 				res = ipa3_iommu_map(smmu_domain, va, phys,
 					len, IOMMU_READ | IOMMU_WRITE);
 				if (res) {
-					IPAERR("Fail to map pa=%pa\n", &phys);
+					IPAERR("Fail to map pa=%pa, va 0x%X\n",
+						&phys, va);
 					return -EINVAL;
 				}
 				va += len;
@@ -431,82 +468,39 @@ int ipa3_smmu_map_peer_buff(u64 iova, u32 size, bool map, struct sg_table *sgt,
 	} else {
 		if (sgt != NULL) {
 			va = rounddown(iova, PAGE_SIZE);
-			len = 0;
-			for_each_sg(sgt->sgl, sg, sgt->nents, i) {
+			for_each_sg(sgt->sgl, sg, sgt->nents, i)
+			{
+				page = sg_page(sg);
+				phys = page_to_phys(page);
 				len = PAGE_ALIGN(sg->offset + sg->length);
-				res = iommu_unmap(smmu_domain, va,
-						roundup(len, PAGE_SIZE));
-				if (res !=
-					roundup(len, PAGE_SIZE)) {
-					IPAERR("Fail to unmap iova=%llx\n",
-									iova);
-					return -EINVAL;
+				res = iommu_unmap(smmu_domain, va, len);
+				if (res != len) {
+					IPAERR(
+						"Fail to unmap pa=%pa, va 0x%X, res %d\n"
+						, &phys, va, res);
+					ret = -EINVAL;
 				}
 				va += len;
 				count++;
 			}
 		} else {
 			res = iommu_unmap(smmu_domain,
-					rounddown(iova, PAGE_SIZE),
-					roundup(size + iova -
-						rounddown(iova, PAGE_SIZE),
-						PAGE_SIZE));
-			if (res != roundup(size + iova -
-				rounddown(iova, PAGE_SIZE), PAGE_SIZE)) {
+				rounddown(iova, PAGE_SIZE),
+				roundup(
+				size + iova - rounddown(iova, PAGE_SIZE),
+					PAGE_SIZE));
+			if (res != roundup(
+			size + iova - rounddown(iova, PAGE_SIZE),
+				PAGE_SIZE)) {
 				IPAERR("Fail to unmap 0x%llx\n", iova);
 				return -EINVAL;
 			}
 		}
 	}
 	IPADBG("Peer buff %s 0x%llx\n", map ? "map" : "unmap", iova);
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(ipa3_smmu_map_peer_buff);
-
-int ipa3_smmu_map_ctg(u64 iova, u32 size, bool map, phys_addr_t pa,
-	enum ipa_smmu_cb_type cb_type)
-{
-	struct iommu_domain *smmu_domain;
-	int res;
-	phys_addr_t phys;
-	unsigned long va;
-	size_t len;
-
-	if (cb_type >= IPA_SMMU_CB_MAX) {
-		IPAERR("invalid cb_type\n");
-		return -EINVAL;
-	}
-
-	if (ipa3_ctx->s1_bypass_arr[cb_type]) {
-		IPADBG("CB# %d is set to s1 bypass\n", cb_type);
-		return 0;
-	}
-
-	smmu_domain = ipa3_get_smmu_domain_by_type(cb_type);
-	if (!smmu_domain) {
-		IPAERR("invalid smmu domain\n");
-		return -EINVAL;
-	}
-
-	if (map) {
-		va = rounddown(iova, PAGE_SIZE);
-		phys = rounddown(pa, PAGE_SIZE);
-		len = size + ((iova - va > pa - phys) ?
-			(iova-va) : (pa - phys));
-		res = ipa3_iommu_map(smmu_domain, va, phys,
-			roundup(len, PAGE_SIZE),
-			IOMMU_READ | IOMMU_WRITE);
-	} else {
-		va = rounddown(iova, PAGE_SIZE);
-		phys = rounddown(pa, PAGE_SIZE);
-		len = size + ((iova - va > pa - phys) ?
-			(iova-va) : (pa - phys));
-		res = iommu_unmap(smmu_domain, va,
-					roundup(len, PAGE_SIZE));
-	}
-	IPADBG("ctg %s 0x%llx to 0x%llx\n", map ? "map" : "unmap", pa, iova);
-	return 0;
-}
 
 static enum ipa_client_cb_type ipa_get_client_cb_type(
 					enum ipa_client_type client_type)
@@ -827,29 +821,28 @@ int ipa3_get_usb_gsi_stats(struct ipa_uc_dbg_ring_stats *stats)
 {
 	int i;
 
-	if (!ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio) {
-		IPAERR("bad parms NULL usb_gsi_stats_mmio\n");
+	if (!ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio)
 		return -EINVAL;
-	}
+
 	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	for (i = 0; i < MAX_USB_CHANNELS; i++) {
-		stats->ring[i].ringFull = ioread32(
+		stats->u.ring[i].ringFull = ioread32(
 			ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio
 			+ i * IPA3_UC_DEBUG_STATS_OFF +
 			IPA3_UC_DEBUG_STATS_RINGFULL_OFF);
-		stats->ring[i].ringEmpty = ioread32(
+		stats->u.ring[i].ringEmpty = ioread32(
 			ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio
 			+ i * IPA3_UC_DEBUG_STATS_OFF +
 			IPA3_UC_DEBUG_STATS_RINGEMPTY_OFF);
-		stats->ring[i].ringUsageHigh = ioread32(
+		stats->u.ring[i].ringUsageHigh = ioread32(
 			ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio
 			+ i * IPA3_UC_DEBUG_STATS_OFF +
 			IPA3_UC_DEBUG_STATS_RINGUSAGEHIGH_OFF);
-		stats->ring[i].ringUsageLow = ioread32(
+		stats->u.ring[i].ringUsageLow = ioread32(
 			ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio
 			+ i * IPA3_UC_DEBUG_STATS_OFF +
 			IPA3_UC_DEBUG_STATS_RINGUSAGELOW_OFF);
-		stats->ring[i].RingUtilCount = ioread32(
+		stats->u.ring[i].RingUtilCount = ioread32(
 			ipa3_ctx->usb_ctx.dbg_stats.uc_dbg_stats_mmio
 			+ i * IPA3_UC_DEBUG_STATS_OFF +
 			IPA3_UC_DEBUG_STATS_RINGUTILCOUNT_OFF);
@@ -1059,7 +1052,7 @@ static int ipa3_is_xdci_channel_empty(struct ipa3_ep_context *ep,
 }
 
 int ipa3_enable_force_clear(u32 request_id, bool throttle_source,
-	u32 source_pipe_bitmask)
+	u32 source_pipe_bitmask, u32 source_pipe_reg_idx)
 {
 	struct ipa_enable_force_clear_datapath_req_msg_v01 req;
 	int result;
@@ -1071,7 +1064,14 @@ int ipa3_enable_force_clear(u32 request_id, bool throttle_source,
 
 	memset(&req, 0, sizeof(req));
 	req.request_id = request_id;
-	req.source_pipe_bitmask = source_pipe_bitmask;
+	if (ipa3_ctx->ipa_hw_type < IPA_HW_v5_0) {
+		WARN_ON(source_pipe_reg_idx);
+		req.source_pipe_bitmask = source_pipe_bitmask;
+	} else {
+		req.source_pipe_bitmask_ext_valid = 1;
+		req.source_pipe_bitmask_ext[source_pipe_reg_idx] =
+			source_pipe_bitmask;
+	}
 	if (throttle_source) {
 		req.throttle_source_valid = 1;
 		req.throttle_source = 1;
@@ -1193,8 +1193,8 @@ int ipa3_remove_secondary_flow_ctrl(int gsi_chan_hdl)
 	result = gsi_query_flow_control_state_ee(gsi_chan_hdl, 0, 1, &code);
 	if (result == GSI_STATUS_SUCCESS) {
 		code = 0;
-		result = gsi_flow_control_ee(gsi_chan_hdl, 0, false, true,
-							&code);
+		result = gsi_flow_control_ee(gsi_chan_hdl,
+			ipa3_get_ep_mapping_from_gsi(gsi_chan_hdl), 0, false, true, &code);
 		if (result == GSI_STATUS_SUCCESS) {
 			IPADBG("flow control sussess ch %d code %d\n",
 					gsi_chan_hdl, code);
@@ -1210,8 +1210,8 @@ int ipa3_remove_secondary_flow_ctrl(int gsi_chan_hdl)
 }
 /* Clocks should be voted for before invoking this function */
 static int ipa3_stop_ul_chan_with_data_drain(u32 qmi_req_id,
-		u32 source_pipe_bitmask, bool should_force_clear, u32 clnt_hdl,
-		bool remove_delay)
+		u32 source_pipe_bitmask, u32 source_pipe_reg_idx,
+		bool should_force_clear, u32 clnt_hdl, bool remove_delay)
 {
 	int result;
 	bool is_empty = false;
@@ -1282,7 +1282,7 @@ static int ipa3_stop_ul_chan_with_data_drain(u32 qmi_req_id,
 	/* if still stop_in_proc or not empty, activate force clear */
 	if (should_force_clear && IPA_CLIENT_IS_PROD(ep->client)) {
 		result = ipa3_enable_force_clear(qmi_req_id, false,
-			source_pipe_bitmask);
+			source_pipe_bitmask, source_pipe_reg_idx);
 		if (result) {
 			struct ipahal_ep_cfg_ctrl_scnd ep_ctrl_scnd = { 0 };
 
@@ -1320,6 +1320,7 @@ static int ipa3_stop_ul_chan_with_data_drain(u32 qmi_req_id,
 	if (result) {
 		IPAERR("fail to stop UL channel - hdl=%d clnt=%d\n",
 			clnt_hdl, ep->client);
+		ipa_assert();
 		goto disable_force_clear_and_exit;
 	}
 	result = stop_in_proc ? -EFAULT : 0;
@@ -1450,7 +1451,7 @@ int ipa3_start_stop_client_prod_gsi_chnl(enum ipa_client_type client,
 	client_lock_unlock_cb(client, false);
 	return result;
 }
-int ipa3_set_reset_client_cons_pipe_sus_holb(bool set_reset, u32 tmr_val,
+int ipa3_set_reset_client_cons_pipe_sus_holb(bool set_reset,
 		enum ipa_client_type client)
 {
 	int pipe_idx;
@@ -1462,7 +1463,7 @@ int ipa3_set_reset_client_cons_pipe_sus_holb(bool set_reset, u32 tmr_val,
 	memset(&ep_holb, 0, sizeof(ep_holb));
 
 	ep_suspend.ipa_ep_suspend = set_reset;
-	ep_holb.tmr_val = tmr_val;
+	ep_holb.tmr_val = 0;
 	ep_holb.en = set_reset;
 
 	if (IPA_CLIENT_IS_PROD(client)) {
@@ -1556,8 +1557,10 @@ EXPORT_SYMBOL(ipa3_xdci_ep_delay_rm);
 int ipa3_xdci_disconnect(u32 clnt_hdl, bool should_force_clear, u32 qmi_req_id)
 {
 	struct ipa3_ep_context *ep;
+	struct ipa_ep_cfg_ctrl ep_cfg_ctrl;
 	int result;
 	u32 source_pipe_bitmask = 0;
+	u32 source_pipe_reg_idx = 0;
 
 	IPADBG("entry\n");
 	if (clnt_hdl >= ipa3_ctx->ipa_num_pipes ||
@@ -1571,14 +1574,16 @@ int ipa3_xdci_disconnect(u32 clnt_hdl, bool should_force_clear, u32 qmi_req_id)
 	if (!ep->keep_ipa_awake)
 		IPA_ACTIVE_CLIENTS_INC_EP(ipa3_get_client_mapping(clnt_hdl));
 
+	ipa3_disable_data_path(clnt_hdl);
+
 	if (!IPA_CLIENT_IS_CONS(ep->client)) {
 		IPADBG("Stopping PROD channel - hdl=%d clnt=%d\n",
 			clnt_hdl, ep->client);
-		source_pipe_bitmask = 1 <<
-			ipa3_get_ep_mapping(ep->client);
+		source_pipe_bitmask = ipahal_get_ep_bit(clnt_hdl);
+		source_pipe_reg_idx = ipahal_get_ep_reg_idx(clnt_hdl);
 		result = ipa3_stop_ul_chan_with_data_drain(qmi_req_id,
-			source_pipe_bitmask, should_force_clear, clnt_hdl,
-			true);
+			source_pipe_bitmask, source_pipe_reg_idx,
+			should_force_clear, clnt_hdl, true);
 		if (result) {
 			IPAERR("Fail to stop UL channel with data drain\n");
 			WARN_ON(1);
@@ -1593,8 +1598,13 @@ int ipa3_xdci_disconnect(u32 clnt_hdl, bool should_force_clear, u32 qmi_req_id)
 				result);
 			goto stop_chan_fail;
 		}
+		if (ipa3_ctx->ipa_hw_type < IPA_HW_v4_0) {
+			/* Unsuspend the pipe */
+			memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
+			ep_cfg_ctrl.ipa_ep_suspend = false;
+			ipa3_cfg_ep_ctrl(clnt_hdl, &ep_cfg_ctrl);
+		}
 	}
-	ipa3_disable_data_path(clnt_hdl);
 	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 
 	IPADBG("exit\n");
@@ -1612,7 +1622,6 @@ int ipa3_release_gsi_channel(u32 clnt_hdl)
 	struct ipa3_ep_context *ep;
 	int result = -EFAULT;
 	enum gsi_status gsi_res;
-	unsigned long flags;
 
 	IPADBG("entry\n");
 	if (clnt_hdl >= ipa3_ctx->ipa_num_pipes ||
@@ -1627,9 +1636,10 @@ int ipa3_release_gsi_channel(u32 clnt_hdl)
 		IPA_ACTIVE_CLIENTS_INC_EP(ipa3_get_client_mapping(clnt_hdl));
 
 	/* Set the disconnect in progress flag to avoid calling cb.*/
-	spin_lock_irqsave(&ipa3_ctx->disconnect_lock, flags);
+	spin_lock(&ipa3_ctx->disconnect_lock);
 	atomic_set(&ep->disconnect_in_progress, 1);
-	spin_unlock_irqrestore(&ipa3_ctx->disconnect_lock, flags);
+	spin_unlock(&ipa3_ctx->disconnect_lock);
+
 
 	gsi_res = gsi_dealloc_channel(ep->gsi_chan_hdl);
 	if (gsi_res != GSI_STATUS_SUCCESS) {
@@ -1649,9 +1659,9 @@ int ipa3_release_gsi_channel(u32 clnt_hdl)
 	if (!ep->keep_ipa_awake)
 		IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 
-	spin_lock_irqsave(&ipa3_ctx->disconnect_lock, flags);
+	spin_lock(&ipa3_ctx->disconnect_lock);
 	memset(&ipa3_ctx->ep[clnt_hdl], 0, sizeof(struct ipa3_ep_context));
-	spin_unlock_irqrestore(&ipa3_ctx->disconnect_lock, flags);
+	spin_unlock(&ipa3_ctx->disconnect_lock);
 
 	IPADBG("exit\n");
 	return 0;
@@ -1670,6 +1680,7 @@ int ipa3_xdci_suspend(u32 ul_clnt_hdl, u32 dl_clnt_hdl,
 	struct ipa3_ep_context *dl_ep;
 	int result = -EFAULT;
 	u32 source_pipe_bitmask = 0;
+	u32 source_pipe_reg_idx = 0;
 	bool dl_data_pending = true;
 	bool ul_data_pending = true;
 	int i;
@@ -1733,9 +1744,18 @@ int ipa3_xdci_suspend(u32 ul_clnt_hdl, u32 dl_clnt_hdl,
 	}
 
 	if (!dl_data_pending) {
-		aggr_active_bitmap = ipahal_read_reg(IPA_STATE_AGGR_ACTIVE);
-		if (aggr_active_bitmap & (1 << dl_clnt_hdl)) {
-			IPADBG("DL/DPL data pending due to open aggr. frame\n");
+		if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_0) {
+			aggr_active_bitmap =
+				ipahal_read_ep_reg(IPA_STATE_AGGR_ACTIVE_n,
+					dl_clnt_hdl);
+		} else {
+			aggr_active_bitmap =
+				ipahal_read_reg(IPA_STATE_AGGR_ACTIVE);
+		}
+		if (ipahal_test_ep_bit(aggr_active_bitmap, dl_clnt_hdl)) {
+			IPADBG(
+				"DL/DPL data pending due to open aggr. frame\n"
+			);
 			dl_data_pending = true;
 		}
 	}
@@ -1783,10 +1803,11 @@ int ipa3_xdci_suspend(u32 ul_clnt_hdl, u32 dl_clnt_hdl,
 
 	/* STOP UL channel */
 	if (!is_dpl) {
-		source_pipe_bitmask = 1 << ipa3_get_ep_mapping(ul_ep->client);
+		source_pipe_bitmask = ipahal_get_ep_bit(ul_clnt_hdl);
+		source_pipe_reg_idx = ipahal_get_ep_reg_idx(ul_clnt_hdl);
 		result = ipa3_stop_ul_chan_with_data_drain(qmi_req_id,
-			source_pipe_bitmask, should_force_clear, ul_clnt_hdl,
-			false);
+			source_pipe_bitmask, source_pipe_reg_idx,
+			should_force_clear, ul_clnt_hdl, false);
 		if (result) {
 			IPAERR("Error stopping UL channel: result = %d\n",
 				result);
@@ -1983,10 +2004,19 @@ int ipa3_clear_endpoint_delay(u32 clnt_hdl)
 	ep = &ipa3_ctx->ep[clnt_hdl];
 
 	if (!ipa3_ctx->tethered_flow_control) {
+		u32 source_pipe_bitmask = ipahal_get_ep_bit(clnt_hdl);
+		int source_pipe_reg_idx = ipahal_get_ep_reg_idx(clnt_hdl);
 		IPADBG("APPS flow control is not enabled\n");
 		/* Send a message to modem to disable flow control honoring. */
 		req.request_id = clnt_hdl;
-		req.source_pipe_bitmask = 1 << clnt_hdl;
+		if (ipa3_ctx->ipa_hw_type < IPA_HW_v5_0) {
+			WARN_ON(source_pipe_reg_idx);
+			req.source_pipe_bitmask = source_pipe_bitmask;
+		} else {
+			req.source_pipe_bitmask_ext_valid = 1;
+			req.source_pipe_bitmask_ext[source_pipe_reg_idx] =
+				source_pipe_bitmask;
+		}
 		res = ipa3_qmi_enable_force_clear_datapath_send(&req);
 		if (res) {
 			IPADBG("enable_force_clear_datapath failed %d\n",
@@ -2013,6 +2043,32 @@ int ipa3_clear_endpoint_delay(u32 clnt_hdl)
 	return 0;
 }
 
+static void ipa3_get_gsi_ring_stats(struct IpaHwRingStats_t *ring,
+	struct ipa3_uc_dbg_stats *ctx_stats, int idx)
+{
+	ring->ringFull = ioread32(
+		ctx_stats->uc_dbg_stats_mmio
+		+ idx * IPA3_UC_DEBUG_STATS_OFF +
+		IPA3_UC_DEBUG_STATS_RINGFULL_OFF);
+
+	ring->ringEmpty = ioread32(
+		ctx_stats->uc_dbg_stats_mmio
+		+ idx * IPA3_UC_DEBUG_STATS_OFF +
+		IPA3_UC_DEBUG_STATS_RINGEMPTY_OFF);
+	ring->ringUsageHigh = ioread32(
+		ctx_stats->uc_dbg_stats_mmio
+		+ idx * IPA3_UC_DEBUG_STATS_OFF +
+		IPA3_UC_DEBUG_STATS_RINGUSAGEHIGH_OFF);
+	ring->ringUsageLow = ioread32(
+		ctx_stats->uc_dbg_stats_mmio
+		+ idx * IPA3_UC_DEBUG_STATS_OFF +
+		IPA3_UC_DEBUG_STATS_RINGUSAGELOW_OFF);
+	ring->RingUtilCount = ioread32(
+		ctx_stats->uc_dbg_stats_mmio
+		+ idx * IPA3_UC_DEBUG_STATS_OFF +
+		IPA3_UC_DEBUG_STATS_RINGUTILCOUNT_OFF);
+}
+
 /**
  * ipa3_get_aqc_gsi_stats() - Query AQC gsi stats from uc
  * @stats:	[inout] stats blob from client populated by driver
@@ -2026,32 +2082,87 @@ int ipa3_get_aqc_gsi_stats(struct ipa_uc_dbg_ring_stats *stats)
 {
 	int i;
 
-	if (!ipa3_ctx->aqc_ctx.dbg_stats.uc_dbg_stats_mmio) {
-		IPAERR("bad parms NULL aqc_gsi_stats_mmio\n");
+	if (!ipa3_ctx->aqc_ctx.dbg_stats.uc_dbg_stats_mmio)
 		return -EINVAL;
-	}
+
 	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
 	for (i = 0; i < MAX_AQC_CHANNELS; i++) {
-		stats->ring[i].ringFull = ioread32(
-			ipa3_ctx->aqc_ctx.dbg_stats.uc_dbg_stats_mmio
-			+ i * IPA3_UC_DEBUG_STATS_OFF +
-			IPA3_UC_DEBUG_STATS_RINGFULL_OFF);
-		stats->ring[i].ringEmpty = ioread32(
-			ipa3_ctx->aqc_ctx.dbg_stats.uc_dbg_stats_mmio
-			+ i * IPA3_UC_DEBUG_STATS_OFF +
-			IPA3_UC_DEBUG_STATS_RINGEMPTY_OFF);
-		stats->ring[i].ringUsageHigh = ioread32(
-			ipa3_ctx->aqc_ctx.dbg_stats.uc_dbg_stats_mmio
-			+ i * IPA3_UC_DEBUG_STATS_OFF +
-			IPA3_UC_DEBUG_STATS_RINGUSAGEHIGH_OFF);
-		stats->ring[i].ringUsageLow = ioread32(
-			ipa3_ctx->aqc_ctx.dbg_stats.uc_dbg_stats_mmio
-			+ i * IPA3_UC_DEBUG_STATS_OFF +
-			IPA3_UC_DEBUG_STATS_RINGUSAGELOW_OFF);
-		stats->ring[i].RingUtilCount = ioread32(
-			ipa3_ctx->aqc_ctx.dbg_stats.uc_dbg_stats_mmio
-			+ i * IPA3_UC_DEBUG_STATS_OFF +
-			IPA3_UC_DEBUG_STATS_RINGUTILCOUNT_OFF);
+		ipa3_get_gsi_ring_stats(stats->u.ring + i,
+			&ipa3_ctx->aqc_ctx.dbg_stats, i);
+	}
+	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
+
+
+	return 0;
+}
+
+/**
+* ipa3_get_ntn_gsi_stats() - Query NTN gsi stats from uc
+* @stats:	[inout] stats blob from client populated by driver
+*
+* Returns:	0 on success, negative on failure
+*
+* @note Cannot be called from atomic context
+*
+*/
+int ipa3_get_ntn_gsi_stats(struct ipa_uc_dbg_ring_stats *stats)
+{
+	int i;
+
+	if (!ipa3_ctx->ntn_ctx.dbg_stats.uc_dbg_stats_mmio)
+		return -EINVAL;
+
+	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
+	for (i = 0; i < MAX_NTN_CHANNELS; i++) {
+		ipa3_get_gsi_ring_stats(stats->u.ring + i,
+			&ipa3_ctx->ntn_ctx.dbg_stats, i);
+	}
+	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
+
+
+	return 0;
+}
+
+/**
+ * ipa3_get_rtk_gsi_stats() - Query RTK gsi stats from uc
+ * @stats:	[inout] stats blob from client populated by driver
+ *
+ * Returns:	0 on success, negative on failure
+ *
+ * @note Cannot be called from atomic context
+ *
+ */
+int ipa3_get_rtk_gsi_stats(struct ipa_uc_dbg_ring_stats *stats)
+{
+	int i;
+	u64 low, high;
+
+	if (!ipa3_ctx->rtk_ctx.dbg_stats.uc_dbg_stats_mmio)
+		return -EINVAL;
+
+	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
+	for (i = 0; i < MAX_RTK_CHANNELS; i++) {
+		ipa3_get_gsi_ring_stats(&stats->u.rtk[i].commStats,
+			&ipa3_ctx->rtk_ctx.dbg_stats, i);
+		stats->u.rtk[i].trCount = ioread32(
+			ipa3_ctx->rtk_ctx.dbg_stats.uc_dbg_stats_mmio
+			+ i * IPA3_UC_DEBUG_STATS_RTK_OFF +
+			IPA3_UC_DEBUG_STATS_TRCOUNT_OFF);
+		stats->u.rtk[i].erCount = ioread32(
+			ipa3_ctx->rtk_ctx.dbg_stats.uc_dbg_stats_mmio
+			+ i * IPA3_UC_DEBUG_STATS_RTK_OFF +
+			IPA3_UC_DEBUG_STATS_ERCOUNT_OFF);
+		stats->u.rtk[i].totalAosCount = ioread32(
+			ipa3_ctx->rtk_ctx.dbg_stats.uc_dbg_stats_mmio
+			+ i * IPA3_UC_DEBUG_STATS_RTK_OFF +
+			IPA3_UC_DEBUG_STATS_AOSCOUNT_OFF);
+		low = ioread32(ipa3_ctx->rtk_ctx.dbg_stats.uc_dbg_stats_mmio
+			+ i * IPA3_UC_DEBUG_STATS_RTK_OFF +
+			IPA3_UC_DEBUG_STATS_BUSYTIME_OFF);
+		high = ioread32(ipa3_ctx->rtk_ctx.dbg_stats.uc_dbg_stats_mmio
+			+ i * IPA3_UC_DEBUG_STATS_RTK_OFF +
+			IPA3_UC_DEBUG_STATS_BUSYTIME_OFF + sizeof(u32));
+		stats->u.rtk[i].busyTime = low | (high << 32);
 	}
 	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 

@@ -5,6 +5,7 @@
 
 #include <linux/debugfs.h>
 #include "ipa_pm.h"
+#include "ipa_stats.h"
 #include "ipa_i.h"
 
 
@@ -48,11 +49,6 @@
 	IPA_PM_DBG_LOW("Client[%d] %s: %s\n", hdl, name, \
 		client_state_to_str[state])
 
-
-#if IPA_PM_MAX_CLIENTS > 32
-#error max client greater than 32 all bitmask types should be changed
-#endif
-
 /*
  * struct ipa_pm_exception_list - holds information about an exception
  * @pending: number of clients in exception that have not yet been adctivated
@@ -62,7 +58,7 @@
 struct ipa_pm_exception_list {
 	char clients[IPA_PM_MAX_EX_CL];
 	int pending;
-	u32 bitmask;
+	u32 bitmask[IPA5_PIPE_REG_NUM];
 	int threshold[IPA_PM_THRESHOLD_MAX];
 };
 
@@ -83,7 +79,7 @@ struct clk_scaling_db {
 	spinlock_t lock;
 	struct ipa_pm_exception_list exception_list[IPA_PM_EXCEPTION_MAX];
 	struct work_struct work;
-	u32 active_client_bitmask;
+	u32 active_client_bitmask[IPA5_PIPE_REG_NUM];
 	int threshold_size;
 	int exception_size;
 	int cur_vote;
@@ -173,7 +169,7 @@ struct ipa_pm_client {
  */
 struct ipa_pm_ctx {
 	struct ipa_pm_client *clients[IPA_PM_MAX_CLIENTS];
-	struct ipa_pm_client *clients_by_pipe[IPA3_MAX_NUM_PIPES];
+	struct ipa_pm_client *clients_by_pipe[IPA5_PIPES_NUM];
 	struct workqueue_struct *wq;
 	struct clk_scaling_db clk_scaling;
 	struct mutex client_mutex;
@@ -198,6 +194,8 @@ static const char *ipa_pm_group_to_str[IPA_PM_GROUP_MAX] = {
 	__stringify(IPA_PM_GROUP_APPS),
 	__stringify(IPA_PM_GROUP_MODEM),
 };
+
+static int dummy_hdl_1, dummy_hdl_2, tput_modem, tput_apps;
 
 /**
  * pop_max_from_array() -pop the max and move the last element to where the
@@ -289,12 +287,14 @@ static int calculate_throughput(void)
 static void deactivate_client(u32 hdl)
 {
 	unsigned long flags;
+	int idx = ipahal_get_ep_reg_idx(hdl);
 
 	spin_lock_irqsave(&ipa_pm_ctx->clk_scaling.lock, flags);
-	ipa_pm_ctx->clk_scaling.active_client_bitmask &= ~(1 << hdl);
+	ipa_pm_ctx->clk_scaling.active_client_bitmask[idx] &=
+		~(ipahal_get_ep_bit(hdl));
 	spin_unlock_irqrestore(&ipa_pm_ctx->clk_scaling.lock, flags);
-	IPA_PM_DBG_LOW("active bitmask: %x\n",
-		ipa_pm_ctx->clk_scaling.active_client_bitmask);
+	IPA_PM_DBG_LOW("active bitmask (%d): %x\n",
+		idx, ipa_pm_ctx->clk_scaling.active_client_bitmask[idx]);
 }
 
 /**
@@ -305,12 +305,14 @@ static void deactivate_client(u32 hdl)
 static void activate_client(u32 hdl)
 {
 	unsigned long flags;
+	int idx = ipahal_get_ep_reg_idx(hdl);
 
 	spin_lock_irqsave(&ipa_pm_ctx->clk_scaling.lock, flags);
-	ipa_pm_ctx->clk_scaling.active_client_bitmask |= (1 << hdl);
+	ipa_pm_ctx->clk_scaling.active_client_bitmask[idx] |=
+		(ipahal_get_ep_bit(hdl));
 	spin_unlock_irqrestore(&ipa_pm_ctx->clk_scaling.lock, flags);
-	IPA_PM_DBG_LOW("active bitmask: %x\n",
-		ipa_pm_ctx->clk_scaling.active_client_bitmask);
+	IPA_PM_DBG_LOW("active bitmask (%d): %x\n",
+		idx, ipa_pm_ctx->clk_scaling.active_client_bitmask[idx]);
 }
 
 /**
@@ -330,8 +332,10 @@ static void set_current_threshold(void)
 	spin_lock_irqsave(&ipa_pm_ctx->clk_scaling.lock, flags);
 	for (i = 0; i < clk->exception_size; i++) {
 		exception = &clk->exception_list[i];
-		if (exception->pending == 0 && (exception->bitmask
-			& ~clk->active_client_bitmask) == 0) {
+		if (exception->pending == 0 && ((exception->bitmask[0]
+			& ~clk->active_client_bitmask[0]) == 0) &&
+			((exception->bitmask[1] &
+				~clk->active_client_bitmask[1]) == 0)) {
 			spin_unlock_irqrestore(&ipa_pm_ctx->clk_scaling.lock,
 				 flags);
 			clk->current_threshold = exception->threshold;
@@ -443,8 +447,6 @@ static void activate_work_func(struct work_struct *work)
 	if (client->callback) {
 		client->callback(client->callback_params,
 			IPA_PM_CLIENT_ACTIVATED);
-	} else {
-		IPA_PM_ERR_RL("client has no callback");
 	}
 	mutex_unlock(&ipa_pm_ctx->client_mutex);
 
@@ -559,7 +561,8 @@ static int add_client_to_exception_list(u32 hdl)
 				mutex_unlock(&ipa_pm_ctx->client_mutex);
 				return -EPERM;
 			}
-			exception->bitmask |= (1 << hdl);
+			exception->bitmask[ipahal_get_ep_reg_idx(hdl)] |=
+				(ipahal_get_ep_bit(hdl));
 		}
 	}
 	IPA_PM_DBG("%s added to exception list\n",
@@ -580,14 +583,18 @@ static int remove_client_from_exception_list(u32 hdl)
 {
 	int i;
 	struct ipa_pm_exception_list *exception;
+	int idx;
+	u32 ep_bit;
 
+	idx = ipahal_get_ep_reg_idx(hdl);
+	ep_bit = ipahal_get_ep_bit(hdl);
 	for (i = 0; i < ipa_pm_ctx->clk_scaling.exception_size; i++) {
 		exception = &ipa_pm_ctx->clk_scaling.exception_list[i];
-		if (exception->bitmask & (1 << hdl)) {
+		if (exception->bitmask[idx] & (ep_bit)) {
 			exception->pending++;
 			IPA_PM_DBG("Pending: %d\n",
 			exception->pending);
-			exception->bitmask &= ~(1 << hdl);
+			exception->bitmask[idx] &= ~(ep_bit);
 		}
 	}
 	IPA_PM_DBG("Client %d removed from exception list\n", hdl);
@@ -605,6 +612,9 @@ int ipa_pm_init(struct ipa_pm_init_params *params)
 {
 	int i, j;
 	struct clk_scaling_db *clk_scaling;
+#if IS_ENABLED(CONFIG_QCOM_VA_MINIDUMP)
+	struct ipa_minidump_data *mini_dump;
+#endif
 
 	if (params == NULL) {
 		IPA_PM_ERR("Invalid Params\n");
@@ -684,6 +694,17 @@ int ipa_pm_init(struct ipa_pm_init_params *params)
 
 	}
 	IPA_PM_DBG("initialization success");
+
+#if IS_ENABLED(CONFIG_QCOM_VA_MINIDUMP)
+	/*Adding ipa3_ctx pointer to minidump list*/
+	mini_dump = (struct ipa_minidump_data *)kzalloc(sizeof(struct ipa_minidump_data), GFP_KERNEL);
+	if (mini_dump != NULL) {
+		strlcpy(mini_dump->data.owner, "ipa_pm_ctx", sizeof(mini_dump->data.owner));
+		mini_dump->data.vaddr = (unsigned long)(ipa_pm_ctx);
+		mini_dump->data.size = sizeof(*ipa_pm_ctx);
+		list_add(&mini_dump->entry, &ipa3_ctx->minidump_list_head);
+	}
+#endif
 
 	return 0;
 }
@@ -837,7 +858,7 @@ int ipa_pm_deregister(u32 hdl)
 	mutex_lock(&ipa_pm_ctx->client_mutex);
 
 	/* nullify pointers in pipe array */
-	for (i = 0; i < IPA3_MAX_NUM_PIPES; i++) {
+	for (i = 0; i < ipa3_get_max_num_pipes(); i++) {
 		if (ipa_pm_ctx->clients_by_pipe[i] == ipa_pm_ctx->clients[hdl])
 			ipa_pm_ctx->clients_by_pipe[i] = NULL;
 	}
@@ -1217,14 +1238,17 @@ EXPORT_SYMBOL(ipa_pm_deactivate_sync);
 /**
  * ipa_pm_handle_suspend(): calls the callbacks of suspended clients to wake up
  * @pipe_bitmask: the bits represent the indexes of the clients to be woken up
+ * @pipe_arr_idx: if larger than 0 add to pipe num 32 * pipe_arr_idx
  *
  * Returns: 0 on success, negative on failure
  */
-int ipa_pm_handle_suspend(u32 pipe_bitmask)
+int ipa_pm_handle_suspend(u32 pipe_bitmask, u32 pipe_arr_idx)
 {
 	int i;
 	struct ipa_pm_client *client;
 	bool client_notified[IPA_PM_MAX_CLIENTS] = { false };
+	u32 pipe_add;
+	u32 max_pipes;
 
 	if (ipa_pm_ctx == NULL) {
 		IPA_PM_ERR("PM_ctx is null\n");
@@ -1236,18 +1260,17 @@ int ipa_pm_handle_suspend(u32 pipe_bitmask)
 	if (pipe_bitmask == 0)
 		return 0;
 
+	pipe_add = pipe_arr_idx * 32;
+	max_pipes = ipa3_get_max_num_pipes();
 	mutex_lock(&ipa_pm_ctx->client_mutex);
-	for (i = 0; i < IPA3_MAX_NUM_PIPES; i++) {
+	for (i = 0; i < IPA_EP_PER_REG && (i + pipe_add) < max_pipes; i++) {
 		if (pipe_bitmask & (1 << i)) {
-			client = ipa_pm_ctx->clients_by_pipe[i];
+			client = ipa_pm_ctx->clients_by_pipe[i + pipe_add];
 			if (client && !client_notified[client->hdl]) {
 				if (client->callback) {
 					client->callback(client->callback_params
 						, IPA_PM_REQUEST_WAKEUP);
 					client_notified[client->hdl] = true;
-				} else {
-					IPA_PM_ERR("client has no callback");
-					WARN_ON(1);
 				}
 			}
 		}
@@ -1384,7 +1407,7 @@ int ipa_pm_stat(char *buf, int size)
 			ipa_pm_group_to_str[client->group], tput);
 		cnt += result;
 
-		for (j = 0; j < IPA3_MAX_NUM_PIPES; j++) {
+		for (j = 0; j < ipa3_get_max_num_pipes(); j++) {
 			if (ipa_pm_ctx->clients_by_pipe[j] == client) {
 				result = scnprintf(buf + cnt, size - cnt,
 					"%d, ", j);
@@ -1432,9 +1455,9 @@ int ipa_pm_exceptions_stat(char *buf, int size)
 		}
 
 		result = scnprintf(buf + cnt, size - cnt,
-			"Exception %d: %s\nPending: %d Bitmask: %d Threshold: ["
+			"Exception %d: %s\nPending: %d Bitmask: %X %X Threshold: ["
 			, i, exception->clients, exception->pending,
-			exception->bitmask);
+			exception->bitmask[0], exception->bitmask[1]);
 		cnt += result;
 		for (j = 0; j < ipa_pm_ctx->clk_scaling.threshold_size; j++) {
 			result = scnprintf(buf + cnt, size - cnt,
@@ -1447,4 +1470,241 @@ int ipa_pm_exceptions_stat(char *buf, int size)
 	mutex_unlock(&ipa_pm_ctx->client_mutex);
 
 	return cnt;
+}
+
+int ipa_pm_get_scaling_bw_levels(struct ipa_lnx_clock_stats *clock_stats)
+{
+	struct clk_scaling_db *clk;
+
+	if (ipa_pm_ctx) {
+		clk = &ipa_pm_ctx->clk_scaling;
+		if (clk->threshold_size >= 3) {
+			clock_stats->scale_thresh_svs = clk->current_threshold[0];
+			clock_stats->scale_thresh_nom = clk->current_threshold[1];
+			clock_stats->scale_thresh_tur = clk->current_threshold[2];
+			return 0;
+		} else return -EINVAL;
+	} else return -EINVAL;
+}
+
+int ipa_pm_get_aggregated_throughput(void)
+{
+	if (ipa_pm_ctx)
+		return ipa_pm_ctx->aggregated_tput;
+	else return 0;
+}
+
+int ipa_pm_get_current_clk_vote(void)
+{
+	if (ipa_pm_ctx)
+		return ipa_pm_ctx->clk_scaling.cur_vote;
+	else
+		return ipa3_ctx->app_clock_vote.cnt;
+}
+
+
+static int ipa_get_pm_hdl_from_name(char *client_name)
+{
+	int i;
+	struct pm_client_name_lookup *lookup;
+
+	for (i = 0; i < NUM_PM_CLIENT_NAMES; i++) {
+		lookup = &client_lookup_table[i];
+		if (!strcmp(lookup->name, client_name))
+			return lookup->idx_hdl;
+	}
+	return NUM_PM_CLIENT_NAMES + 2;
+}
+
+bool ipa_get_pm_client_stats_filled(struct pm_client_stats *pm_stats_ptr,
+	int pm_client_index)
+{
+	struct ipa_pm_client *client;
+	unsigned long flags;
+	int i;
+
+	client = ipa_pm_ctx->clients[pm_client_index];
+	mutex_lock(&ipa_pm_ctx->client_mutex);
+	if (client == NULL) {
+		mutex_unlock(&ipa_pm_ctx->client_mutex);
+		return false;
+	}
+	spin_lock_irqsave(&client->state_lock, flags);
+	pm_stats_ptr->pm_client_group = client->group;
+	pm_stats_ptr->pm_client_state = client->state;
+	pm_stats_ptr->pm_client_hdl = ipa_get_pm_hdl_from_name(client->name);
+	if (client->group == IPA_PM_GROUP_DEFAULT)
+		pm_stats_ptr->pm_client_bw = client->throughput;
+	else {
+		pm_stats_ptr->pm_client_bw = ipa_pm_ctx->group_tput[client->group];
+	}
+
+	pm_stats_ptr->pm_client_type = IPA_CLIENT_MAX;
+	for (i = 0; i < ipa3_get_max_num_pipes(); i++) {
+		if (ipa_pm_ctx->clients_by_pipe[i] == client) {
+			pm_stats_ptr->pm_client_type = ipa3_get_client_by_pipe(i);
+			break;
+		}
+	}
+
+	spin_unlock_irqrestore(&client->state_lock, flags);
+	mutex_unlock(&ipa_pm_ctx->client_mutex);
+	return true;
+}
+
+int ipa_pm_get_pm_clnt_throughput(enum ipa_client_type client_type)
+{
+	int idx = ipa3_get_ep_mapping(client_type);
+	int throughput;
+
+	mutex_lock(&ipa_pm_ctx->client_mutex);
+	if (ipa_pm_ctx && (idx >= 0) && ipa_pm_ctx->clients_by_pipe[idx]) {
+		throughput = ipa_pm_ctx->clients_by_pipe[idx]->throughput;
+		mutex_unlock(&ipa_pm_ctx->client_mutex);
+		return throughput;
+	} else {
+		mutex_unlock(&ipa_pm_ctx->client_mutex);
+		return 0;
+	}
+}
+
+/**
+ * ipa_pm_add_dummy_clients() - add 2 dummy clients for modem and apps
+ * @power_plan: [in] The power plan for the dummy clients
+ * 0 = SVS (lowest plan), 1 = SVS2, ... etc
+ *
+ * Returns: 0 on success, negative on failure
+ */
+int ipa_pm_add_dummy_clients(s8 power_plan)
+{
+	int rc = 0;
+	int tput;
+	int hdl_1, hdl_2;
+
+	struct ipa_pm_register_params dummy1_params = {
+		.name = "DummyModem",
+		.group = IPA_PM_GROUP_MODEM,
+		.skip_clk_vote = 0,
+		.callback = NULL,
+		.user_data = NULL
+	};
+
+	struct ipa_pm_register_params dummy2_params = {
+		.name = "DummyApps",
+		.group = IPA_PM_GROUP_APPS,
+		.skip_clk_vote = 0,
+		.callback = NULL,
+		.user_data = NULL
+	};
+
+	if (power_plan < 0 ||
+		(power_plan - 1) >= ipa_pm_ctx->clk_scaling.threshold_size) {
+		pr_err("Invalid power plan(%d)\n", power_plan);
+		return -EFAULT;
+	}
+
+	/* 0 is SVS case which is not part of the threshold */
+	if (power_plan == 0)
+		tput = 0;
+	else
+		tput = ipa_pm_ctx->clk_scaling.current_threshold[power_plan-1];
+
+	/*
+	 * register with local handles to prevent overwriting global handles
+	 * in the case of a failure
+	 */
+	rc = ipa_pm_register(&dummy1_params, &hdl_1);
+	if (rc) {
+		pr_err("fail to register client 1 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	rc = ipa_pm_register(&dummy2_params, &hdl_2);
+	if (rc) {
+		pr_err("fail to register client 2 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	/* replace global handles */
+	dummy_hdl_1 = hdl_1;
+	dummy_hdl_2 = hdl_2;
+
+	/* save the old throughputs for removal */
+	tput_modem = ipa_pm_ctx->group_tput[IPA_PM_GROUP_MODEM];
+	tput_apps = ipa_pm_ctx->group_tput[IPA_PM_GROUP_APPS];
+
+	rc = ipa_pm_set_throughput(dummy_hdl_1, tput);
+	if (rc) {
+		IPAERR("fail to set tput for client 1 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	rc = ipa_pm_set_throughput(dummy_hdl_2, tput);
+	if (rc) {
+		IPAERR("fail to set tput for client 2 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	rc = ipa_pm_activate_sync(dummy_hdl_1);
+	if (rc) {
+		IPAERR("fail to activate sync for client 1 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	rc = ipa_pm_activate_sync(dummy_hdl_2);
+	if (rc) {
+		IPAERR("fail to activate sync for client 2 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	return rc;
+}
+
+/**
+ * ipa_pm_remove_dummy_clients() - remove the 2 dummy clients for modem and apps
+ *
+ * Returns: 0 on success, negative on failure
+ */
+int ipa_pm_remove_dummy_clients(void)
+{
+	int rc = 0;
+
+	rc = ipa_pm_deactivate_sync(dummy_hdl_1);
+	if (rc) {
+		IPAERR("fail to deactivate client 1 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	rc = ipa_pm_deactivate_sync(dummy_hdl_2);
+	if (rc) {
+		IPAERR("fail to deactivate client 2 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	/* reset the modem and apps tputs back to old values */
+	rc = ipa_pm_set_throughput(dummy_hdl_1, tput_modem);
+	if (rc) {
+		IPAERR("fail to reset tput for client 1 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	rc = ipa_pm_set_throughput(dummy_hdl_2, tput_apps);
+	if (rc) {
+		IPAERR("fail to reset tput for client 2 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	rc = ipa_pm_deregister(dummy_hdl_1);
+	if (rc) {
+		IPAERR("fail to deregister client 1 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	rc = ipa_pm_deregister(dummy_hdl_2);
+	if (rc) {
+		IPAERR("fail to deregister client 2 rc = %d\n", rc);
+		return -EFAULT;
+	}
+
+	return rc;
 }

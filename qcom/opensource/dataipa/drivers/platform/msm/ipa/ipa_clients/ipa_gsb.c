@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/debugfs.h>
@@ -220,7 +220,7 @@ static void ipa_gsb_debugfs_init(void)
 	const mode_t read_only_mode = 00444;
 
 	dent = debugfs_create_dir("ipa_gsb", NULL);
-	if (IS_ERR(dent)) {
+	if (!dent) {
 		IPA_GSB_ERR("fail to create folder ipa_gsb\n");
 		return;
 	}
@@ -293,7 +293,7 @@ static int ipa_gsb_commit_partial_hdr(struct ipa_gsb_iface_info *iface_info)
 	if (!hdr)
 		return -ENOMEM;
 
-	hdr->commit = 1;
+	hdr->commit = 0;
 	hdr->num_hdrs = 2;
 
 	snprintf(hdr->hdr[0].name, sizeof(hdr->hdr[0].name),
@@ -1216,7 +1216,7 @@ static int ipa_bridge_tx_dp_internal(u32 hdl, struct sk_buff *skb,
 		sizeof(struct ipa_gsb_mux_hdr));
 	memset(mux_hdr, 0, sizeof(struct ipa_gsb_mux_hdr));
 	mux_hdr->iface_hdl = (u8)hdl;
-	mux_hdr->qmap_id = (u8)ipa3_get_qmap_id(ipa_gsb_ctx->prod_hdl);
+	mux_hdr->qmap_id = (u8)ipa3_ctx->ep[ipa_gsb_ctx->prod_hdl].cfg.meta.qmap_id;
 
 	ret = ipa_tx_dp(IPA_CLIENT_ODU_PROD, skb, metadata);
 	if (ret) {

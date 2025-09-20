@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/completion.h>
@@ -9,8 +9,8 @@
 #include <linux/random.h>
 #include <linux/uaccess.h>
 #include <linux/msm_gsi.h>
-#include "gsi_reg.h"
 #include "gsi.h"
+#include "gsihal.h"
 
 #define GSI_MAX_MSG_LEN 4096
 
@@ -71,54 +71,58 @@ static ssize_t gsi_dump_evt(struct file *file,
 		return -EINVAL;
 	}
 
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_0_OFFS(arg1, gsi_ctx->per.ee));
+	gsi_ctx->per.vote_clk_cb();
+
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_0,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX0  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_1_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_1,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX1  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_2_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_2,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX2  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_3_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_3,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX3  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_4_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_4,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX4  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_5_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_5,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX5  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_6_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_6,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX6  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_7_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_7,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX7  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_8_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_8,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX8  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_9_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_9,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX9  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_10_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_10,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX10 0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_11_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_11,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX11 0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_12_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_12,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX12 0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_CNTXT_13_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_CNTXT_13,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d CTX13 0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_SCRATCH_0_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_SCRATCH_0,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d SCR0  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_EV_CH_k_SCRATCH_1_OFFS(arg1, gsi_ctx->per.ee));
+	val = gsihal_read_reg_nk(GSI_EE_n_EV_CH_k_SCRATCH_1,
+		gsi_ctx->per.ee, arg1);
 	TERR("EV%2d SCR1  0x%x\n", arg1, val);
+
+	gsi_ctx->per.unvote_clk_cb();
 
 	if (arg2) {
 		ctx = &gsi_ctx->evtr[arg1];
@@ -150,7 +154,6 @@ static ssize_t gsi_dump_ch(struct file *file,
 	u32 arg2;
 	unsigned long missing;
 	char *sptr, *token;
-	uint32_t val;
 	struct gsi_chan_ctx *ctx;
 	uint16_t i;
 
@@ -184,58 +187,9 @@ static ssize_t gsi_dump_ch(struct file *file,
 		return -EINVAL;
 	}
 
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_CNTXT_0_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d CTX0  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_CNTXT_1_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d CTX1  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_CNTXT_2_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d CTX2  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_CNTXT_3_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d CTX3  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_CNTXT_4_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d CTX4  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_CNTXT_5_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d CTX5  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_CNTXT_6_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d CTX6  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_CNTXT_7_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d CTX7  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_RE_FETCH_READ_PTR_OFFS(arg1,
-			gsi_ctx->per.ee));
-	TERR("CH%2d REFRP 0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_RE_FETCH_WRITE_PTR_OFFS(arg1,
-			gsi_ctx->per.ee));
-	TERR("CH%2d REFWP 0x%x\n", arg1, val);
-	if (gsi_ctx->per.ver >= GSI_VER_2_5) {
-		val = gsi_readl(gsi_ctx->base +
-			GSI_V2_5_EE_n_GSI_CH_k_QOS_OFFS(arg1, gsi_ctx->per.ee));
-	} else {
-		val = gsi_readl(gsi_ctx->base +
-			GSI_EE_n_GSI_CH_k_QOS_OFFS(arg1, gsi_ctx->per.ee));
-	}
-	TERR("CH%2d QOS   0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_SCRATCH_0_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d SCR0  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_SCRATCH_1_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d SCR1  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_SCRATCH_2_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d SCR2  0x%x\n", arg1, val);
-	val = gsi_readl(gsi_ctx->base +
-		GSI_EE_n_GSI_CH_k_SCRATCH_3_OFFS(arg1, gsi_ctx->per.ee));
-	TERR("CH%2d SCR3  0x%x\n", arg1, val);
+	gsi_ctx->per.vote_clk_cb();
+	gsi_dump_ch_info(arg1);
+	gsi_ctx->per.unvote_clk_cb();
 
 	if (arg2) {
 		ctx = &gsi_ctx->chan[arg1];
@@ -406,7 +360,6 @@ static ssize_t gsi_set_max_elem_dp_stats(struct file *file,
 	unsigned long missing;
 	char *sptr, *token;
 
-
 	if (count >= sizeof(dbg_buff))
 		goto error;
 
@@ -484,44 +437,22 @@ static void gsi_dbg_update_ch_dp_stats(struct gsi_chan_ctx *ctx)
 	int ee = gsi_ctx->per.ee;
 	uint16_t used_hw;
 
-	if ( ctx->props.prot == GSI_CHAN_PROT_WDI2) {
-		rp_hw = gsi_readl(gsi_ctx->base +
-			GSI_EE_n_GSI_CH_k_CNTXT_4_OFFS(ctx->props.ch_id, gsi_ctx->per.ee)) &
-			0x0000ffff;
+	gsi_ctx->per.vote_clk_cb();
 
-		wp_hw = gsi_readl(gsi_ctx->base +
-			GSI_EE_n_GSI_CH_k_RE_FETCH_WRITE_PTR_OFFS(ctx->props.ch_id,
-			gsi_ctx->per.ee));
+	rp_hw = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_4,
+		ee, ctx->props.ch_id);
+	rp_hw |= ((uint64_t)gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_5,
+		ee, ctx->props.ch_id)) << 32;
 
-		start_hw = rp_hw / ctx->ring.elem_sz;
-		end_hw = wp_hw / ctx->ring.elem_sz;
-	} else if ( ctx->props.prot == GSI_CHAN_PROT_WDI3) {
-		rp_hw = gsi_readl(gsi_ctx->base +
-			GSI_EE_n_GSI_CH_k_CNTXT_4_OFFS(ctx->props.ch_id, gsi_ctx->per.ee)) &
-			0x000fffff;
+	wp_hw = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_6,
+		ee, ctx->props.ch_id);
+	wp_hw |= ((uint64_t)gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_7,
+		ee, ctx->props.ch_id)) << 32;
 
-		wp_hw = gsi_readl(gsi_ctx->base +
-			GSI_EE_n_GSI_CH_k_RE_FETCH_WRITE_PTR_OFFS(ctx->props.ch_id,
-			gsi_ctx->per.ee));
+	gsi_ctx->per.unvote_clk_cb();
 
-		start_hw = rp_hw / ctx->ring.elem_sz;
-		end_hw = wp_hw / ctx->ring.elem_sz;
-	} else {
-		rp_hw = gsi_readl(gsi_ctx->base +
-			GSI_EE_n_GSI_CH_k_CNTXT_4_OFFS(ctx->props.ch_id, ee));
-		rp_hw |= ((uint64_t)gsi_readl(gsi_ctx->base +
-			GSI_EE_n_GSI_CH_k_CNTXT_5_OFFS(ctx->props.ch_id, ee)))
-			<< 32;
-
-		wp_hw = gsi_readl(gsi_ctx->base +
-			GSI_EE_n_GSI_CH_k_CNTXT_6_OFFS(ctx->props.ch_id, ee));
-		wp_hw |= ((uint64_t)gsi_readl(gsi_ctx->base +
-			GSI_EE_n_GSI_CH_k_CNTXT_7_OFFS(ctx->props.ch_id, ee)))
-			<< 32;
-
-		start_hw = gsi_find_idx_from_addr(&ctx->ring, rp_hw);
-		end_hw = gsi_find_idx_from_addr(&ctx->ring, wp_hw);
-	}
+	start_hw = gsi_find_idx_from_addr(&ctx->ring, rp_hw);
+	end_hw = gsi_find_idx_from_addr(&ctx->ring, wp_hw);
 
 	if (end_hw >= start_hw)
 		used_hw = end_hw - start_hw;
@@ -651,7 +582,7 @@ static ssize_t gsi_enable_ipc_low(struct file *file,
 		if (!gsi_ipc_logbuf_low) {
 			gsi_ipc_logbuf_low =
 				ipc_log_context_create(GSI_IPC_LOG_PAGES,
-					"gsi_low", 0);
+					"gsi_low", MINIDUMP_MASK);
 			if (gsi_ipc_logbuf_low == NULL)
 				TERR("failed to get ipc_logbuf_low\n");
 		}
@@ -668,7 +599,7 @@ static ssize_t gsi_read_gsi_hw_profiling_stats(struct file *file,
 	char __user *buf, size_t count, loff_t *ppos)
 {
 	struct gsi_hw_profiling_data stats;
-	int nbytes, cnt = 0;
+	int ret, nbytes, cnt = 0;
 	u64 totalCycles = 0, util = 0;
 
 	if (gsi_ctx->per.ver < GSI_VER_2_9) {
@@ -677,7 +608,12 @@ static ssize_t gsi_read_gsi_hw_profiling_stats(struct file *file,
 		cnt += nbytes;
 		goto done;
 	}
-	if (!gsi_get_hw_profiling_stats(&stats)) {
+
+	gsi_ctx->per.vote_clk_cb();
+	ret = gsi_get_hw_profiling_stats(&stats);
+	gsi_ctx->per.unvote_clk_cb();
+
+	if (!ret) {
 		totalCycles = stats.mcs_busy_cnt + stats.mcs_idle_cnt +
 			stats.bp_and_pending_cnt;
 		if (totalCycles != 0)
@@ -714,7 +650,7 @@ static ssize_t gsi_read_gsi_fw_version(struct file *file,
 	char __user *buf, size_t count, loff_t *ppos)
 {
 	struct gsi_fw_version ver;
-	int nbytes, cnt = 0;
+	int ret, nbytes, cnt = 0;
 
 	if (gsi_ctx->per.ver < GSI_VER_2_9) {
 		nbytes = scnprintf(dbg_buff, GSI_MAX_MSG_LEN,
@@ -722,7 +658,12 @@ static ssize_t gsi_read_gsi_fw_version(struct file *file,
 		cnt += nbytes;
 		goto done;
 	}
-	if (!gsi_get_fw_version(&ver)) {
+
+	gsi_ctx->per.vote_clk_cb();
+	ret = gsi_get_fw_version(&ver);
+	gsi_ctx->per.unvote_clk_cb();
+
+	if (!ret) {
 		nbytes = scnprintf(dbg_buff, GSI_MAX_MSG_LEN,
 			"hw=%d\nflavor=%d\nfw=%d\n",
 			ver.hw,

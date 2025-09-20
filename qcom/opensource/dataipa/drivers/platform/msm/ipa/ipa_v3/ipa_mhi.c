@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/debugfs.h>
@@ -14,7 +14,6 @@
 #include "gsi.h"
 #include "ipa_common_i.h"
 #include "ipa_i.h"
-#include "ipa_qmi_service.h"
 
 #define IPA_MHI_DRV_NAME "ipa_mhi"
 
@@ -54,8 +53,12 @@
 #define IPA_MHI_FUNC_EXIT() \
 	IPA_MHI_DBG("EXIT\n")
 
-#define IPA_MHI_MAX_UL_CHANNELS 1
-#define IPA_MHI_MAX_DL_CHANNELS 2
+#define IPA_MHI_MAX_UL_CHANNELS 2
+#define IPA_MHI_MAX_DL_CHANNELS 3
+
+#define IPA_CLIENT_IS_MHI_LOW_LAT(client) \
+	((client) == IPA_CLIENT_MHI_LOW_LAT_PROD || \
+	(client) == IPA_CLIENT_MHI_LOW_LAT_CONS)
 
 /* bit #40 in address should be asserted for MHI transfers over pcie */
 #define IPA_MHI_HOST_ADDR_COND(addr) \
@@ -177,7 +180,11 @@ static int ipa3_mhi_get_ch_poll_cfg(enum ipa_client_type client,
 		if (IPA_CLIENT_IS_PROD(client))
 			return 7;
 		else
-			return (ring_size/2)/8;
+			/* IPA5.0 use almst empty register */
+			if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_0)
+				return (ring_size/2);
+			else
+				return (ring_size/2)/8;
 		break;
 	default:
 		return ch_ctx_host->pollcfg;
@@ -193,6 +200,7 @@ static int ipa_mhi_start_gsi_channel(enum ipa_client_type client,
 	struct ipa_mhi_msi_info *msi;
 	struct gsi_chan_props ch_props;
 	union __packed gsi_channel_scratch ch_scratch;
+	union __packed gsi_channel_scratch ch_scratch1;
 	struct ipa3_ep_context *ep;
 	const struct ipa_gsi_ep_config *ep_cfg;
 	struct ipa_ep_cfg_ctrl ep_cfg_ctrl;
@@ -254,11 +262,12 @@ static int ipa_mhi_start_gsi_channel(enum ipa_client_type client,
 		ep->gsi_evt_ring_hdl = *params->cached_gsi_evt_ring_hdl;
 	}
 
-	if (params->ev_ctx_host->wp == params->ev_ctx_host->rbase) {
-		IPA_MHI_ERR("event ring wp is not updated. base=wp=0x%llx\n",
-			params->ev_ctx_host->wp);
-		goto fail_alloc_ch;
-	}
+	/**
+	 * compare host evt ring wp with base ptr condition was added to check
+	 * whether MHI driver ring db or not, but in wrap around case wp and
+	 * base ptr can be same so removing it.
+	 * if evt-ring has no credit, gsi will crash.
+	 */
 
 	IPA_MHI_DBG("Ring event db: evt_ring_hdl=%lu host_wp=0x%llx\n",
 		ep->gsi_evt_ring_hdl, params->ev_ctx_host->wp);
@@ -295,6 +304,7 @@ static int ipa_mhi_start_gsi_channel(enum ipa_client_type client,
 		ch_props.use_db_eng = GSI_CHAN_DB_MODE;
 
 	ch_props.db_in_bytes = 1;
+	ch_props.low_latency_en = 0;
 	ch_props.max_prefetch = GSI_ONE_PREFETCH_SEG;
 	ch_props.low_weight = 1;
 	ch_props.prefetch_mode = ep_cfg->prefetch_mode;
@@ -338,8 +348,32 @@ static int ipa_mhi_start_gsi_channel(enum ipa_client_type client,
 	} else {
 		ch_scratch.mhi.burst_mode_enabled = false;
 	}
-	res = gsi_write_channel_scratch(ep->gsi_chan_hdl,
-		ch_scratch);
+	if (ipa3_ctx->ipa_hw_type >= IPA_HW_v4_5 &&
+	    ipa3_ctx->platform_type == IPA_PLAT_TYPE_MDM) {
+		memset(&ch_scratch1, 0, sizeof(ch_scratch1));
+		ch_scratch1.mhi_v2.mhi_host_wp_addr_lo =
+			ch_scratch.mhi.mhi_host_wp_addr & 0xFFFFFFFF;
+		ch_scratch1.mhi_v2.mhi_host_wp_addr_hi =
+			(ch_scratch.mhi.mhi_host_wp_addr & 0x1FF00000000ll) >>
+			32;
+		if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_0 &&
+			client == IPA_CLIENT_MHI_CONS) {
+			gsi_update_almst_empty_thrshold(ep->gsi_chan_hdl,
+				ch_scratch.mhi.polling_configuration);
+		} else {
+			ch_scratch1.mhi_v2.polling_configuration =
+				ch_scratch.mhi.polling_configuration;
+		}
+		ch_scratch1.mhi_v2.assert_bit40 = ch_scratch.mhi.assert_bit40;
+		ch_scratch1.mhi_v2.burst_mode_enabled =
+			ch_scratch.mhi.burst_mode_enabled;
+		ch_scratch1.mhi_v2.polling_mode = ch_scratch.mhi.polling_mode;
+		ch_scratch1.mhi_v2.oob_mod_threshold =
+			ch_scratch.mhi.oob_mod_threshold;
+		res = gsi_write_channel_scratch(ep->gsi_chan_hdl, ch_scratch1);
+	} else {
+		res = gsi_write_channel_scratch(ep->gsi_chan_hdl, ch_scratch);
+	}
 	if (res) {
 		IPA_MHI_ERR("gsi_write_channel_scratch failed %d\n",
 			res);
@@ -405,7 +439,9 @@ static int ipa_mhi_start_gsi_channel(enum ipa_client_type client,
 
 	if (IPA_CLIENT_IS_PROD(ep->client) && ep->skip_ep_cfg &&
 			ipa3_ctx->ipa_endp_delay_wa &&
-			!ipa3_is_mhip_offload_enabled()) {
+			!ipa3_is_mhip_offload_enabled() &&
+			!(IPA_CLIENT_IS_MHI_LOW_LAT(ep->client) &&
+			ipa3_is_modem_up())) {
 		res = gsi_enable_flow_control_ee(ep->gsi_chan_hdl, 0, &code);
 		if (res == GSI_STATUS_SUCCESS) {
 			IPA_MHI_DBG("flow ctrl sussess gsi ch %d code %d\n",
@@ -436,6 +472,7 @@ int ipa3_mhi_init_engine(struct ipa_mhi_init_engine *params)
 	int res;
 	struct gsi_device_scratch gsi_scratch;
 	const struct ipa_gsi_ep_config *gsi_ep_info;
+	u32 ipa_mhi_max_ul_channels, ipa_mhi_max_dl_channels;
 
 	IPA_MHI_FUNC_ENTRY();
 
@@ -444,7 +481,16 @@ int ipa3_mhi_init_engine(struct ipa_mhi_init_engine *params)
 		return -EINVAL;
 	}
 
-	if ((IPA_MHI_MAX_UL_CHANNELS + IPA_MHI_MAX_DL_CHANNELS) >
+	ipa_mhi_max_ul_channels = IPA_MHI_MAX_UL_CHANNELS;
+	ipa_mhi_max_dl_channels = IPA_MHI_MAX_DL_CHANNELS;
+
+	/* In case of Auto-pcie config, MHI2_PROD and MHI2_CONS is used */
+	if (ipa3_ctx->ipa_config_is_auto == true) {
+		ipa_mhi_max_ul_channels++;
+		ipa_mhi_max_dl_channels++;
+	}
+
+	if ((ipa_mhi_max_ul_channels + ipa_mhi_max_dl_channels) >
 		((ipa3_ctx->mhi_evid_limits[1] -
 		ipa3_ctx->mhi_evid_limits[0]) + 1)) {
 		IPAERR("Not enough event rings for MHI\n");
@@ -620,7 +666,8 @@ EXPORT_SYMBOL(ipa3_disconnect_mhi_pipe);
 
 int ipa3_mhi_resume_channels_internal(enum ipa_client_type client,
 		bool LPTransitionRejected, bool brstmode_enabled,
-		union __packed gsi_channel_scratch ch_scratch, u8 index)
+		union __packed gsi_channel_scratch ch_scratch, u8 index,
+		bool is_switch_to_dbmode)
 {
 	int res;
 	int ipa_ep_idx;
@@ -660,15 +707,23 @@ int ipa3_mhi_resume_channels_internal(enum ipa_client_type client,
 		 * For IPA-->MHI pipe:
 		 * always restore the polling mode bit.
 		 */
-		if (IPA_CLIENT_IS_PROD(client))
-			ch_scratch.mhi.polling_mode =
-				IPA_MHI_POLLING_MODE_DB_MODE;
-		else
+		if (IPA_CLIENT_IS_PROD(client)) {
+			if (is_switch_to_dbmode)
+				ch_scratch.mhi.polling_mode =
+					IPA_MHI_POLLING_MODE_DB_MODE;
+			else
+				ch_scratch.mhi.polling_mode =
+					gsi_ch_scratch.mhi.polling_mode;
+		} else {
 			ch_scratch.mhi.polling_mode =
 				gsi_ch_scratch.mhi.polling_mode;
+		}
 
 		/* Use GSI update API to not affect non-SWI fields
 		 * inside the scratch while in suspend-resume operation
+		 */
+		/* polling_mode bit remains unchanged for mhi_v2 format,
+		 * no update needed for this effort
 		 */
 		res = gsi_update_mhi_channel_scratch(
 			ep->gsi_chan_hdl, ch_scratch.mhi);
@@ -721,19 +776,25 @@ bool ipa3_has_open_aggr_frame(enum ipa_client_type client)
 	u32 aggr_state_active;
 	int ipa_ep_idx;
 
-	aggr_state_active = ipahal_read_reg(IPA_STATE_AGGR_ACTIVE);
-	IPA_MHI_DBG_LOW("IPA_STATE_AGGR_ACTIVE_OFST 0x%x\n", aggr_state_active);
-
 	ipa_ep_idx = ipa_get_ep_mapping(client);
 	if (ipa_ep_idx == -1) {
 		ipa_assert();
 		return false;
 	}
 
-	if ((1 << ipa_ep_idx) & aggr_state_active)
-		return true;
+	if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_0) {
+		aggr_state_active =
+			ipahal_read_ep_reg(IPA_STATE_AGGR_ACTIVE_n,
+				ipa_ep_idx);
+	} else {
+		aggr_state_active =
+			ipahal_read_reg(IPA_STATE_AGGR_ACTIVE);
+	}
 
-	return false;
+	IPA_MHI_DBG_LOW("IPA_STATE_AGGR_ACTIVE_OFST 0x%x, ep_idx %d\n",
+		ipa_ep_idx, aggr_state_active);
+
+	return ipahal_test_ep_bit(aggr_state_active, ipa_ep_idx);
 }
 EXPORT_SYMBOL(ipa3_has_open_aggr_frame);
 

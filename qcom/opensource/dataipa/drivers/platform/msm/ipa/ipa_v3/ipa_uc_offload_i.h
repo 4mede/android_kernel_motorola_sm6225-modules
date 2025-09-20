@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
 #ifndef _IPA_UC_OFFLOAD_I_H_
@@ -13,8 +13,8 @@
  * Neutrino protocol related data structures
  */
 
-#define IPA_UC_MAX_NTN_TX_CHANNELS 1
-#define IPA_UC_MAX_NTN_RX_CHANNELS 1
+#define IPA_UC_MAX_NTN_TX_CHANNELS 2
+#define IPA_UC_MAX_NTN_RX_CHANNELS 2
 
 #define IPA_NTN_TX_DIR 1
 #define IPA_NTN_RX_DIR 2
@@ -24,9 +24,11 @@
 #define DIR_PRODUCER 1
 
 #define MAX_AQC_CHANNELS 2
+#define MAX_RTK_CHANNELS 2
+#define MAX_NTN_CHANNELS 2
 #define MAX_11AD_CHANNELS 5
 #define MAX_WDI2_CHANNELS 2
-#define MAX_WDI3_CHANNELS 2
+#define MAX_WDI3_CHANNELS 3
 #define MAX_MHIP_CHANNELS 4
 #define MAX_USB_CHANNELS 2
 
@@ -81,6 +83,8 @@ enum ipa3_hw_features {
  * @IPA_HW_PROTOCOL_ETH : protocol related to ETH operation in IPA HW
  * @IPA_HW_PROTOCOL_MHIP: protocol related to MHIP operation in IPA HW
  * @IPA_HW_PROTOCOL_USB : protocol related to USB operation in IPA HW
+ * @IPA_HW_PROTOCOL_RTK : protocol related to RTK operation in IPA HW
+ * @IPA_HW_PROTOCOL_NTN3 : protocol related to NTN3 operation in IPA HW
  */
 enum ipa4_hw_protocol {
 	IPA_HW_PROTOCOL_COMMON = 0x0,
@@ -91,6 +95,8 @@ enum ipa4_hw_protocol {
 	IPA_HW_PROTOCOL_ETH = 0x5,
 	IPA_HW_PROTOCOL_MHIP = 0x6,
 	IPA_HW_PROTOCOL_USB = 0x7,
+	IPA_HW_PROTOCOL_RTK = 0x9,
+	IPA_HW_PROTOCOL_NTN3 = 0xA,
 	IPA_HW_PROTOCOL_MAX
 };
 
@@ -281,6 +287,8 @@ struct ipa3_uc_ntn_ctx {
 	struct Ipa3HwStatsNTNInfoData_t *ntn_uc_stats_mmio;
 	void *priv;
 	ipa_uc_ready_cb uc_ready_cb;
+	phys_addr_t ntn_reg_base_ptr_pa_rd;
+	u32 smmu_mapped;
 };
 
 /**
@@ -335,7 +343,7 @@ enum ipa3_hw_ntn_channel_errors {
 
 
 /**
- * struct Ipa3HwNtnSetUpCmdData_t  - Ntn setup command data
+ * struct uc_channel_setup_cmd_hw_ntn  - Ntn setup command data
  * @ring_base_pa: physical address of the base of the Tx/Rx NTN
  *  ring
  * @buff_pool_base_pa: physical address of the base of the Tx/Rx
@@ -350,7 +358,7 @@ enum ipa3_hw_ntn_channel_errors {
  * @data_buff_size: size of the each data buffer allocated in
  *  DDR
  */
-struct Ipa3HwNtnSetUpCmdData_t {
+struct uc_channel_setup_cmd_hw_ntn {
 	u32 ring_base_pa;
 	u32 buff_pool_base_pa;
 	u16 ntn_ring_size;
@@ -359,16 +367,19 @@ struct Ipa3HwNtnSetUpCmdData_t {
 	u8  ipa_pipe_number;
 	u8  dir;
 	u16 data_buff_size;
+	u8 db_mode;
+	u8 reserved1;
+	u16 reserved2;
 
 } __packed;
 
 /**
- * struct Ipa3HwNtnCommonChCmdData_t - Structure holding the
+ * struct uc_channel_teardown_cmd_hw_ntn - Structure holding the
  * parameters for Ntn Tear down command data params
  *
  *@ipa_pipe_number: IPA pipe number. This could be Tx or an Rx pipe
  */
-union Ipa3HwNtnCommonChCmdData_t {
+union uc_channel_teardown_cmd_hw_ntn {
 	struct IpaHwNtnCommonChCmdParams_t {
 		u32  ipa_pipe_number :8;
 		u32  reserved        :24;
@@ -444,8 +455,8 @@ struct Ipa3HwStatsNTNInfoData_t {
  * the offload commands from CPU
  * @IPA_CPU_2_HW_CMD_OFFLOAD_CHANNEL_SET_UP : Command to set up
  * Offload protocol's Tx/Rx Path
- * @IPA_CPU_2_HW_CMD_OFFLOAD_TEAR_DOWN : Command to tear down
- * Offload protocol's Tx/ Rx Path
+ * @IPA_CPU_2_HW_CMD_OFFLOAD_CHANNEL_TEAR_DOWN : Command to tear
+ * down Offload protocol's Tx/ Rx Path
  * @IPA_CPU_2_HW_CMD_PERIPHERAL_INIT :Command to initialize peripheral
  * @IPA_CPU_2_HW_CMD_PERIPHERAL_DEINIT : Command to deinitialize peripheral
  * @IPA_CPU_2_HW_CMD_OFFLOAD_STATS_ALLOC: Command to start the
@@ -458,7 +469,7 @@ struct Ipa3HwStatsNTNInfoData_t {
 enum ipa_cpu_2_hw_offload_commands {
 	IPA_CPU_2_HW_CMD_OFFLOAD_CHANNEL_SET_UP  =
 		FEATURE_ENUM_VAL(IPA_HW_FEATURE_OFFLOAD, 1),
-	IPA_CPU_2_HW_CMD_OFFLOAD_TEAR_DOWN =
+	IPA_CPU_2_HW_CMD_OFFLOAD_CHANNEL_TEAR_DOWN =
 		FEATURE_ENUM_VAL(IPA_HW_FEATURE_OFFLOAD, 2),
 	IPA_CPU_2_HW_CMD_PERIPHERAL_INIT =
 		FEATURE_ENUM_VAL(IPA_HW_FEATURE_OFFLOAD, 3),
@@ -543,7 +554,8 @@ enum ipa3_hw_2_cpu_offload_cmd_resp_status {
 };
 
 /**
- * struct IpaHw11adSetupCmdData_t  - 11ad setup channel command data
+ * struct uc_channel_setup_cmd_hw_11ad  - 11ad setup channel
+ * command data
  * @dir: Direction RX/TX
  * @wifi_ch: 11ad peripheral pipe number
  * @gsi_ch: GSI Channel number
@@ -551,7 +563,7 @@ enum ipa3_hw_2_cpu_offload_cmd_resp_status {
  * @wifi_hp_addr_lsb: Head/Tail pointer absolute address
  * @wifi_hp_addr_msb: Head/Tail pointer absolute address
  */
-struct IpaHw11adSetupCmdData_t {
+struct uc_channel_setup_cmd_hw_11ad {
 	u8 dir;
 	u8 wifi_ch;
 	u8 gsi_ch;
@@ -562,12 +574,13 @@ struct IpaHw11adSetupCmdData_t {
 
 
 /**
- * struct IpaHw11adCommonChCmdData_t - 11ad tear down channel command data
+ * struct uc_channel_teardown_cmd_hw_11ad - 11ad tear down
+ * channel command data
  * @gsi_ch: GSI Channel number
  * @reserved_0: padding
  * @reserved_1: padding
  */
-struct IpaHw11adCommonChCmdData_t {
+struct uc_channel_teardown_cmd_hw_11ad {
 	u8 gsi_ch;
 	u8 reserved_0;
 	u16 reserved_1;
@@ -589,22 +602,96 @@ struct IpaHw11adInitCmdData_t {
  */
 struct IpaHw11adDeinitCmdData_t {
 	u32 reserved;
-};
+} __packed;
 
 /**
- * struct IpaHwSetUpCmd  - Structure holding the parameters
- * for IPA_CPU_2_HW_CMD_OFFLOAD_CHANNEL_SET_UP
+ * struct uc_channel_setup_cmd_hw_rtk  - rtk setup channel
+ * command data
+ * @dir: Direction RX/TX
+ * @gsi_ch: GSI Channel number
+ * @reserved: 16 bytes padding
+ */
+struct uc_channel_setup_cmd_hw_rtk {
+	uint8_t dir;
+	uint8_t gsi_ch;
+	uint16_t reserved;
+} __packed;
+
+/**
+ * struct uc_channel_teardown_cmd_hw_rtk - rtk tear down channel
+ * command data
+ * @gsi_ch: GSI Channel number
+ * @reserved_0: padding
+ * @reserved_1: padding
+ */
+struct uc_channel_teardown_cmd_hw_rtk {
+	uint8_t gsi_ch;
+	uint8_t reserved_0;
+	uint16_t reserved_1;
+} __packed;
+
+/**
+ * struct IpaHwAQCInitCmdData_t - AQC peripheral init command data
+ * @periph_baddr_lsb: Peripheral Base Address LSB (pa/IOVA)
+ * @periph_baddr_msb: Peripheral Base Address MSB (pa/IOVA)
+ */
+struct IpaHwAQCInitCmdData_t {
+	u32 periph_baddr_lsb;
+	u32 periph_baddr_msb;
+} __packed;
+
+/**
+ * struct IpaHwAQCDeinitCmdData_t - AQC peripheral deinit command data
+ * @reserved: Reserved for future
+ */
+struct IpaHwAQCDeinitCmdData_t {
+	u32 reserved;
+} __packed;
+
+/**
+ * struct uc_channel_setup_cmd_hw_aqc - AQC setup channel
+ * command data
+ * @dir: Direction RX/TX
+ * @aqc_ch: aqc channel number
+ * @gsi_ch: GSI Channel number
+ * @reserved: 8 bytes padding
+ */
+struct uc_channel_setup_cmd_hw_aqc {
+	u8 dir;
+	u8 aqc_ch;
+	u8 gsi_ch;
+	u8 reserved;
+} __packed;
+
+/**
+ * struct uc_channel_teardown_cmd_hw_aqc - AQC tear down channel
+ * command data
+ * @gsi_ch: GSI Channel number
+ * @reserved_0: padding
+ * @reserved_1: padding
+ */
+struct uc_channel_teardown_cmd_hw_aqc {
+	u8 gsi_ch;
+	u8 reserved_0;
+	u16 reserved_1;
+} __packed;
+
+/**
+ * struct uc_channel_setup_cmd_hw  - Structure holding the
+ * parameters for IPA_CPU_2_HW_CMD_OFFLOAD_CHANNEL_SET_UP
  *
  *
  */
-union IpaHwSetUpCmd {
-	struct Ipa3HwNtnSetUpCmdData_t NtnSetupCh_params;
-	struct IpaHw11adSetupCmdData_t	W11AdSetupCh_params;
+union uc_channel_setup_cmd_hw {
+	struct uc_channel_setup_cmd_hw_ntn ntn_params;
+	struct uc_channel_setup_cmd_hw_aqc aqc_params;
+	struct uc_channel_setup_cmd_hw_11ad w11ad_params;
+	struct uc_channel_setup_cmd_hw_rtk rtk_params;
 } __packed;
 
 struct IpaHwOffloadSetUpCmdData_t {
 	u8 protocol;
-	union IpaHwSetUpCmd SetupCh_params;
+	union uc_channel_setup_cmd_hw SetupCh_params;
 } __packed;
 
 struct IpaCommonMonitoringParams_t {
@@ -651,23 +738,25 @@ struct IpaBwMonitoring_t {
 
 struct IpaHwOffloadSetUpCmdData_t_v4_0 {
 	u32 protocol;
-	union IpaHwSetUpCmd SetupCh_params;
+	union uc_channel_setup_cmd_hw SetupCh_params;
 } __packed;
 
 /**
- * struct IpaHwCommonChCmd  - Structure holding the parameters
- * for IPA_CPU_2_HW_CMD_OFFLOAD_TEAR_DOWN
+ * struct uc_channel_teardown_cmd_hw  - Structure holding the
+ * parameters for IPA_CPU_2_HW_CMD_OFFLOAD_CHANNEL_TEAR_DOWN
  *
  *
  */
-union IpaHwCommonChCmd {
-	union Ipa3HwNtnCommonChCmdData_t NtnCommonCh_params;
-	struct IpaHw11adCommonChCmdData_t W11AdCommonCh_params;
+union uc_channel_teardown_cmd_hw {
+	union uc_channel_teardown_cmd_hw_ntn ntn_params;
+	struct uc_channel_teardown_cmd_hw_aqc aqc_params;
+	struct uc_channel_teardown_cmd_hw_rtk rtk_params;
+	struct uc_channel_teardown_cmd_hw_11ad w11ad_params;
 } __packed;
 
 struct IpaHwOffloadCommonChCmdData_t {
 	u8 protocol;
-	union IpaHwCommonChCmd CommonCh_params;
+	union uc_channel_teardown_cmd_hw CommonCh_params;
 } __packed;
 
 enum EVENT_2_CPU_OPCODE {
@@ -732,7 +821,7 @@ struct eventElement_t {
 
 struct IpaHwOffloadCommonChCmdData_t_v4_0 {
 	u32 protocol;
-	union IpaHwCommonChCmd CommonCh_params;
+	union uc_channel_teardown_cmd_hw CommonCh_params;
 } __packed;
 
 
@@ -743,6 +832,7 @@ struct IpaHwOffloadCommonChCmdData_t_v4_0 {
  */
 union IpaHwPeripheralInitCmd {
 	struct IpaHw11adInitCmdData_t W11AdInit_params;
+	struct IpaHwAQCInitCmdData_t AqcInit_params;
 } __packed;
 
 struct IpaHwPeripheralInitCmdData_t {
@@ -757,6 +847,7 @@ struct IpaHwPeripheralInitCmdData_t {
  */
 union IpaHwPeripheralDeinitCmd {
 	struct IpaHw11adDeinitCmdData_t W11AdDeinit_params;
+	struct IpaHwAQCDeinitCmdData_t AqcDeinit_params;
 } __packed;
 
 struct IpaHwPeripheralDeinitCmdData_t {
