@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -25,6 +26,19 @@
 #define _WMI_UNIFIED_VDEV_API_H_
 
 #include <wmi_unified_api.h>
+
+/**
+ *  wmi_unified_peer_filter_set_tx_cmd_send() - WMI set tx peer filter function
+ *  @param wmi_handle: handle to WMI.
+ *  @param macaddr: MAC address
+ *  @param param: pointer to hold peer filter parameter
+ *
+ *  @return QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
+ */
+QDF_STATUS
+wmi_unified_peer_filter_set_tx_cmd_send(struct wmi_unified *wmi_handle,
+					uint8_t macaddr[],
+					struct set_tx_peer_filter *param);
 
 /**
  *  wmi_unified_vdev_set_neighbour_rx_cmd_send() - WMI set neighbour rx function
@@ -64,6 +78,20 @@ QDF_STATUS wmi_unified_send_multiple_vdev_restart_req_cmd(
 				struct multiple_vdev_restart_params *param);
 
 /**
+ * wmi_unified_send_multiple_vdev_set_param_cmd() - Send multiple vdev set param
+ *                                                  command
+ * @wmi_handle: wmi handle
+ * @param: multiple vdev restart parameter
+ *
+ * Send WMI_PDEV_MULTIPLE_VDEV_SET_PARAM_CMDID parameters to fw.
+ *
+ * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_** on error
+ */
+QDF_STATUS wmi_unified_send_multiple_vdev_set_param_cmd(
+				struct wmi_unified *wmi_handle,
+				struct multiple_vdev_set_param *param);
+
+/**
  *  wmi_unified_beacon_send_cmd() - WMI beacon send function
  *  @param wmi_handle: handle to WMI.
  *  @param macaddr: MAC address
@@ -97,6 +125,17 @@ wmi_extract_vdev_start_resp(struct wmi_unified *wmi_handle, void *evt_buf,
 QDF_STATUS
 wmi_extract_vdev_stopped_param(struct wmi_unified *wmi_handle, void *evt_buf,
 			       uint32_t *vdev_id);
+
+/**
+ * wmi_send_peer_vlan_config() - send peer vlan configuration
+ * @wmi_handle: wmi handle
+ * @mac_addr: mac address of the peer
+ * @param: vlan parameter
+ */
+QDF_STATUS
+wmi_send_peer_vlan_config(struct wmi_unified *wmi_handle,
+			  uint8_t *mac_addr,
+			  struct peer_vlan_config_param param);
 
 /**
  * wmi_extract_vdev_delete_resp() - extract vdev delete response
@@ -172,4 +211,24 @@ QDF_STATUS wmi_extract_multi_vdev_restart_resp_event(
 QDF_STATUS
 wmi_unified_multisoc_tbtt_sync_cmd(wmi_unified_t wmi_handle,
 				   struct rnr_tbtt_multisoc_sync_param *param);
+
+#ifdef WLAN_FEATURE_SR
+/**
+ * wmi_unified_vdev_param_sr_prohibit_send() - send vdev SR prohibit command
+ * @wmi: wmi handle
+ * @srp_param: SR Prohibit parameters
+ *
+ * Return: QDF_STATUS_SUCCESS for success or error code
+ */
+QDF_STATUS
+wmi_unified_vdev_param_sr_prohibit_send(wmi_unified_t wmi_hdl,
+					struct sr_prohibit_param *srp_param);
+#else
+static inline QDF_STATUS
+wmi_unified_vdev_param_sr_prohibit_send(wmi_unified_t wmi_hdl,
+					struct sr_prohibit_param *srp_param)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
 #endif

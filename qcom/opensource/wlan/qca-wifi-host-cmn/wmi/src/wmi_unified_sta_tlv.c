@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -130,6 +131,8 @@ send_set_sta_keep_alive_cmd_tlv(wmi_unified_t wmi_handle,
 			     QDF_IPV4_ADDR_SIZE);
 		WMI_CHAR_ARRAY_TO_MAC_ADDR(params->destmac,
 					   &arp_rsp->dest_mac_addr);
+	} else if (WMI_KEEP_ALIVE_MGMT_FRAME == params->method) {
+		cmd->method = WMI_STA_KEEPALIVE_METHOD_MGMT_VENDOR_ACTION;
 	} else {
 		cmd->method = WMI_STA_KEEPALIVE_METHOD_NULL_FRAME;
 	}
@@ -462,6 +465,29 @@ static QDF_STATUS send_nat_keepalive_en_cmd_tlv(wmi_unified_t wmi_handle, uint8_
 	return 0;
 }
 
+#ifdef MULTI_CLIENT_LL_SUPPORT
+/**
+ * fill_multi_client_ll_info - Fill multi client low latency info to wlm cmd
+ * @cmd: wlm config command
+ * @params: wlm params
+ *
+ * Return: none
+ */
+static void fill_multi_client_ll_info(wmi_wlm_config_cmd_fixed_param *cmd,
+				      struct wlm_latency_level_param *params)
+{
+		cmd->client_id_bitmask = params->client_id_bitmask;
+		WLM_FLAGS_SET_FORCE_DEFAULT_LATENCY(cmd->flags_ext,
+						    params->force_reset);
+}
+#else
+static inline void
+fill_multi_client_ll_info(wmi_wlm_config_cmd_fixed_param *cmd,
+			  struct wlm_latency_level_param *params)
+{
+}
+#endif
+
 static QDF_STATUS send_wlm_latency_level_cmd_tlv(wmi_unified_t wmi_handle,
 				struct wlm_latency_level_param *params)
 {
@@ -484,6 +510,8 @@ static QDF_STATUS send_wlm_latency_level_cmd_tlv(wmi_unified_t wmi_handle,
 	cmd->ul_latency = ll[params->wlm_latency_level];
 	cmd->dl_latency = ll[params->wlm_latency_level];
 	cmd->flags = params->wlm_latency_flags;
+	fill_multi_client_ll_info(cmd, params);
+
 	wmi_mtrace(WMI_WLM_CONFIG_CMDID, cmd->vdev_id, 0);
 	if (wmi_unified_cmd_send(wmi_handle, buf, len,
 				 WMI_WLM_CONFIG_CMDID)) {
@@ -844,9 +872,9 @@ send_update_tdls_peer_state_cmd_tlv(wmi_unified_t wmi_handle,
 
 		if (in_chan_info->dfs_set) {
 			WMI_SET_CHANNEL_FLAG(chan_info, WMI_CHAN_FLAG_PASSIVE);
-			wmi_debug("chan[%d] DFS[%d]",
-				 in_chan_info->chan_id,
-				 in_chan_info->dfs_set);
+			wmi_debug("chan_freq[%d] DFS[%d]",
+				  in_chan_info->ch_freq,
+				  in_chan_info->dfs_set);
 		}
 
 		if (chan_info->mhz < WMI_2_4_GHZ_MAX_FREQ)
@@ -1095,19 +1123,19 @@ static QDF_STATUS send_set_base_macaddr_indicate_cmd_tlv(wmi_unified_t wmi_handl
 	return 0;
 }
 
-#if defined(WLAN_FEATURE_ROAM_OFFLOAD) && defined(FEATURE_BLACKLIST_MGR)
+#if defined(WLAN_FEATURE_ROAM_OFFLOAD) && defined(FEATURE_DENYLIST_MGR)
 
 static WMI_BSSID_DISALLOW_LIST_TYPE
-wmi_get_wmi_reject_ap_type(enum blm_reject_ap_type reject_ap_type)
+wmi_get_wmi_reject_ap_type(enum dlm_reject_ap_type reject_ap_type)
 {
 	switch (reject_ap_type) {
 	case USERSPACE_AVOID_TYPE:
 		return WMI_BSSID_DISALLOW_USER_SPACE_AVOID_LIST;
 	case DRIVER_AVOID_TYPE:
 		return WMI_BSSID_DISALLOW_DRIVER_AVOID_LIST;
-	case USERSPACE_BLACKLIST_TYPE:
+	case USERSPACE_DENYLIST_TYPE:
 		return WMI_BSSID_DISALLOW_USER_SPACE_BLACK_LIST;
-	case DRIVER_BLACKLIST_TYPE:
+	case DRIVER_DENYLIST_TYPE:
 		return WMI_BSSID_DISALLOW_DRIVER_BLACK_LIST;
 	case DRIVER_RSSI_REJECT_TYPE:
 		return WMI_BSSID_DISALLOW_RSSI_REJECT_LIST;
@@ -1117,7 +1145,7 @@ wmi_get_wmi_reject_ap_type(enum blm_reject_ap_type reject_ap_type)
 }
 
 static WMI_BLACKLIST_REASON_ID
-wmi_get_reject_reason(enum blm_reject_ap_reason reject_reason)
+wmi_get_reject_reason(enum dlm_reject_ap_reason reject_reason)
 {
 	switch(reject_reason) {
 	case REASON_NUD_FAILURE:
@@ -1220,7 +1248,7 @@ error:
 	return status;
 }
 
-void wmi_blacklist_mgr_attach_tlv(struct wmi_unified *wmi_handle)
+void wmi_denylist_mgr_attach_tlv(struct wmi_unified *wmi_handle)
 {
 	struct wmi_ops *ops = wmi_handle->ops;
 
@@ -2441,6 +2469,6 @@ void wmi_sta_attach_tlv(wmi_unified_t wmi_handle)
 
 	wmi_tdls_attach_tlv(wmi_handle);
 	wmi_policy_mgr_attach_tlv(wmi_handle);
-	wmi_blacklist_mgr_attach_tlv(wmi_handle);
+	wmi_denylist_mgr_attach_tlv(wmi_handle);
 }
 

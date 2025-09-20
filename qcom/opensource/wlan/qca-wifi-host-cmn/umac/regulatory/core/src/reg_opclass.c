@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022,2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -25,6 +26,7 @@
 #include <wlan_cmn.h>
 #include <reg_services_public_struct.h>
 #include <wlan_objmgr_psoc_obj.h>
+#include <wlan_objmgr_pdev_obj.h>
 #include "reg_priv_objs.h"
 #include "reg_utils.h"
 #include "reg_db.h"
@@ -34,56 +36,197 @@
 #include "reg_build_chan_list.h"
 #include "reg_opclass.h"
 #include "reg_services_common.h"
+#include <wlan_objmgr_pdev_obj.h>
 
 #ifdef HOST_OPCLASS
 static struct reg_dmn_supp_op_classes reg_dmn_curr_supp_opp_classes = { 0 };
 #endif
 
+/**
+ * Given a global opclass number create the corresponding  array token.
+ * Examples:
+ *     'CFISARR(132)' expands to  'opcls_132_cfis_arr'
+ *     'CFISARR(133)' expands to  'opcls_133_cfis_arr'
+ */
+#define CFISARR(_g_opcls)  opcls_ ## _g_opcls ## _cfis_arr
+
+/**
+ * Given a global opclass number create the corresponding list token.
+ * Examples:
+ *     'CFISLST(132)' expands to  'opcls_132_cfis_lst'
+ *     'CFISLST(133)' expands to  'opcls_133_cfis_lst'
+ */
+#define CFISLST(_g_opcls)  opcls_ ## _g_opcls ## _cfis_lst
+
+/* The type of the opclass list objects */
+#define CFISLST_TYPE static const struct c_freq_lst
+
+/* The number of elements of the array */
+#define NELEMS QDF_ARRAY_SIZE
+
+/**
+ * Given a global opclass number create the corresponding cfis list and assign
+ * the corresponding cfis array and size of the cfis array
+ * Examples:
+ *     'CREATE_CFIS_LST(132);'
+ *     expands to
+ *     '
+ *     static const struct c_freq_lst opcls_132_cfis_lst =
+ *                   {QDF_ARRAY_SIZE(opcls_132_cfis_arr), opcls_132_cfis_arr};
+ *     '
+ *
+ *     'CREATE_CFIS_LST(133);'
+ *     expands to
+ *     '
+ *     static const struct c_freq_lst opcls_133_cfis_lst =
+ *                   {QDF_ARRAY_SIZE(opcls_133_cfis_arr), opcls_133_cfis_arr};
+ *     '
+ */
+#define CREATE_CFIS_LST(_gopcls) \
+CFISLST_TYPE CFISLST(_gopcls) = {NELEMS(CFISARR(_gopcls)), CFISARR(_gopcls)}
+
+/* The NULL pointer to a cfis list object */
+#define NULL_CFIS_LST NULL
+
+/* CFIs for global opclass 131: (start Freq=5925 BW=20MHz) */
+static const uint8_t opcls_131_cfis_arr[] = {
+#ifdef CONFIG_AFC_SUPPORT
+	  1, 5, 9, 13, 17, 21, 25, 29, 33,
+	  37, 41, 45, 49, 53, 57, 61, 65, 69,
+	  73, 77, 81, 85, 89, 93, 97,
+	  101, 105, 109, 113, 117, 121, 125,
+	  129, 133, 137, 141, 145, 149, 153,
+	  157, 161, 165, 169, 173, 177, 181,
+	  185, 189, 193, 197, 201, 205, 209,
+	  213, 217, 221, 225, 229, 233,
+#endif
+};
+
+/* CFIs for global opclass 132: (start Freq=5925 BW=40MHz) */
+static const uint8_t opcls_132_cfis_arr[] = {
+#ifdef CONFIG_AFC_SUPPORT
+	3, 11, 19, 27, 35, 43, 51, 59, 67, 75,
+	83, 91, 99, 107, 115, 123, 131, 139, 147, 155,
+	163, 171, 179, 187, 195, 203, 211, 219, 227,
+#endif
+};
+
+/* CFIs for global opclass 133: (start Freq=5925 BW=80MHz) */
+static const uint8_t opcls_133_cfis_arr[] = {
+#ifdef CONFIG_AFC_SUPPORT
+	7, 23, 39, 55, 71, 87, 103, 119, 135, 151, 167, 183,
+	  199, 215,
+#endif
+};
+
+/* CFIs for global opclass 134: (start Freq=5950 BW=160MHz) */
+static const uint8_t opcls_134_cfis_arr[] = {
+#ifdef CONFIG_AFC_SUPPORT
+	15, 47, 79, 111, 143, 175, 207,
+#endif
+};
+
+/* CFIs for global opclass 135: (start Freq=5950 BW=80MHz+80MHz) */
+static const uint8_t opcls_135_cfis_arr[] = {
+#ifdef CONFIG_AFC_SUPPORT
+	7, 23, 39, 55, 71, 87, 103, 119, 135, 151, 167, 183,
+	199, 215,
+#endif
+};
+
+/* CFIs for global opclass 136: (start Freq=5925 BW=20MHz) */
+static const uint8_t opcls_136_cfis_arr[] = {
+#ifdef CONFIG_AFC_SUPPORT
+	2,
+#endif
+};
+
+/* CFIs for global opclass 137: (start Freq=5950 BW=320MHz) */
+#ifdef WLAN_FEATURE_11BE
+static const uint8_t opcls_137_cfis_arr[] = {
+#ifdef CONFIG_AFC_SUPPORT
+	31, 63, 95, 127, 159, 191,
+#endif
+};
+#endif
+
+/* Create the CFIS static constant lists */
+CREATE_CFIS_LST(131);
+CREATE_CFIS_LST(132);
+CREATE_CFIS_LST(133);
+CREATE_CFIS_LST(134);
+CREATE_CFIS_LST(135);
+CREATE_CFIS_LST(136);
+#ifdef WLAN_FEATURE_11BE
+CREATE_CFIS_LST(137);
+#endif
+
 static const struct reg_dmn_op_class_map_t global_op_class[] = {
 	{81, 25, BW20, BIT(BEHAV_NONE), 2407,
-	 {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13} },
+	 {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},
+	 NULL_CFIS_LST },
 	{82, 25, BW20, BIT(BEHAV_NONE), 2414,
-	 {14} },
+	 {14},
+	 NULL_CFIS_LST },
 	{83, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 2407,
-	 {1, 2, 3, 4, 5, 6, 7, 8, 9} },
+	 {1, 2, 3, 4, 5, 6, 7, 8, 9},
+	 NULL_CFIS_LST },
 	{84, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 2407,
-	 {5, 6, 7, 8, 9, 10, 11, 12, 13} },
+	 {5, 6, 7, 8, 9, 10, 11, 12, 13},
+	 NULL_CFIS_LST },
 	{115, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {36, 40, 44, 48} },
+	 {36, 40, 44, 48},
+	 NULL_CFIS_LST },
 	{116, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {36, 44} },
+	 {36, 44},
+	 NULL_CFIS_LST },
 	{117, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {40, 48} },
+	 {40, 48},
+	 NULL_CFIS_LST },
 	{118, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {52, 56, 60, 64} },
+	 {52, 56, 60, 64},
+	 NULL_CFIS_LST },
 	{119, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {52, 60} },
+	 {52, 60},
+	 NULL_CFIS_LST },
 	{120, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {56, 64} },
+	 {56, 64},
+	 NULL_CFIS_LST },
 	{121, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144} },
+	 {100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144},
+	 NULL_CFIS_LST },
 	{122, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {100, 108, 116, 124, 132, 140} },
+	 {100, 108, 116, 124, 132, 140},
+	 NULL_CFIS_LST },
 	{123, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {104, 112, 120, 128, 136, 144} },
+	 {104, 112, 120, 128, 136, 144},
+	 NULL_CFIS_LST },
 	{125, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {149, 153, 157, 161, 165, 169} },
+	 {149, 153, 157, 161, 165, 169, 173, 177},
+	 NULL_CFIS_LST },
 	{126, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {149, 157} },
+	 {149, 157, 165, 173},
+	 NULL_CFIS_LST },
 	{127, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {153, 161} },
+	 {153, 161, 169, 177},
+	 NULL_CFIS_LST },
 	{128, 80, BW80, BIT(BEHAV_NONE), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64,
-	  100, 104, 108, 112, 116, 120, 124,
-	  128, 132, 136, 140, 144,
-	  149, 153, 157, 161} },
+	  100, 104, 108, 112, 116, 120, 124, 128,
+	  132, 136, 140, 144, 149, 153, 157, 161,
+	  165, 169, 173, 177},
+	  NULL_CFIS_LST },
 	{129, 160, BW80, BIT(BEHAV_NONE), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64,
-	  100, 104, 108, 112, 116, 120, 124, 128} },
+	  100, 104, 108, 112, 116, 120, 124, 128,
+	  149, 153, 157, 161, 165, 169, 173, 177},
+	 NULL_CFIS_LST },
 	{130, 80, BW80, BIT(BEHAV_BW80_PLUS), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64,
 	  100, 104, 108, 112, 116, 120, 124, 128,
-	  132, 136, 140, 144, 149, 153, 157, 161} },
+	  132, 136, 140, 144, 149, 153, 157, 161,
+	  165, 169, 173, 177},
+	 NULL_CFIS_LST },
 
 #ifdef CONFIG_BAND_6GHZ
 	{131, 20, BW20, BIT(BEHAV_NONE), 5950,
@@ -94,7 +237,8 @@ static const struct reg_dmn_op_class_map_t global_op_class[] = {
 	  129, 133, 137, 141, 145, 149, 153,
 	  157, 161, 165, 169, 173, 177, 181,
 	  185, 189, 193, 197, 201, 205, 209,
-	  213, 217, 221, 225, 229, 233} },
+	  213, 217, 221, 225, 229, 233},
+	&CFISLST(131)},
 
 	{132, 40, BW40_LOW_PRIMARY, BIT(BEHAV_NONE), 5950,
 	 {1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49,
@@ -102,7 +246,8 @@ static const struct reg_dmn_op_class_map_t global_op_class[] = {
 	  101, 105, 109, 113, 117, 121, 125, 129, 133, 137,
 	  141, 145, 149, 153, 157, 161, 165, 169, 173, 177,
 	  181, 185, 189, 193, 197, 201, 205, 209, 213, 217,
-	  221, 225, 229, 233} },
+	  221, 225, 229, 233},
+	&CFISLST(132)},
 
 	{133, 80, BW80, BIT(BEHAV_NONE), 5950,
 	 {1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49,
@@ -110,7 +255,8 @@ static const struct reg_dmn_op_class_map_t global_op_class[] = {
 	  101, 105, 109, 113, 117, 121, 125, 129, 133, 137,
 	  141, 145, 149, 153, 157, 161, 165, 169, 173,
 	  177, 181, 185, 189, 193, 197, 201, 205, 209, 213,
-	  217, 221, 225, 229, 233} },
+	  217, 221, 225, 229, 233},
+	&CFISLST(133)},
 
 	{134, 160, BW80, BIT(BEHAV_NONE), 5950,
 	 {1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45,
@@ -118,7 +264,8 @@ static const struct reg_dmn_op_class_map_t global_op_class[] = {
 	  93, 97, 101, 105, 109, 113, 117, 121, 125,
 	  129, 133, 137, 141, 145, 149, 153, 157, 161,
 	  165, 169, 173, 177, 181, 185, 189, 193, 197,
-	  201, 205, 209, 213, 217, 221, 225, 229, 233} },
+	     201, 205, 209, 213, 217, 221, 225, 229, 233},
+	&CFISLST(134)},
 
 	{135, 80, BW80, BIT(BEHAV_BW80_PLUS), 5950,
 	 {1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41,
@@ -127,164 +274,244 @@ static const struct reg_dmn_op_class_map_t global_op_class[] = {
 	  121, 125, 129, 133, 137, 141, 145, 149,
 	  153, 157, 161, 165, 169, 173, 177, 181,
 	  185, 189, 193, 197, 201, 205, 209, 213,
-	  217, 221, 225, 229, 233} },
+	  217, 221, 225, 229, 233},
+	&CFISLST(135)},
 
 	{136, 20, BW20, BIT(BEHAV_NONE), 5925,
-	 {2} },
+	 {2},
+	&CFISLST(136)},
+#ifdef WLAN_FEATURE_11BE
+	{137, 320, BW20, BIT(BEHAV_NONE), 5950,
+	 {1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41,
+	  45, 49, 53, 57, 61, 65, 69, 73, 77, 81,
+	  85, 89, 93, 97, 101, 105, 109, 113, 117,
+	  121, 125, 129, 133, 137, 141, 145, 149,
+	  153, 157, 161, 165, 169, 173, 177, 181,
+	  185, 189, 193, 197, 201, 205, 209, 213,
+	  217, 221, 225, 229, 233},
+	&CFISLST(137)},
 #endif
-	{0, 0, 0, 0, 0, {0} },
+#endif
+	{0, 0, 0, 0, 0, {0},
+	NULL_CFIS_LST },
 };
 
 static const struct reg_dmn_op_class_map_t us_op_class[] = {
 	{1, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {36, 40, 44, 48} },
+	 {36, 40, 44, 48},
+	 NULL_CFIS_LST },
 	{2, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {52, 56, 60, 64} },
+	 {52, 56, 60, 64},
+	 NULL_CFIS_LST },
 	{4, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144} },
+	 {100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144},
+	 NULL_CFIS_LST },
 	{5, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {149, 153, 157, 161, 165} },
+	 {149, 153, 157, 161, 165},
+	 NULL_CFIS_LST },
 	{12, 25, BW20, BIT(BEHAV_NONE), 2407,
-	 {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} },
+	 {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+	 NULL_CFIS_LST },
 	{22, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {36, 44} },
+	 {36, 44},
+	 NULL_CFIS_LST },
 	{23, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {52, 60} },
+	 {52, 60},
+	 NULL_CFIS_LST },
 	{24, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {100, 108, 116, 124, 132, 140} },
+	 {100, 108, 116, 124, 132, 140},
+	 NULL_CFIS_LST },
 	{26, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {149, 157} },
+	 {149, 157},
+	 NULL_CFIS_LST },
 	{27, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {40, 48} },
+	 {40, 48},
+	 NULL_CFIS_LST },
 	{28, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {56, 64} },
+	 {56, 64},
+	 NULL_CFIS_LST },
 	{29, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {104, 112, 120, 128, 136, 144} },
+	 {104, 112, 120, 128, 136, 144},
+	 NULL_CFIS_LST },
 	{30, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {153, 161} },
+	 {153, 161},
+	 NULL_CFIS_LST },
 	{31, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {153, 161} },
+	 {153, 161},
+	 NULL_CFIS_LST },
 	{32, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 2407,
-	 {1, 2, 3, 4, 5, 6, 7} },
+	 {1, 2, 3, 4, 5, 6, 7},
+	 NULL_CFIS_LST },
 	{33, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 2407,
-	 {5, 6, 7, 8, 9, 10, 11} },
+	 {5, 6, 7, 8, 9, 10, 11},
+	 NULL_CFIS_LST },
 	{128, 80, BW80, BIT(BEHAV_NONE), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64, 100,
 	  104, 108, 112, 116, 120, 124, 128, 132,
-	  136, 140, 144, 149, 153, 157, 161} },
+	  136, 140, 144, 149, 153, 157, 161},
+	 NULL_CFIS_LST },
 	{129, 160, BW80, BIT(BEHAV_NONE), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64, 100,
-	  104, 108, 112, 116, 120, 124, 128} },
+	  104, 108, 112, 116, 120, 124, 128},
+	 NULL_CFIS_LST },
 	{130, 80, BW80, BIT(BEHAV_BW80_PLUS), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64, 100,
 	  104, 108, 112, 116, 120, 124, 128, 132,
-	  136, 140, 144, 149, 153, 157, 161} },
-	{0, 0, 0, 0, 0, {0} },
+	  136, 140, 144, 149, 153, 157, 161},
+	 NULL_CFIS_LST },
+	{0, 0, 0, 0, 0, {0},
+	 NULL_CFIS_LST },
 };
 
 static const struct reg_dmn_op_class_map_t euro_op_class[] = {
 	{1, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {36, 40, 44, 48} },
+	 {36, 40, 44, 48},
+	 NULL_CFIS_LST },
 	{2, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {52, 56, 60, 64} },
+	 {52, 56, 60, 64},
+	 NULL_CFIS_LST },
 	{3, 20, BW20, BIT(BEHAV_NONE), 5000,
 	 {100, 104, 108, 112, 116, 120,
-	  124, 128, 132, 136, 140} },
+	  124, 128, 132, 136, 140},
+	 NULL_CFIS_LST },
 	{4, 25, BW20, BIT(BEHAV_NONE), 2407,
-	 {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13} },
+	 {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},
+	 NULL_CFIS_LST },
 	{5, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {36, 44} },
+	 {36, 44},
+	 NULL_CFIS_LST },
 	{6, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {52, 60} },
+	 {52, 60},
+	 NULL_CFIS_LST },
 	{7, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {100, 108, 116, 124, 132} },
+	 {100, 108, 116, 124, 132},
+	 NULL_CFIS_LST },
 	{8, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {40, 48} },
+	 {40, 48},
+	 NULL_CFIS_LST },
 	{9, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {56, 64} },
+	 {56, 64},
+	 NULL_CFIS_LST },
 	{10, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {104, 112, 120, 128, 136} },
+	 {104, 112, 120, 128, 136},
+	 NULL_CFIS_LST },
 	{11, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 2407,
-	 {1, 2, 3, 4, 5, 6, 7, 8, 9} },
+	 {1, 2, 3, 4, 5, 6, 7, 8, 9},
+	 NULL_CFIS_LST },
 	{12, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 2407,
-	 {5, 6, 7, 8, 9, 10, 11, 12, 13} },
+	 {5, 6, 7, 8, 9, 10, 11, 12, 13},
+	 NULL_CFIS_LST },
 	{17, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {149, 153, 157, 161, 165, 169} },
+	 {149, 153, 157, 161, 165, 169},
+	 NULL_CFIS_LST },
 	{128, 80, BW80, BIT(BEHAV_NONE), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120,
-	  124, 128} },
+	  124, 128},
+	 NULL_CFIS_LST },
 	{129, 160, BW80, BIT(BEHAV_NONE), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64, 100,
-	  104, 108, 112, 116, 120, 124, 128} },
+	  104, 108, 112, 116, 120, 124, 128},
+	 NULL_CFIS_LST },
 	{130, 80, BW80, BIT(BEHAV_BW80_PLUS), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120,
-	  124, 128} },
-	{0, 0, 0, 0, 0, {0} },
+	  124, 128},
+	 NULL_CFIS_LST },
+	{0, 0, 0, 0, 0, {0},
+	 NULL_CFIS_LST },
 };
 
 static const struct reg_dmn_op_class_map_t japan_op_class[] = {
 	{1, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {36, 40, 44, 48} },
+	 {36, 40, 44, 48},
+	 NULL_CFIS_LST },
 	{30, 25, BW20, BIT(BEHAV_NONE), 2407,
-	 {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13} },
+	 {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},
+	 NULL_CFIS_LST },
 	{31, 25, BW20, BIT(BEHAV_NONE), 2414,
-	 {14} },
+	 {14},
+	 NULL_CFIS_LST },
 	{32, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {52, 56, 60, 64} },
+	 {52, 56, 60, 64},
+	 NULL_CFIS_LST },
 	{34, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140} },
+	 {100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140},
+	 NULL_CFIS_LST },
 	{36, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {36, 44} },
+	 {36, 44},
+	 NULL_CFIS_LST },
 	{37, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {52, 60} },
+	 {52, 60},
+	 NULL_CFIS_LST },
 	{39, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {100, 108, 116, 124, 132} },
+	 {100, 108, 116, 124, 132},
+	 NULL_CFIS_LST },
 	{41, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {40, 48} },
+	 {40, 48},
+	 NULL_CFIS_LST },
 	{42, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {56, 64} },
+	 {56, 64},
+	 NULL_CFIS_LST },
 	{44, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {104, 112, 120, 128, 136} },
+	 {104, 112, 120, 128, 136},
+	 NULL_CFIS_LST },
 	{128, 80, BW80, BIT(BEHAV_NONE), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120,
-	  124, 128, 132, 136, 140, 144} },
+	  124, 128, 132, 136, 140, 144},
+	 NULL_CFIS_LST },
 	{129, 160, BW80, BIT(BEHAV_NONE), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64, 100,
-	  104, 108, 112, 116, 120, 124, 128} },
+	  104, 108, 112, 116, 120, 124, 128},
+	 NULL_CFIS_LST },
 	{130, 80, BW80, BIT(BEHAV_BW80_PLUS), 5000,
 	 {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120,
-	  124, 128, 132, 136, 140, 144} },
-	{0, 0, 0, 0, 0, {0} },
+	  124, 128, 132, 136, 140, 144},
+	 NULL_CFIS_LST },
+	{0, 0, 0, 0, 0, {0},
+	 NULL_CFIS_LST },
 };
 
 static const struct reg_dmn_op_class_map_t china_op_class[] = {
 	{7, 25, BW20, BIT(BEHAV_NONE), 2407,
-	 {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13} },
+	 {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},
+	 NULL_CFIS_LST },
 	{8, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 2407,
-	 {1, 2, 3, 4, 5, 6, 7, 8, 9} },
+	 {1, 2, 3, 4, 5, 6, 7, 8, 9},
+	 NULL_CFIS_LST },
 	{9, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 2407,
-	 {5, 6, 7, 8, 9, 10, 11, 12, 13} },
+	 {5, 6, 7, 8, 9, 10, 11, 12, 13},
+	 NULL_CFIS_LST },
 	{1, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {36, 40, 44, 48} },
+	 {36, 40, 44, 48},
+	 NULL_CFIS_LST },
 	{4, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {36, 44} },
+	 {36, 44},
+	 NULL_CFIS_LST },
 	{117, 40, BW40_HIGH_PRIMARY, BIT(BEHAV_BW40_HIGH_PRIMARY), 5000,
-	 {40, 48} },
+	 {40, 48},
+	 NULL_CFIS_LST },
 	{2, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {52, 56, 60, 64} },
+	 {52, 56, 60, 64},
+	 NULL_CFIS_LST },
 	{5, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {52, 60} },
+	 {52, 60},
+	 NULL_CFIS_LST },
 	{3, 20, BW20, BIT(BEHAV_NONE), 5000,
-	 {149, 153, 157, 161, 165} },
+	 {149, 153, 157, 161, 165},
+	 NULL_CFIS_LST },
 	{6, 40, BW40_LOW_PRIMARY, BIT(BEHAV_BW40_LOW_PRIMARY), 5000,
-	 {149, 157} },
+	 {149, 157},
+	 NULL_CFIS_LST },
 	{128, 80, BW80, BIT(BEHAV_NONE), 5000,
-	 {36, 40, 44, 48, 52, 56, 60, 64, 149, 153, 157, 161} },
+	 {36, 40, 44, 48, 52, 56, 60, 64, 149, 153, 157, 161},
+	 NULL_CFIS_LST },
 	{129, 160, BW80, BIT(BEHAV_NONE), 5000,
-	 {36, 40, 44, 48, 52, 56, 60, 64,} },
+	 {36, 40, 44, 48, 52, 56, 60, 64,},
+	 NULL_CFIS_LST },
 	{130, 80, BW80, BIT(BEHAV_BW80_PLUS), 5000,
-	 {36, 40, 44, 48, 52, 56, 60, 64, 149, 153, 157, 161} },
-	{0, 0, 0, 0, 0, {0} },
+	 {36, 40, 44, 48, 52, 56, 60, 64, 149, 153, 157, 161},
+	 NULL_CFIS_LST },
+	{0, 0, 0, 0, 0, {0},
+	 NULL_CFIS_LST },
 };
 #ifdef HOST_OPCLASS
 /**
@@ -297,6 +524,9 @@ static const struct reg_dmn_op_class_map_t
 *reg_get_class_from_country(const uint8_t *country)
 {
 	const struct reg_dmn_op_class_map_t *class = NULL;
+
+	if (!country)
+		return global_op_class;
 
 	reg_debug_rl("Country %c%c 0x%x", country[0], country[1], country[2]);
 
@@ -334,6 +564,310 @@ static const struct reg_dmn_op_class_map_t
 	}
 	return class;
 }
+
+#ifdef CONFIG_AFC_SUPPORT
+static bool reg_is_range_valid(struct freq_range *range)
+{
+	return (range->right > range->left);
+}
+
+/**
+ * reg_is_subrange() - Check if range_first is a subrange of range_second
+ * @range_first: Pointer to first range
+ * @range_second: Pointer to first range
+ *
+ * Return: True if the range_first is a subrange range_second, else false
+ */
+static bool reg_is_subrange(struct freq_range *range_first,
+			    struct freq_range *range_second)
+{
+	bool is_subrange;
+	bool is_valid;
+
+	is_valid = reg_is_range_valid(range_first) &&
+		   reg_is_range_valid(range_second);
+
+	if (!is_valid)
+		return false;
+
+	is_subrange = (range_first->left >= range_second->left) &&
+		      (range_first->right <= range_second->right);
+
+	return is_subrange;
+}
+
+/**
+ * reg_is_cfi_freq_in_ranges() - Check if the given 'cfi' in the any of the
+ * frequency ranges
+ * @cfi_freq: The center frequency index frequency
+ * @bw: bandwidth of the band with center freq cfi_freq
+ * @p_frange_lst: Pointer to frequency range list (AFC)
+ *
+ * return: True if the cfi is in the ranges, else false
+ */
+static bool reg_is_cfi_freq_in_ranges(qdf_freq_t cfi_freq,
+				      uint16_t bw,
+				      struct wlan_afc_frange_list *p_frange_lst)
+{
+	uint32_t num_ranges;
+	struct wlan_afc_freq_range_obj *p_range_objs;
+	uint8_t i;
+	bool is_cfi_supported = false;
+
+	num_ranges = p_frange_lst->num_ranges;
+	p_range_objs = &p_frange_lst->range_objs[0];
+	for (i = 0; i <  num_ranges; i++) {
+		qdf_freq_t cfi_band_left;
+		qdf_freq_t cfi_band_right;
+		struct freq_range range_cfi;
+		struct freq_range range_chip;
+
+		cfi_band_left = cfi_freq - bw / 2;
+		cfi_band_right = cfi_freq + bw / 2;
+
+		range_cfi = reg_init_freq_range(cfi_band_left,
+						cfi_band_right);
+		range_chip = reg_init_freq_range(p_range_objs->lowfreq,
+						 p_range_objs->highfreq);
+		is_cfi_supported = reg_is_subrange(&range_cfi, &range_chip);
+
+		if (is_cfi_supported)
+			return true;
+
+		p_range_objs++;
+	}
+
+	return is_cfi_supported;
+}
+
+void reg_dmn_free_6g_opclasses_and_channels(struct wlan_objmgr_pdev *pdev,
+					    uint8_t num_opclasses,
+					    uint8_t *opclass_lst,
+					    uint8_t *chansize_lst,
+					    uint8_t *channel_lists[])
+{
+	/*
+	 * All the elements of channel_lists were allocated as a single
+	 * allocation with 'channel_lists[0]' holding the first location of the
+	 * allocation. Therefore, freeing only 'channel_lists[0]' is enough.
+	 * Freeing any other 'channel_lists[i]' will result in error of freeing
+	 * unallocated memory.
+
+	 */
+	if (channel_lists)
+		qdf_mem_free(channel_lists[0]);
+
+	/*
+	 * opclass_lst, chansize_lst and channel_lists were allocated as a
+	 * single allocation with 'opclass_lst' holding the first location of
+	 * allocation. Therefore, freeing only 'opclass_lst' is enough.
+	 * Freeing chansize_lst, channel_lists will result in error of freeing
+	 * unallocated memory.
+	 */
+	qdf_mem_free(opclass_lst);
+}
+
+/**
+ * reg_dmn_get_num_6g_opclasses() - Calculate the number of opclasses in the
+ * 6GHz band.
+ * Return: The number of opclasses
+ */
+static uint8_t reg_dmn_get_num_6g_opclasses(struct wlan_objmgr_pdev *pdev)
+{
+	const struct reg_dmn_op_class_map_t *op_class_tbl;
+	uint8_t count;
+
+	op_class_tbl = global_op_class;
+
+	count = 0;
+	while (op_class_tbl && op_class_tbl->op_class) {
+		const struct c_freq_lst *p_lst;
+
+		p_lst = op_class_tbl->p_cfi_lst_obj;
+		if (p_lst &&
+		    reg_is_6ghz_op_class(pdev, op_class_tbl->op_class))
+			count++;
+
+		op_class_tbl++;
+	}
+
+	return count;
+}
+
+/**
+ * reg_dmn_fill_6g_opcls_chan_lists() - Copy the channel lists for 6g opclasses
+ * to the output argument list ('channel_lists')
+ * @pdev: Pointer to pdev.
+ * @p_frange_lst: Pointer to frequency range list (AFC)
+ * @chansize_lst: Array of sizes of channel lists
+ * @channel_lists: The array list pointers where the channel lists are to be
+ *                 copied.
+ *
+ * Return: Void
+ */
+static void reg_dmn_fill_6g_opcls_chan_lists(struct wlan_objmgr_pdev *pdev,
+					     struct wlan_afc_frange_list *p_frange_lst,
+					     uint8_t chansize_lst[],
+					     uint8_t *channel_lists[])
+{
+	uint8_t i = 0;
+	const struct reg_dmn_op_class_map_t *op_class_tbl;
+
+	op_class_tbl = global_op_class;
+
+	while (op_class_tbl && op_class_tbl->op_class) {
+		const struct c_freq_lst *p_lst;
+
+		p_lst = op_class_tbl->p_cfi_lst_obj;
+		if (p_lst &&
+		    reg_is_6ghz_op_class(pdev, op_class_tbl->op_class)) {
+			uint8_t j;
+			uint8_t cfi_idx = 0;
+			uint8_t *dst;
+
+			dst = channel_lists[i];
+			for (j = 0; j < p_lst->num_cfis; j++) {
+				uint8_t cfi;
+				qdf_freq_t cfi_freq;
+				qdf_freq_t start_freq = op_class_tbl->start_freq;
+				uint16_t bw = op_class_tbl->chan_spacing;
+
+				cfi = p_lst->p_cfis_arr[j];
+				cfi_freq = start_freq +
+					FREQ_TO_CHAN_SCALE * cfi;
+
+				if (reg_is_cfi_freq_in_ranges(cfi_freq,
+							      bw,
+							      p_frange_lst)) {
+					dst[cfi_idx++] = cfi;
+				}
+			}
+			i++;
+		}
+		op_class_tbl++;
+	}
+}
+
+QDF_STATUS reg_dmn_get_6g_opclasses_and_channels(struct wlan_objmgr_pdev *pdev,
+						 struct wlan_afc_frange_list *p_frange_lst,
+						 uint8_t *num_opclasses,
+						 uint8_t **opclass_lst,
+						 uint8_t **chansize_lst,
+						 uint8_t **channel_lists[])
+{
+	const struct reg_dmn_op_class_map_t *op_class_tbl;
+	uint8_t *l_opcls_lst;
+	uint8_t *l_chansize_lst;
+	uint8_t count;
+	uint8_t i;
+	uint8_t **arr_chan_lists;
+	uint16_t total_alloc_size;
+	uint16_t opcls_lst_size;
+	uint16_t chansize_lst_size;
+	uint16_t arr_chan_lists_size;
+	uint8_t *p_total_alloc1;
+	uint8_t *p_total_alloc2;
+	uint8_t *p_temp_alloc;
+
+	*opclass_lst = NULL;
+	*chansize_lst =  NULL;
+	*channel_lists = NULL;
+
+	op_class_tbl = global_op_class;
+
+	*num_opclasses = reg_dmn_get_num_6g_opclasses(pdev);
+	opcls_lst_size = *num_opclasses * sizeof(uint8_t);
+	chansize_lst_size = *num_opclasses * sizeof(uint8_t);
+	arr_chan_lists_size = *num_opclasses * sizeof(uint8_t *);
+
+	total_alloc_size = 0;
+	total_alloc_size += opcls_lst_size
+		+ chansize_lst_size
+		+ arr_chan_lists_size;
+
+	p_total_alloc1 = qdf_mem_malloc(total_alloc_size);
+	if (!p_total_alloc1) {
+		reg_err("out-of-memory");
+		return QDF_STATUS_E_NOMEM;
+	}
+
+	 /* Assign memory locations to each pointers */
+	p_temp_alloc = p_total_alloc1;
+
+	l_opcls_lst = p_temp_alloc;
+	p_temp_alloc += opcls_lst_size;
+
+	l_chansize_lst = p_temp_alloc;
+	p_temp_alloc += chansize_lst_size;
+
+	arr_chan_lists = (uint8_t **)p_temp_alloc;
+
+	/* Fill arrays with opclasses and chanlist sizes */
+	count = 0;
+	while (op_class_tbl && op_class_tbl->op_class) {
+		const struct c_freq_lst *p_lst;
+
+		p_lst = op_class_tbl->p_cfi_lst_obj;
+		if (p_lst &&
+		    reg_is_6ghz_op_class(pdev, op_class_tbl->op_class)) {
+			uint8_t n_supp_cfis = 0;
+			uint8_t j;
+
+			l_opcls_lst[count] = op_class_tbl->op_class;
+			for (j = 0; j < p_lst->num_cfis; j++) {
+				uint8_t cfi;
+				qdf_freq_t cfi_freq;
+				qdf_freq_t start_freq = op_class_tbl->start_freq;
+				uint16_t bw = op_class_tbl->chan_spacing;
+
+				cfi = p_lst->p_cfis_arr[j];
+				cfi_freq = start_freq +
+					FREQ_TO_CHAN_SCALE * cfi;
+				if (reg_is_cfi_freq_in_ranges(cfi_freq,
+							      bw,
+							      p_frange_lst)) {
+					n_supp_cfis++;
+				}
+			}
+			l_chansize_lst[count] = n_supp_cfis;
+			count++;
+		}
+		op_class_tbl++;
+	}
+
+	/* Calculate total alloction size for the array */
+	total_alloc_size = 0;
+	for (i = 0; i < *num_opclasses; i++)
+		total_alloc_size += l_chansize_lst[i] * sizeof(uint8_t *);
+
+	p_total_alloc2 = qdf_mem_malloc(total_alloc_size);
+	if (!p_total_alloc2) {
+		reg_err("out-of-memory");
+		qdf_mem_free(p_total_alloc1);
+		return QDF_STATUS_E_NOMEM;
+	}
+
+	/* Assign memory locations to each list pointers */
+	p_temp_alloc = p_total_alloc2;
+	for (i = 0; i < *num_opclasses; i++) {
+		if (!l_chansize_lst[i])
+			arr_chan_lists[i] = NULL;
+		else
+			arr_chan_lists[i] = p_temp_alloc;
+
+		p_temp_alloc += l_chansize_lst[i] * sizeof(uint8_t *);
+	}
+
+	/* Fill the array with channel lists */
+	reg_dmn_fill_6g_opcls_chan_lists(pdev, p_frange_lst, l_chansize_lst, arr_chan_lists);
+
+	*opclass_lst = l_opcls_lst;
+	*chansize_lst = l_chansize_lst;
+	*channel_lists = arr_chan_lists;
+
+	return QDF_STATUS_SUCCESS;
+}
+#endif /* CONFIG_AFC_SUPPORT */
 
 uint16_t reg_dmn_get_chanwidth_from_opclass(uint8_t *country, uint8_t channel,
 					    uint8_t opclass)
@@ -398,7 +932,7 @@ uint16_t reg_dmn_get_opclass_from_channel(uint8_t *country, uint8_t channel,
 
 uint8_t reg_dmn_get_opclass_from_freq_width(uint8_t *country,
 					    qdf_freq_t freq,
-					    uint8_t ch_width,
+					    uint16_t ch_width,
 					    uint16_t behav_limit)
 {
 	const struct reg_dmn_op_class_map_t *op_class_tbl = NULL;
@@ -533,6 +1067,68 @@ uint16_t reg_dmn_get_curr_opclasses(uint8_t *num_classes, uint8_t *class)
 }
 
 #ifdef CONFIG_CHAN_FREQ_API
+/**
+ * reg_find_opclass_absent_in_ctry_opclss_tables() - Check Global Opclass table
+ * when Opclass is not present in specific country.
+ * @pdev - Pointer to pdev
+ * @freq - Destination Frequency
+ * @chan_width- Channel Width
+ * @global_tbl_lookup - Global Table Lookup
+ * @behav_limit - Behav Limit
+ * @op_class - Pointer to Opclass
+ * @chan_num - Pointer to Channel
+ *
+ * Return: Void
+ */
+static void
+reg_find_opclass_absent_in_ctry_opclss_tables(struct wlan_objmgr_pdev *pdev,
+					      qdf_freq_t freq,
+					      uint16_t chan_width,
+					      bool global_tbl_lookup,
+					      uint16_t behav_limit,
+					      uint8_t *op_class,
+					      uint8_t *chan_num)
+{
+	if (!global_tbl_lookup && !*op_class) {
+		global_tbl_lookup = true;
+		reg_freq_width_to_chan_op_class(pdev, freq,
+						chan_width,
+						global_tbl_lookup,
+						behav_limit,
+						op_class,
+						chan_num);
+	}
+}
+
+static bool
+reg_is_country_opclass_global(struct wlan_objmgr_pdev *pdev)
+{
+	struct wlan_lmac_if_reg_tx_ops *reg_tx_ops;
+	struct wlan_objmgr_psoc *psoc;
+	uint8_t opclass_tbl_idx;
+
+	psoc = wlan_pdev_get_psoc(pdev);
+	if (!psoc) {
+		reg_err("psoc is NULL");
+		return false;
+	}
+
+	reg_tx_ops = reg_get_psoc_tx_ops(psoc);
+	if (!reg_tx_ops) {
+		reg_err("reg_tx_ops is NULL");
+		return false;
+	}
+
+	if (reg_tx_ops->get_opclass_tbl_idx) {
+		reg_tx_ops->get_opclass_tbl_idx(pdev, &opclass_tbl_idx);
+
+		if (opclass_tbl_idx == OP_CLASS_GLOBAL)
+			return true;
+	}
+
+	return false;
+}
+
 void reg_freq_width_to_chan_op_class_auto(struct wlan_objmgr_pdev *pdev,
 					  qdf_freq_t freq,
 					  uint16_t chan_width,
@@ -545,16 +1141,25 @@ void reg_freq_width_to_chan_op_class_auto(struct wlan_objmgr_pdev *pdev,
 		global_tbl_lookup = true;
 		if (chan_width == BW_40_MHZ)
 			behav_limit = BIT(BEHAV_NONE);
+	} else if (reg_is_5dot9_ghz_freq(pdev, freq)) {
+		global_tbl_lookup = true;
 	} else {
-		global_tbl_lookup = false;
+		global_tbl_lookup = reg_is_country_opclass_global(pdev);
 	}
 
+	*op_class = 0;
 	reg_freq_width_to_chan_op_class(pdev, freq,
 					chan_width,
 					global_tbl_lookup,
 					behav_limit,
 					op_class,
 					chan_num);
+	reg_find_opclass_absent_in_ctry_opclss_tables(pdev, freq,
+						      chan_width,
+						      global_tbl_lookup,
+						      behav_limit,
+						      op_class,
+						      chan_num);
 }
 
 void reg_freq_width_to_chan_op_class(struct wlan_objmgr_pdev *pdev,
@@ -571,7 +1176,7 @@ void reg_freq_width_to_chan_op_class(struct wlan_objmgr_pdev *pdev,
 
 	chan_enum = reg_get_chan_enum_for_freq(freq);
 
-	if (chan_enum == INVALID_CHANNEL) {
+	if (reg_is_chan_enum_invalid(chan_enum)) {
 		reg_err_rl("Invalid chan enum %d", chan_enum);
 		return;
 	}
@@ -622,7 +1227,7 @@ void reg_freq_to_chan_op_class(struct wlan_objmgr_pdev *pdev,
 	enum channel_enum chan_enum;
 	struct regulatory_channel *cur_chan_list;
 	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
-	struct ch_params chan_params;
+	struct ch_params chan_params = {0};
 
 	pdev_priv_obj = reg_get_pdev_obj(pdev);
 
@@ -635,13 +1240,16 @@ void reg_freq_to_chan_op_class(struct wlan_objmgr_pdev *pdev,
 
 	chan_enum = reg_get_chan_enum_for_freq(freq);
 
-	if (chan_enum == INVALID_CHANNEL) {
+	if (reg_is_chan_enum_invalid(chan_enum)) {
 		reg_err_rl("Invalid chan enum %d", chan_enum);
 		return;
 	}
 
 	chan_params.ch_width = CH_WIDTH_MAX;
-	reg_set_channel_params_for_freq(pdev, freq, 0, &chan_params);
+	reg_set_channel_params_for_pwrmode(pdev, freq,
+					   0,
+					   &chan_params,
+					   REG_CURRENT_PWR_MODE, true);
 
 	reg_freq_width_to_chan_op_class(pdev, freq,
 					reg_get_bw_value(chan_params.ch_width),
@@ -759,6 +1367,13 @@ qdf_freq_t reg_chan_opclass_to_freq_auto(uint8_t chan, uint8_t op_class,
 	if ((op_class >= MIN_6GHZ_OPER_CLASS) &&
 	    (op_class <= MAX_6GHZ_OPER_CLASS)) {
 		global_tbl_lookup = true;
+	} else {
+		qdf_freq_t freq = reg_chan_opclass_to_freq(chan,
+				op_class,
+				global_tbl_lookup);
+		if (freq)
+			return freq;
+		global_tbl_lookup = true;
 	}
 
 	return reg_chan_opclass_to_freq(chan, op_class, global_tbl_lookup);
@@ -809,6 +1424,22 @@ qdf_freq_t reg_country_chan_opclass_to_freq(struct wlan_objmgr_pdev *pdev,
 
 	return 0;
 }
+
+qdf_freq_t
+reg_chan_opclass_to_freq_prefer_global(struct wlan_objmgr_pdev *pdev,
+				       const uint8_t *country, uint8_t chan_num,
+				       uint8_t opclass)
+{
+	qdf_freq_t freq;
+
+	freq = reg_chan_opclass_to_freq(chan_num, opclass, true);
+	if (!freq && country) {
+		freq = reg_country_chan_opclass_to_freq(pdev, country, chan_num,
+							opclass, true);
+	}
+
+	return freq;
+}
 #endif
 
 static void
@@ -855,6 +1486,27 @@ static void reg_get_channel_cen(const struct
 }
 
 /**
+ * reg_is_chan_320mhz() - Return true if the chan width is 320MHZ,
+ * false otherwise.
+ * @chan_spacing: Channel spacing in MHZ.
+ *
+ * Return: true if chan_width is 320, false otherwise.
+ */
+#ifdef WLAN_FEATURE_11BE
+static bool reg_is_chan_320mhz(uint16_t chan_spacing)
+{
+	if (chan_spacing == BW_320_MHZ)
+		return true;
+	return false;
+}
+#else
+static bool reg_is_chan_320mhz(uint16_t chan_spacing)
+{
+	return false;
+}
+#endif
+
+/**
  * reg_get_chan_or_chan_center - Calculate central channel in the channel set.
  *
  * @op_class_tbl - Pointer to op_class_tbl.
@@ -881,12 +1533,221 @@ static uint8_t reg_get_chan_or_chan_center(const struct
 				    idx,
 				    NUM_20_MHZ_CHAN_IN_160_MHZ_CHAN,
 				    &center_chan);
+	} else if (reg_is_chan_320mhz(op_class_tbl->chan_spacing)) {
+		reg_get_channel_cen(op_class_tbl,
+				    idx,
+				    NUM_20_MHZ_CHAN_IN_320_MHZ_CHAN,
+				    &center_chan);
 	} else {
 		center_chan = op_class_tbl->channels[*idx];
 		*idx = *idx + 1;
 	}
 
 	return center_chan;
+}
+
+static inline qdf_freq_t reg_get_nearest_primary_freq(uint16_t bw,
+						      qdf_freq_t cfi_freq,
+						      uint8_t op_class)
+{
+	qdf_freq_t pri_freq;
+
+	if (bw <= BW_40_MHZ && op_class != OPCLS_132) {
+		pri_freq = cfi_freq;
+	} else {
+		if (cfi_freq >= BW_10_MHZ)
+			pri_freq = cfi_freq - BW_10_MHZ;
+		else
+			pri_freq = 0;
+	}
+
+	return pri_freq;
+}
+
+#ifdef WLAN_FEATURE_11BE
+/**
+ * reg_is_chan_supported()- Check if given channel is supported based on its
+ * freq provided
+ * @pdev: Pointer to pdev
+ * @pri_freq: Primary frequency of the input channel
+ * @cfi_freq: cfi frequency of the input channel
+ * @ch_width: Input channel width
+ *
+ * Return: True if the channel is supported, else false
+ */
+static bool reg_is_chan_supported(struct wlan_objmgr_pdev *pdev,
+				  qdf_freq_t pri_freq,
+				  qdf_freq_t cfi_freq,
+				  enum phy_ch_width ch_width)
+{
+	struct reg_channel_list chan_list;
+	qdf_freq_t center_320;
+	struct ch_params ch_params = {0};
+
+	center_320 = (ch_width == CH_WIDTH_320MHZ) ? cfi_freq : 0;
+	reg_fill_channel_list(pdev,
+			      pri_freq,
+			      0,
+			      ch_width,
+			      center_320,
+			      &chan_list, true);
+	ch_params = chan_list.chan_param[0];
+
+	if (ch_params.ch_width == ch_width)
+		return true;
+
+	return false;
+}
+#else
+static bool reg_is_chan_supported(struct wlan_objmgr_pdev *pdev,
+				  qdf_freq_t pri_freq,
+				  qdf_freq_t cfi_freq,
+				  enum phy_ch_width ch_width)
+{
+	struct ch_params ch_params = {0};
+
+	ch_params.ch_width = ch_width;
+	reg_set_channel_params_for_freq(pdev, pri_freq, 0, &ch_params, true);
+	if (ch_params.ch_width == ch_width)
+		return true;
+
+	return false;
+}
+#endif
+
+/**
+ * reg_is_cfi_supported()- Check if given cfi is supported
+ * @pdev: Pointer to pdev
+ * @cfi_freq: cfi frequency
+ * @bw: bandwidth
+ *
+ * Return: True if the cfi is supported, else false
+ */
+static bool reg_is_cfi_supported(struct wlan_objmgr_pdev *pdev,
+				 qdf_freq_t cfi_freq,
+				 uint16_t bw,
+				 uint8_t op_class)
+{
+	enum phy_ch_width ch_width;
+	qdf_freq_t pri_freq;
+	bool is_cfi_supported;
+
+	ch_width = reg_find_chwidth_from_bw(bw);
+	pri_freq = reg_get_nearest_primary_freq(bw, cfi_freq, op_class);
+	is_cfi_supported = reg_is_chan_supported(pdev,
+						 pri_freq,
+						 cfi_freq,
+						 ch_width);
+
+	return is_cfi_supported;
+}
+
+/**
+ * reg_get_cfis_from_opclassmap_for_6g()- Get channels from the opclass map
+ * for 6GHz
+ * @pdev: Pointer to pdev
+ * @cap: Pointer to regdmn_ap_cap_opclass_t
+ * @op_class_tbl: Pointer to op_class_tbl
+ * @in_opclass_conf: input opclass configuration
+ * Supported or not-supported by current HW mode
+ *
+ * Populate channels from opclass map to regdmn_ap_cap_opclass_t as supported
+ * and non-supported channels for 6Ghz.
+ *
+ * Return: void.
+ */
+static void reg_get_cfis_from_opclassmap_for_6g(
+			struct wlan_objmgr_pdev *pdev,
+			struct regdmn_ap_cap_opclass_t *cap,
+			const struct reg_dmn_op_class_map_t *op_class_tbl,
+			enum opclass_config in_opclass_conf)
+{
+	uint8_t n_sup_chans = 0, n_unsup_chans = 0, j;
+	const struct c_freq_lst *p_cfi_lst = op_class_tbl->p_cfi_lst_obj;
+	qdf_freq_t cfi_freq;
+	qdf_freq_t start_freq = op_class_tbl->start_freq;
+	uint16_t bw = op_class_tbl->chan_spacing;
+
+	for (j = 0; j < p_cfi_lst->num_cfis; j++) {
+		uint8_t cfi = p_cfi_lst->p_cfis_arr[j];
+		bool is_cfi_supported;
+
+		cfi_freq = start_freq + FREQ_TO_CHAN_SCALE * cfi;
+		is_cfi_supported = reg_is_cfi_supported(pdev,
+							cfi_freq,
+							bw,
+							op_class_tbl->op_class);
+		if (is_cfi_supported &&
+		    (in_opclass_conf == OPCLASSES_SUPPORTED_BY_CUR_HWMODE ||
+		     in_opclass_conf == OPCLASSES_SUPPORTED_BY_DOMAIN)) {
+			cap->sup_chan_list[n_sup_chans++] = cfi;
+			cap->num_supported_chan++;
+		} else {
+			cap->non_sup_chan_list[n_unsup_chans++] = cfi;
+			cap->num_non_supported_chan++;
+		}
+	}
+}
+
+static uint16_t reg_find_nearest_ieee_bw(uint16_t spacing)
+{
+	#define SMALLEST_BW 20
+	return (spacing / SMALLEST_BW) * SMALLEST_BW;
+}
+
+/**
+ * reg_get_cfis_from_opclassmap_for_non6g()- Get channels from the opclass map
+ * for non-6GHz
+ * @pdev: Pointer to pdev
+ * @cap: Pointer to regdmn_ap_cap_opclass_t
+ * @op_class_tbl: Pointer to op_class_tbl
+ * @in_opclass_conf: input opclass configuration
+ * Supported or not-supported by current HW mode
+ *
+ * Populate channels from opclass map to regdmn_ap_cap_opclass_t as supported
+ * and non-supported channels for non-6Ghz.
+ *
+ * Return: void.
+ */
+static void reg_get_cfis_from_opclassmap_for_non6g(
+			struct wlan_objmgr_pdev *pdev,
+			struct regdmn_ap_cap_opclass_t *cap,
+			const struct reg_dmn_op_class_map_t *op_class_tbl,
+			enum opclass_config in_opclass_conf)
+{
+	qdf_freq_t start_freq = op_class_tbl->start_freq;
+	uint8_t chan_idx = 0, n_sup_chans = 0, n_unsup_chans = 0;
+
+	while (op_class_tbl->channels[chan_idx]) {
+		uint8_t op_cls_chan;
+		qdf_freq_t pri_freq;
+		enum phy_ch_width ch_width;
+		bool is_supported;
+		uint16_t opcls_bw;
+
+		op_cls_chan = reg_get_chan_or_chan_center(op_class_tbl,
+							  &chan_idx);
+		pri_freq = start_freq + FREQ_TO_CHAN_SCALE * op_cls_chan;
+		opcls_bw = reg_find_nearest_ieee_bw(op_class_tbl->chan_spacing);
+		ch_width = reg_find_chwidth_from_bw(opcls_bw);
+		pri_freq = reg_get_nearest_primary_freq(opcls_bw,
+							pri_freq,
+							op_class_tbl->op_class);
+		is_supported = reg_is_chan_supported(pdev,
+						     pri_freq,
+						     0,
+						     ch_width);
+
+		if (is_supported &&
+		    (in_opclass_conf == OPCLASSES_SUPPORTED_BY_CUR_HWMODE ||
+		     in_opclass_conf == OPCLASSES_SUPPORTED_BY_DOMAIN)) {
+			cap->sup_chan_list[n_sup_chans++] = op_cls_chan;
+			cap->num_supported_chan++;
+		} else {
+			cap->non_sup_chan_list[n_unsup_chans++] = op_cls_chan;
+			cap->num_non_supported_chan++;
+		}
+	}
 }
 
 /**
@@ -896,6 +1757,8 @@ static uint8_t reg_get_chan_or_chan_center(const struct
  * @index: Pointer to index of reg_ap_cap
  * @op_class_tbl: Pointer to op_class_tbl
  * @is_opclass_operable: Set true if opclass is operable, else set false
+ * @in_opclass_conf: input opclass configuration
+ * Supported or not-supported by current HW mode
  *
  * Populate channels from opclass map to reg_ap_cap as supported and
  * non-supported channels.
@@ -908,34 +1771,24 @@ reg_get_channels_from_opclassmap(
 		struct regdmn_ap_cap_opclass_t *reg_ap_cap,
 		uint8_t index,
 		const struct reg_dmn_op_class_map_t *op_class_tbl,
-		bool *is_opclass_operable)
+		bool *is_opclass_operable,
+		enum opclass_config in_opclass_conf)
 {
-	uint8_t op_cls_chan;
-	qdf_freq_t search_freq;
-	bool is_freq_present;
-	uint8_t chan_idx = 0, n_sup_chans = 0, n_unsup_chans = 0;
+	struct regdmn_ap_cap_opclass_t *cap = &reg_ap_cap[index];
 
-	while (op_class_tbl->channels[chan_idx]) {
-		op_cls_chan = op_class_tbl->channels[chan_idx];
-		search_freq = op_class_tbl->start_freq +
-					(FREQ_TO_CHAN_SCALE * op_cls_chan);
-		is_freq_present =
-			reg_is_freq_present_in_cur_chan_list(pdev, search_freq);
-
-		if (!is_freq_present) {
-			reg_ap_cap[index].non_sup_chan_list[n_unsup_chans++] =
-				reg_get_chan_or_chan_center(op_class_tbl,
-							    &chan_idx);
-			reg_ap_cap[index].num_non_supported_chan++;
-		} else {
-			reg_ap_cap[index].sup_chan_list[n_sup_chans++] =
-				reg_get_chan_or_chan_center(op_class_tbl,
-							    &chan_idx);
-			reg_ap_cap[index].num_supported_chan++;
-		}
+	if (reg_is_6ghz_op_class(pdev, op_class_tbl->op_class)) {
+		reg_get_cfis_from_opclassmap_for_6g(pdev,
+						    cap,
+						    op_class_tbl,
+						    in_opclass_conf);
+	} else {
+		reg_get_cfis_from_opclassmap_for_non6g(pdev,
+						       cap,
+						       op_class_tbl,
+						       in_opclass_conf);
 	}
 
-	if (reg_ap_cap[index].num_supported_chan >= 1)
+	if (cap->num_supported_chan >= 1)
 		*is_opclass_operable = true;
 }
 
@@ -948,6 +1801,7 @@ QDF_STATUS reg_get_opclass_details(struct wlan_objmgr_pdev *pdev,
 	uint8_t max_reg_power = 0;
 	const struct reg_dmn_op_class_map_t *op_class_tbl;
 	uint8_t index = 0;
+	enum opclass_config opclass_conf = OPCLASSES_SUPPORTED_BY_DOMAIN;
 
 	if (global_tbl_lookup)
 		op_class_tbl = global_op_class;
@@ -969,7 +1823,8 @@ QDF_STATUS reg_get_opclass_details(struct wlan_objmgr_pdev *pdev,
 						 reg_ap_cap,
 						 index,
 						 op_class_tbl,
-						 &is_opclass_operable);
+						 &is_opclass_operable,
+						 opclass_conf);
 		if (is_opclass_operable) {
 			reg_ap_cap[index].op_class = op_class_tbl->op_class;
 			reg_ap_cap[index].ch_width =
@@ -1046,5 +1901,133 @@ bool reg_is_5ghz_op_class(const uint8_t *country, uint8_t op_class)
 bool reg_is_2ghz_op_class(const uint8_t *country, uint8_t op_class)
 {
 	return reg_is_opclass_band_found(country, op_class, BIT(REG_BAND_2G));
+}
+
+/**
+ * reg_convert_chan_spacing_to_width() - Convert channel spacing to
+ * channel width.
+ * @chan_spacing: Channel spacing
+ * @opclass_chwidth: Opclass channel width
+ * Return - None
+ */
+#ifdef WLAN_FEATURE_11BE
+static void reg_convert_chan_spacing_to_width(uint16_t chan_spacing,
+					      uint16_t *opclass_chwidth)
+{
+	switch (chan_spacing) {
+	case BW_20_MHZ:
+	case BW_25_MHZ:
+		*opclass_chwidth = BW_20_MHZ;
+		break;
+	case BW_40_MHZ:
+		*opclass_chwidth = BW_40_MHZ;
+		break;
+	case BW_80_MHZ:
+		*opclass_chwidth = BW_80_MHZ;
+		break;
+	case BW_160_MHZ:
+		*opclass_chwidth = BW_160_MHZ;
+		break;
+	case BW_320_MHZ:
+		*opclass_chwidth = BW_320_MHZ;
+		break;
+	default:
+		*opclass_chwidth = 0;
+	}
+}
+#else
+static void reg_convert_chan_spacing_to_width(uint16_t chan_spacing,
+					      uint16_t *opclass_chwidth)
+{
+	switch (chan_spacing) {
+	case BW_20_MHZ:
+	case BW_25_MHZ:
+		*opclass_chwidth = BW_20_MHZ;
+		break;
+	case BW_40_MHZ:
+		*opclass_chwidth = BW_40_MHZ;
+		break;
+	case BW_80_MHZ:
+		*opclass_chwidth = BW_80_MHZ;
+		break;
+	case BW_160_MHZ:
+		*opclass_chwidth = BW_160_MHZ;
+		break;
+	default:
+		*opclass_chwidth = 0;
+	}
+}
+#endif
+
+QDF_STATUS
+reg_get_opclass_for_cur_hwmode(struct wlan_objmgr_pdev *pdev,
+			       struct regdmn_ap_cap_opclass_t *reg_ap_cap,
+			       uint8_t *n_opclasses,
+			       uint8_t max_supp_op_class,
+			       bool global_tbl_lookup,
+			       enum phy_ch_width max_chwidth,
+			       bool is_80p80_supp)
+{
+	uint8_t max_reg_power = 0;
+	const struct reg_dmn_op_class_map_t *op_class_tbl;
+	uint8_t index = 0;
+	uint16_t out_width;
+
+	if (global_tbl_lookup)
+		op_class_tbl = global_op_class;
+	else
+		reg_get_op_class_tbl_by_chan_map(&op_class_tbl);
+
+	max_reg_power = reg_get_max_tx_power(pdev);
+
+	out_width = reg_get_bw_value(max_chwidth);
+
+	while (op_class_tbl->op_class && (index < max_supp_op_class)) {
+		bool is_opclass_operable = false;
+		enum opclass_config opclass_in_config =
+		    OPCLASSES_SUPPORTED_BY_CUR_HWMODE;
+		uint16_t opclass_width;
+
+		qdf_mem_zero(reg_ap_cap[index].sup_chan_list,
+			     REG_MAX_CHANNELS_PER_OPERATING_CLASS);
+		reg_ap_cap[index].num_supported_chan = 0;
+		qdf_mem_zero(reg_ap_cap[index].non_sup_chan_list,
+			     REG_MAX_CHANNELS_PER_OPERATING_CLASS);
+		reg_ap_cap[index].num_non_supported_chan = 0;
+
+		reg_convert_chan_spacing_to_width(op_class_tbl->chan_spacing,
+						  &opclass_width);
+
+		if ((opclass_width > out_width) ||
+		    ((op_class_tbl->behav_limit == BIT(BEHAV_BW80_PLUS)) &&
+		     !is_80p80_supp))
+			opclass_in_config =
+			    OPCLASSES_NOT_SUPPORTED_BY_CUR_HWMODE;
+
+		reg_get_channels_from_opclassmap(pdev,
+						 reg_ap_cap,
+						 index,
+						 op_class_tbl,
+						 &is_opclass_operable,
+						 opclass_in_config);
+
+		if (is_opclass_operable && opclass_in_config ==
+		    OPCLASSES_SUPPORTED_BY_CUR_HWMODE) {
+			reg_ap_cap[index].op_class = op_class_tbl->op_class;
+			reg_ap_cap[index].ch_width =
+				op_class_tbl->chan_spacing;
+			reg_ap_cap[index].start_freq =
+				op_class_tbl->start_freq;
+			reg_ap_cap[index].max_tx_pwr_dbm = max_reg_power;
+			reg_ap_cap[index].behav_limit =
+				op_class_tbl->behav_limit;
+			index++;
+		}
+		op_class_tbl++;
+	}
+
+	*n_opclasses = index;
+
+	return QDF_STATUS_SUCCESS;
 }
 #endif

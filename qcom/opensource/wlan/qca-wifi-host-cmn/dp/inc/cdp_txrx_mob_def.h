@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -25,6 +25,10 @@
 #define TX_WMM_AC_NUM	4
 #define ENABLE_DP_HIST_STATS
 #define DP_MEMORY_OPT
+#ifndef CONFIG_BERYLLIUM
+#define DP_USE_SINGLE_TCL
+#endif
+
 #define DP_RX_DISABLE_NDI_MDNS_FORWARDING
 
 #define OL_TXQ_PAUSE_REASON_FW                (1 << 0)
@@ -238,15 +242,43 @@ enum peer_debug_id_type {
 };
 
 /**
+ * enum cdp_peer_bw - Bandwidth types
+ * @CDP_20_MHZ: 20MHz BW
+ * @CDP_40_MHZ: 40MHz BW
+ * @CDP_80_MHZ: 80MHz BW
+ * @CDP_160_MHZ: 160MHz BW
+ * @CDP_80P80_MHZ: 80+80MHz BW
+ * @CDP_5_MHZ: 5MHz BW
+ * @CDP_10_MHZ: 10MHz BW
+ * @CDP_320_MHZ: 320MHz BW
+ * @CDP_BW_INVALID: Invalid BW
+ * @CDP_BW_MAX: Max BW id
+ */
+enum cdp_peer_bw {
+	CDP_20_MHZ,
+	CDP_40_MHZ,
+	CDP_80_MHZ,
+	CDP_160_MHZ,
+	CDP_80P80_MHZ,
+	CDP_5_MHZ,
+	CDP_10_MHZ,
+	CDP_320_MHZ,
+	CDP_BW_INVALID,
+	CDP_BW_MAX
+};
+
+/**
  * struct ol_txrx_desc_type - txrx descriptor type
  * @is_qos_enabled: is station qos enabled
  * @is_wapi_supported: is station wapi supported
  * @peer_addr: peer mac address
+ * @bw: bandwidth of peer connection
  */
 struct ol_txrx_desc_type {
 	uint8_t is_qos_enabled;
 	uint8_t is_wapi_supported;
 	struct qdf_mac_addr peer_addr;
+	enum cdp_peer_bw bw;
 };
 
 /**
@@ -321,7 +353,8 @@ struct txrx_pdev_cfg_param_t {
 	bool gro_enable;
 	bool tso_enable;
 	bool lro_enable;
-	bool enable_data_stall_detection;
+	bool sg_enable;
+	uint32_t enable_data_stall_detection;
 	bool enable_flow_steering;
 	bool disable_intra_bss_fwd;
 
@@ -408,7 +441,7 @@ struct ol_txrx_ocb_set_chan {
 /**
  * @brief Parameter type to pass WMM setting to ol_txrx_set_wmm_param
  * @details
- *   The struct is used to specify informaiton to update TX WMM scheduler.
+ *   The struct is used to specify information to update TX WMM scheduler.
  */
 struct ol_tx_ac_param_t {
 	uint32_t aifs;
@@ -469,9 +502,6 @@ typedef void (*ol_txrx_vdev_peer_remove_cb)(void *handle, uint8_t *bssid,
 typedef void (*tx_pause_callback)(uint8_t vdev_id,
 		enum netif_action_type action,
 		enum netif_reason_type reason);
-
-typedef void (*ipa_uc_op_cb_type)(uint8_t *op_msg,
-			void *osif_ctxt);
 
 /**
  * struct ol_rx_inv_peer_params - rx invalid peer data parameters

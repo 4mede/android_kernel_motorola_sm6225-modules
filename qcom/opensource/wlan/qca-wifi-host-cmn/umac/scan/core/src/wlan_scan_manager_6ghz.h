@@ -48,7 +48,7 @@
 #define SET_RNR_FLAG_TO_ALL_6G_CHANNELS 0x3
 
 /**
- * scm_add_channel_flags() - Update 6ghz channel flags in the active/pno scan req
+ * scm_add_channel_flags() - Update 6ghz channel flags in active/pno scan req
  * @vdev: vdev
  * @pno_chan_list: channel list
  * @num_chan: number channels

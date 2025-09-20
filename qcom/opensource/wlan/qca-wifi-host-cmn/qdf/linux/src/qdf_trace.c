@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -25,7 +26,11 @@
 /* Include Files */
 #include "qdf_str.h"
 #include <qdf_trace.h>
+#include <qdf_parse.h>
 #include <qdf_module.h>
+#include <qdf_util.h>
+#include <qdf_mem.h>
+#include <qdf_list.h>
 
 /* macro to map qdf trace levels into the bitmask */
 #define QDF_TRACE_LEVEL_TO_MODULE_BITMASK(_level) ((1 << (_level)))
@@ -43,6 +48,12 @@ qdf_declare_param(qdf_log_flush_timer_period, uint);
 #include "qdf_time.h"
 #include "qdf_mc_timer.h"
 #include <host_diag_core_log.h>
+
+#if defined(WLAN_FEATURE_CONNECTIVITY_LOGGING) || \
+	defined(CONNECTIVITY_DIAG_EVENT)
+#include <wlan_connectivity_logging.h>
+#include "i_host_diag_core_event.h"
+#endif
 
 /* Global qdf print id */
 
@@ -102,6 +113,28 @@ static struct s_qdf_dp_trace_data g_qdf_dp_trace_data;
 static tp_qdf_dp_trace_cb qdf_dp_trace_cb_table[QDF_DP_TRACE_MAX + 1];
 #endif
 
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+#define QDF_PARAM_STR_LENGTH 40
+
+enum qdf_num_module_param {
+	MEM_DEBUG_DISABLED,
+	QDF_DBG_MASK,
+	PREALLOC_DISABLED,
+	QDF_LOG_DUMP_AT_KERNEL_ENABLE,
+	QDF_DBG_ARR,
+	QDF_LOG_FLUSH_TIMER_PERIOD,
+	QDF_PARAM_MAX,
+};
+
+static char qdf_module_param[QDF_PARAM_MAX][QDF_PARAM_STR_LENGTH] = {
+	"mem_debug_disabled",
+	"qdf_dbg_mask",
+	"prealloc_disabled",
+	"qdf_log_dump_at_kernel_enable",
+	"qdf_dbg_arr",
+	"qdf_log_flush_timer_period",
+};
+#endif
 /**
  * qdf_snprintf() - wrapper function to snprintf
  * @str_buffer: string Buffer
@@ -211,15 +244,15 @@ qdf_export_symbol(qdf_trace_hex_ascii_dump);
 #ifdef WLAN_LOGGING_BUFFERS_DYNAMICALLY
 static inline QDF_STATUS allocate_g_qdf_trace_tbl_buffer(void)
 {
-	g_qdf_trace_tbl = vzalloc(MAX_QDF_TRACE_RECORDS *
-				  sizeof(*g_qdf_trace_tbl));
+	g_qdf_trace_tbl = qdf_mem_valloc(MAX_QDF_TRACE_RECORDS *
+					 sizeof(*g_qdf_trace_tbl));
 	QDF_BUG(g_qdf_trace_tbl);
 	return g_qdf_trace_tbl ? QDF_STATUS_SUCCESS : QDF_STATUS_E_NOMEM;
 }
 
 static inline void free_g_qdf_trace_tbl_buffer(void)
 {
-	vfree(g_qdf_trace_tbl);
+	qdf_mem_vfree(g_qdf_trace_tbl);
 	g_qdf_trace_tbl = NULL;
 }
 #else
@@ -364,7 +397,7 @@ void qdf_trace(uint8_t module, uint16_t code, uint16_t session, uint32_t data)
 		return;
 
 	qdf_get_time_of_the_day_in_hr_min_sec_usec(time, sizeof(time));
-	/* Aquire the lock so that only one thread at a time can fill the ring
+	/* Acquire the lock so that only one thread at a time can fill the ring
 	 * buffer
 	 */
 	spin_lock_irqsave(&ltrace_lock, flags);
@@ -476,7 +509,7 @@ qdf_export_symbol(qdf_trace_register);
  * @session: Session id of log
  * @count: Number of lines to dump starting from tail to head
  *
- * This function will be called up on issueing ioctl call as mentioned following
+ * This function will be called up on issuing ioctl call as mentioned following
  * [iwpriv wlan0 dumplog 0 0 <n> <bitmask_of_module>]
  *
  * <n> - number lines to dump starting from tail to head.
@@ -505,7 +538,7 @@ void qdf_trace_dump_all(void *p_mac, uint8_t code, uint8_t session,
 		  g_qdf_trace_data.num, g_qdf_trace_data.head,
 		  g_qdf_trace_data.tail);
 
-	/* aquire the lock so that only one thread at a time can read
+	/* acquire the lock so that only one thread at a time can read
 	 * the ring buffer
 	 */
 	spin_lock(&ltrace_lock);
@@ -643,15 +676,15 @@ qdf_export_symbol(qdf_state_info_dump_all);
 #ifdef WLAN_LOGGING_BUFFERS_DYNAMICALLY
 static inline QDF_STATUS allocate_g_qdf_dp_trace_tbl_buffer(void)
 {
-	g_qdf_dp_trace_tbl = vzalloc(MAX_QDF_DP_TRACE_RECORDS *
-				     sizeof(*g_qdf_dp_trace_tbl));
+	g_qdf_dp_trace_tbl = qdf_mem_valloc(MAX_QDF_DP_TRACE_RECORDS *
+					    sizeof(*g_qdf_dp_trace_tbl));
 	QDF_BUG(g_qdf_dp_trace_tbl);
 	return g_qdf_dp_trace_tbl ? QDF_STATUS_SUCCESS : QDF_STATUS_E_NOMEM;
 }
 
 static inline void free_g_qdf_dp_trace_tbl_buffer(void)
 {
-	vfree(g_qdf_dp_trace_tbl);
+	qdf_mem_vfree(g_qdf_dp_trace_tbl);
 	g_qdf_dp_trace_tbl = NULL;
 }
 #else
@@ -1204,6 +1237,24 @@ static const char *qdf_dp_subtype_to_str(enum qdf_proto_subtype subtype)
 		return "ROAM COMP";
 	case QDF_ROAM_EVENTID:
 		return "ROAM EVENTID";
+	case QDF_PROTO_EAP_REQUEST:
+		return "EAP REQ";
+	case QDF_PROTO_EAP_RESPONSE:
+		return "EAP RSP";
+	case QDF_PROTO_EAP_SUCCESS:
+		return "EAP SUC";
+	case QDF_PROTO_EAP_FAILURE:
+		return "EAP FAIL";
+	case QDF_PROTO_EAP_INITIATE:
+		return "EAP INIT";
+	case QDF_PROTO_EAP_FINISH:
+		return "EAP FINISH";
+	case QDF_PROTO_EAPOL_START:
+		return "START";
+	case QDF_PROTO_EAPOL_LOGOFF:
+		return "LOGOFF";
+	case QDF_PROTO_EAPOL_ASF:
+		return "ASF";
 	default:
 		return "invalid";
 	}
@@ -1486,6 +1537,24 @@ uint8_t *qdf_get_pkt_type_string(uint8_t type, uint8_t subtype)
 		return "DNS_Q";
 	case QDF_PROTO_DNS_RES:
 		return "DNS_RS";
+	case QDF_PROTO_EAP_REQUEST:
+		return "EAP_REQ";
+	case QDF_PROTO_EAP_RESPONSE:
+		return "EAP-RSP";
+	case QDF_PROTO_EAP_SUCCESS:
+		return "EAP-SUCCESS";
+	case QDF_PROTO_EAP_FAILURE:
+		return "EAP-FAIL";
+	case QDF_PROTO_EAP_INITIATE:
+		return "EAP-INIT";
+	case QDF_PROTO_EAP_FINISH:
+		return "EAP-FINISH";
+	case QDF_PROTO_EAPOL_START:
+		return "EAPOL-START";
+	case QDF_PROTO_EAPOL_LOGOFF:
+		return "EAPOL-LOGOFF";
+	case QDF_PROTO_EAPOL_ASF:
+		return "EAPOL-ASF";
 	default:
 		switch (type) {
 		case QDF_PROTO_TYPE_EAPOL:
@@ -1609,7 +1678,7 @@ static bool qdf_log_icmpv6_pkt(uint8_t vdev_id, struct sk_buff *skb,
 			QDF_DP_TRACE_ICMPv6_PACKET_RECORD,
 			vdev_id, (skb->data + QDF_NBUF_SRC_MAC_OFFSET),
 			(skb->data + QDF_NBUF_DEST_MAC_OFFSET),
-			QDF_PROTO_TYPE_ICMPv6, subtype, dir, pdev_id, false));
+			QDF_PROTO_TYPE_ICMPv6, subtype, dir, pdev_id, false, 0));
 
 		switch (subtype) {
 		case QDF_PROTO_ICMPV6_REQ:
@@ -1652,12 +1721,23 @@ static bool qdf_log_icmp_pkt(uint8_t vdev_id, struct sk_buff *skb,
 			     enum qdf_proto_dir dir, uint8_t pdev_id)
 {
 	enum qdf_proto_subtype proto_subtype;
+	uint8_t *data = NULL;
+	uint16_t seq_num = 0;
+	uint16_t icmp_id = 0;
+	uint32_t proto_priv_data = 0;
 
 	if ((qdf_dp_get_proto_bitmap() & QDF_NBUF_PKT_TRAC_TYPE_ICMP) &&
 	    (qdf_nbuf_is_icmp_pkt(skb) == true)) {
 
 		QDF_NBUF_CB_DP_TRACE_PRINT(skb) = false;
 		proto_subtype = qdf_nbuf_get_icmp_subtype(skb);
+
+		data = qdf_nbuf_data(skb);
+		icmp_id = qdf_cpu_to_be16(*(uint16_t *)(data + ICMP_ID_OFFSET));
+		seq_num = qdf_cpu_to_be16(*(uint16_t *)(data + ICMP_SEQ_NUM_OFFSET));
+
+		proto_priv_data |= ((proto_priv_data | ((uint32_t)icmp_id)) << 16);
+		proto_priv_data |= (uint32_t)seq_num;
 
 		if (QDF_TX == dir)
 			QDF_NBUF_CB_TX_DP_TRACE(skb) = 1;
@@ -1672,7 +1752,7 @@ static bool qdf_log_icmp_pkt(uint8_t vdev_id, struct sk_buff *skb,
 					       QDF_NBUF_DEST_MAC_OFFSET,
 					       QDF_PROTO_TYPE_ICMP,
 					       proto_subtype, dir, pdev_id,
-					       false));
+					       false, proto_priv_data));
 
 		if (proto_subtype == QDF_PROTO_ICMP_REQ)
 			g_qdf_dp_trace_data.icmp_req++;
@@ -1684,17 +1764,375 @@ static bool qdf_log_icmp_pkt(uint8_t vdev_id, struct sk_buff *skb,
 	return false;
 }
 
+#ifdef CONNECTIVITY_DIAG_EVENT
+enum diag_tx_status wlan_get_diag_tx_status(enum qdf_dp_tx_rx_status tx_status)
+{
+	switch (tx_status) {
+	case DIAG_TX_RX_STATUS_FW_DISCARD:
+	case DIAG_TX_RX_STATUS_INVALID:
+	case DIAG_TX_RX_STATUS_DROP:
+	case DIAG_TX_RX_STATUS_DOWNLOAD_SUCC:
+	case DIAG_TX_RX_STATUS_DEFAULT:
+	default:
+		return DIAG_TX_STATUS_FAIL;
+	case DIAG_TX_RX_STATUS_NO_ACK:
+		return DIAG_TX_STATUS_NO_ACK;
+	case DIAG_TX_RX_STATUS_OK:
+		return DIAG_TX_STATUS_ACK;
+	}
+
+	return DIAG_TX_STATUS_FAIL;
+}
+
+/**
+ * qdf_subtype_to_wlan_main_tag() - Convert qdf subtype to wlan main tag
+ * @subtype: EAPoL key subtype
+ *
+ * Return: Wlan main tag subtype
+ */
+static int qdf_subtype_to_wlan_main_tag(enum qdf_proto_subtype subtype)
+{
+	switch (subtype) {
+	case QDF_PROTO_DHCP_DISCOVER:
+		return WLAN_CONN_DIAG_DHCP_DISC_EVENT;
+	case QDF_PROTO_DHCP_REQUEST:
+		return WLAN_CONN_DIAG_DHCP_REQUEST_EVENT;
+	case QDF_PROTO_DHCP_OFFER:
+		return WLAN_CONN_DIAG_DHCP_OFFER_EVENT;
+	case QDF_PROTO_DHCP_ACK:
+		return WLAN_CONN_DIAG_DHCP_ACK_EVENT;
+	case QDF_PROTO_DHCP_NACK:
+		return WLAN_CONN_DIAG_DHCP_NACK_EVENT;
+	case QDF_PROTO_EAPOL_M1:
+		return WLAN_CONN_DIAG_EAPOL_M1_EVENT;
+	case QDF_PROTO_EAPOL_M2:
+		return WLAN_CONN_DIAG_EAPOL_M2_EVENT;
+	case QDF_PROTO_EAPOL_M3:
+		return WLAN_CONN_DIAG_EAPOL_M3_EVENT;
+	case QDF_PROTO_EAPOL_M4:
+		return WLAN_CONN_DIAG_EAPOL_M4_EVENT;
+	case QDF_PROTO_EAP_REQUEST:
+		return WLAN_CONN_DIAG_EAP_REQ_EVENT;
+	case QDF_PROTO_EAP_RESPONSE:
+		return WLAN_CONN_DIAG_EAP_RESP_EVENT;
+	case QDF_PROTO_EAP_SUCCESS:
+		return WLAN_CONN_DIAG_EAP_SUCC_EVENT;
+	case QDF_PROTO_EAP_FAILURE:
+		return WLAN_CONN_DIAG_EAP_FAIL_EVENT;
+	case QDF_PROTO_EAPOL_START:
+		return WLAN_CONN_DIAG_EAP_START_EVENT;
+	default:
+		return WLAN_CONN_DIAG_MAX;
+	}
+}
+
+/**
+ * qdf_get_wlan_eap_code() - Get EAP code
+ * @data: skb data pointer
+ *
+ * Return: EAP code value
+ */
+static int qdf_get_wlan_eap_code(uint8_t *data)
+{
+	uint8_t code = *(data + EAP_CODE_OFFSET);
+
+	switch (code) {
+	case QDF_EAP_REQUEST:
+		return WLAN_CONN_DIAG_EAP_REQ_EVENT;
+	case QDF_EAP_RESPONSE:
+		return WLAN_CONN_DIAG_EAP_RESP_EVENT;
+	case QDF_EAP_SUCCESS:
+		return WLAN_CONN_DIAG_EAP_SUCC_EVENT;
+	case QDF_EAP_FAILURE:
+		return WLAN_CONN_DIAG_EAP_FAIL_EVENT;
+	default:
+		return WLAN_CONN_DIAG_MAX;
+	}
+}
+
+/**
+ * qdf_eapol_get_key_type() - Get EAPOL key type
+ * @data: skb data pointer
+ * @subtype: EAPoL key subtype
+ *
+ * Return: EAPOL key type
+ */
+static
+uint8_t qdf_eapol_get_key_type(uint8_t *data, enum qdf_proto_subtype subtype)
+{
+	uint16_t key_info = *(uint16_t *)(data + EAPOL_KEY_INFO_OFFSET);
+
+	/* If key type is PTK, key type will be set in EAPOL Key info */
+	if (key_info & EAPOL_KEY_TYPE_MASK)
+		return qdf_subtype_to_wlan_main_tag(subtype);
+	else if (key_info & EAPOL_KEY_ENCRYPTED_MASK)
+		return WLAN_CONN_DIAG_GTK_M1_EVENT;
+	else
+		return WLAN_CONN_DIAG_GTK_M2_EVENT;
+}
+
+/**
+ * qdf_skip_wlan_connectivity_log() - Check if connectivity log need to skip
+ * @type: Protocol type
+ * @subtype: Protocol subtype
+ * @dir: Rx or Tx
+ * @op_mode: Vdev Operation mode
+ *
+ * Return: true or false
+ */
+static inline
+bool qdf_skip_wlan_connectivity_log(enum qdf_proto_type type,
+				    enum qdf_proto_subtype subtype,
+				    enum qdf_proto_dir dir,
+				    enum QDF_OPMODE op_mode)
+{
+	if (op_mode != QDF_STA_MODE)
+		return true;
+
+	if (dir == QDF_RX && type == QDF_PROTO_TYPE_DHCP &&
+	    (subtype == QDF_PROTO_DHCP_DISCOVER ||
+	     subtype == QDF_PROTO_DHCP_REQUEST))
+		return true;
+	return false;
+}
+
+/**
+ * qdf_fill_wlan_connectivity_log() - Fill and queue protocol packet to logging
+ * the logging queue
+ * @type: Protocol type
+ * @subtype: Protocol subtype
+ * @dir: Rx or Tx
+ * @qdf_tx_status: Tx completion status
+ * @op_mode: Vdev Operation mode
+ * @vdev_id: DP vdev ID
+ * @data: skb data pointer
+ *
+ * Return: None
+ */
+static
+void qdf_fill_wlan_connectivity_log(enum qdf_proto_type type,
+				    enum qdf_proto_subtype subtype,
+				    enum qdf_proto_dir dir,
+				    enum qdf_dp_tx_rx_status qdf_tx_status,
+				    enum QDF_OPMODE op_mode,
+				    uint8_t vdev_id, uint8_t *data)
+{
+	uint8_t pkt_type;
+
+	WLAN_HOST_DIAG_EVENT_DEF(wlan_diag_event, struct wlan_diag_packet_info);
+
+	if (qdf_skip_wlan_connectivity_log(type, subtype, dir, op_mode))
+		return;
+
+	qdf_mem_zero(&wlan_diag_event, sizeof(wlan_diag_event));
+
+	wlan_diag_event.diag_cmn.timestamp_us =
+					qdf_get_time_of_the_day_ms() * 1000;
+	wlan_diag_event.diag_cmn.ktime_us = qdf_ktime_to_us(qdf_ktime_get());
+	wlan_diag_event.diag_cmn.vdev_id = vdev_id;
+
+	wlan_diag_event.version = DIAG_MGMT_VERSION;
+
+	if (type == QDF_PROTO_TYPE_DHCP) {
+		wlan_diag_event.subtype =
+					qdf_subtype_to_wlan_main_tag(subtype);
+	} else if (type == QDF_PROTO_TYPE_EAPOL) {
+		pkt_type = *(data + EAPOL_PACKET_TYPE_OFFSET);
+		if (pkt_type == EAPOL_PACKET_TYPE_EAP) {
+			wlan_diag_event.subtype =
+						qdf_get_wlan_eap_code(data);
+			wlan_diag_event.eap_type =
+						*(data + EAP_TYPE_OFFSET);
+			wlan_diag_event.eap_len =
+			   qdf_ntohs(*(uint16_t *)(data + EAP_LENGTH_OFFSET));
+		} else if (pkt_type == EAPOL_PACKET_TYPE_KEY) {
+			wlan_diag_event.subtype =
+					qdf_eapol_get_key_type(data, subtype);
+		} else if (pkt_type == EAPOL_PACKET_TYPE_START) {
+			wlan_diag_event.subtype =
+					WLAN_CONN_DIAG_EAP_START_EVENT;
+			wlan_diag_event.eap_len =
+			    qdf_ntohs(*(uint16_t *)(data + EAPOL_PKT_LEN_OFFSET));
+		} else {
+			return;
+		}
+	} else {
+		return;
+	}
+
+	/*Tx completion status needs to be logged*/
+	if (dir == QDF_TX)
+		wlan_diag_event.tx_status =
+					wlan_get_diag_tx_status(qdf_tx_status);
+
+	WLAN_HOST_DIAG_EVENT_REPORT(&wlan_diag_event, EVENT_WLAN_CONN_DP);
+}
+
+#elif defined(WLAN_FEATURE_CONNECTIVITY_LOGGING)
+/**
+ * qdf_subtype_to_wlan_main_tag() - Convert qdf subtype to wlan main tag
+ * @subtype: EAPoL key subtype
+ *
+ * Return: Wlan main tag subtype
+ */
+static int qdf_subtype_to_wlan_main_tag(enum qdf_proto_subtype subtype)
+{
+	switch (subtype) {
+	case QDF_PROTO_DHCP_DISCOVER:
+		return WLAN_DHCP_DISCOVER;
+	case QDF_PROTO_DHCP_REQUEST:
+		return WLAN_DHCP_REQUEST;
+	case QDF_PROTO_DHCP_OFFER:
+		return WLAN_DHCP_OFFER;
+	case QDF_PROTO_DHCP_ACK:
+		return WLAN_DHCP_ACK;
+	case QDF_PROTO_DHCP_NACK:
+		return WLAN_DHCP_NACK;
+	case QDF_PROTO_EAPOL_M1:
+		return WLAN_EAPOL_M1;
+	case QDF_PROTO_EAPOL_M2:
+		return WLAN_EAPOL_M2;
+	case QDF_PROTO_EAPOL_M3:
+		return WLAN_EAPOL_M3;
+	case QDF_PROTO_EAPOL_M4:
+		return WLAN_EAPOL_M4;
+	default:
+		return WLAN_TAG_MAX;
+	}
+}
+
+/**
+ * qdf_get_wlan_eap_code() - Get EAP code
+ * @data: skb data pointer
+ *
+ * Return: EAP code value
+ */
+static int qdf_get_wlan_eap_code(uint8_t *data)
+{
+	uint8_t code = *(data + EAP_CODE_OFFSET);
+
+	switch (code) {
+	case QDF_EAP_REQUEST:
+		return WLAN_EAP_REQUEST;
+	case QDF_EAP_RESPONSE:
+		return WLAN_EAP_RESPONSE;
+	case QDF_EAP_SUCCESS:
+		return WLAN_EAP_SUCCESS;
+	case QDF_EAP_FAILURE:
+		return WLAN_EAP_FAILURE;
+	default:
+		return WLAN_TAG_MAX;
+	}
+}
+
+/**
+ * qdf_eapol_get_key_type() - Get EAPOL key type
+ * @data: skb data pointer
+ * @subtype: EAPoL key subtype
+ *
+ * Return: EAPOL key type
+ */
+static
+uint8_t qdf_eapol_get_key_type(uint8_t *data, enum qdf_proto_subtype subtype)
+{
+	uint16_t key_info = *(uint16_t *)(data + EAPOL_KEY_INFO_OFFSET);
+
+	/* If key type is PTK, key type will be set in EAPOL Key info */
+	if (key_info & EAPOL_KEY_TYPE_MASK)
+		return qdf_subtype_to_wlan_main_tag(subtype);
+	else if (key_info & EAPOL_KEY_ENCRYPTED_MASK)
+		return WLAN_GTK_M1;
+	else
+		return WLAN_GTK_M2;
+}
+
+/**
+ * qdf_skip_wlan_connectivity_log() - Check if connectivity log need to skip
+ * @type: Protocol type
+ * @subtype: Protocol subtype
+ * @dir: Rx or Tx
+ *
+ * Return: true or false
+ */
+static inline
+bool qdf_skip_wlan_connectivity_log(enum qdf_proto_type type,
+				    enum qdf_proto_subtype subtype,
+				    enum qdf_proto_dir dir)
+{
+	if ((dir == QDF_RX) && (type == QDF_PROTO_TYPE_DHCP) &&
+	    ((subtype == QDF_PROTO_DHCP_DISCOVER) ||
+	     (subtype == QDF_PROTO_DHCP_REQUEST)))
+		return true;
+	return false;
+}
+
+static
+void qdf_fill_wlan_connectivity_log(enum qdf_proto_type type,
+				    enum qdf_proto_subtype subtype,
+				    enum qdf_proto_dir dir,
+				    enum qdf_dp_tx_rx_status qdf_tx_status,
+				    uint8_t vdev_id, uint8_t *data)
+{
+	struct wlan_log_record log_buf = {0};
+	uint8_t pkt_type;
+
+	if (qdf_skip_wlan_connectivity_log(type, subtype, dir))
+		return;
+
+	log_buf.timestamp_us = qdf_get_time_of_the_day_ms() * 1000;
+	log_buf.ktime_us = qdf_ktime_to_us(qdf_ktime_get());
+	log_buf.vdev_id = vdev_id;
+	if (type == QDF_PROTO_TYPE_DHCP) {
+		log_buf.log_subtype = qdf_subtype_to_wlan_main_tag(subtype);
+	} else if (type == QDF_PROTO_TYPE_EAPOL) {
+		pkt_type = *(data + EAPOL_PACKET_TYPE_OFFSET);
+		if (pkt_type == EAPOL_PACKET_TYPE_EAP) {
+			log_buf.log_subtype = qdf_get_wlan_eap_code(data);
+			log_buf.pkt_info.eap_type = *(data + EAP_TYPE_OFFSET);
+			log_buf.pkt_info.eap_len =
+			   qdf_ntohs(*(uint16_t *)(data + EAP_LENGTH_OFFSET));
+		} else if (pkt_type == EAPOL_PACKET_TYPE_KEY) {
+			log_buf.log_subtype = qdf_eapol_get_key_type(data,
+								     subtype);
+		} else {
+			return;
+		}
+	} else {
+		return;
+	}
+
+	/*Tx completion status needs to be logged*/
+	if (dir == QDF_TX)
+		log_buf.pkt_info.tx_status = qdf_tx_status;
+
+	wlan_connectivity_log_enqueue(&log_buf);
+}
+
+#else
+static inline
+void qdf_fill_wlan_connectivity_log(enum qdf_proto_type type,
+				    enum qdf_proto_subtype subtype,
+				    enum qdf_proto_dir dir,
+				    enum qdf_dp_tx_rx_status qdf_tx_status,
+					enum QDF_OPMODE op_mode,
+				    uint8_t vdev_id, uint8_t *data)
+{
+}
+#endif
+
 /**
  * qdf_log_eapol_pkt() - log EAPOL packet
  * @vdev_id: ID of the vdev
  * @skb: skb pointer
  * @dir: direction
  * @pdev_id: ID of the pdev
+ * @op_mode: Vdev Operation mode
  *
  * Return: true/false
  */
 static bool qdf_log_eapol_pkt(uint8_t vdev_id, struct sk_buff *skb,
-			      enum qdf_proto_dir dir, uint8_t pdev_id)
+			      enum qdf_proto_dir dir, uint8_t pdev_id,
+				  enum QDF_OPMODE op_mode)
 {
 	enum qdf_proto_subtype subtype;
 	uint32_t dp_eap_trace;
@@ -1714,12 +2152,16 @@ static bool qdf_log_eapol_pkt(uint8_t vdev_id, struct sk_buff *skb,
 
 	subtype = qdf_nbuf_get_eapol_subtype(skb);
 
-	if (dp_eap_event && dir == QDF_RX)
+	if (dp_eap_event && dir == QDF_RX) {
 		qdf_dp_log_proto_pkt_info(skb->data + QDF_NBUF_SRC_MAC_OFFSET,
 					  skb->data + QDF_NBUF_DEST_MAC_OFFSET,
 					  QDF_PROTO_TYPE_EAPOL, subtype, dir,
 					  QDF_TRACE_DEFAULT_MSDU_ID,
 					  QDF_TX_RX_STATUS_INVALID);
+		qdf_fill_wlan_connectivity_log(QDF_PROTO_TYPE_EAPOL, subtype,
+					       QDF_RX, 0, op_mode,
+					       vdev_id, skb->data);
+	}
 
 	if (dp_eap_trace) {
 		QDF_NBUF_CB_DP_TRACE_PRINT(skb) = true;
@@ -1735,7 +2177,7 @@ static bool qdf_log_eapol_pkt(uint8_t vdev_id, struct sk_buff *skb,
 					       skb->data +
 					       QDF_NBUF_DEST_MAC_OFFSET,
 					       QDF_PROTO_TYPE_EAPOL, subtype,
-					       dir, pdev_id, true));
+					       dir, pdev_id, true, 0));
 
 		switch (subtype) {
 		case QDF_PROTO_EAPOL_M1:
@@ -1765,11 +2207,13 @@ static bool qdf_log_eapol_pkt(uint8_t vdev_id, struct sk_buff *skb,
  * @skb: skb pointer
  * @dir: direction
  * @pdev_id: ID of the pdev
+ * @op_mode: Vdev Operation mode
  *
  * Return: true/false
  */
 static bool qdf_log_dhcp_pkt(uint8_t vdev_id, struct sk_buff *skb,
-			     enum qdf_proto_dir dir, uint8_t pdev_id)
+			     enum qdf_proto_dir dir, uint8_t pdev_id,
+				 enum QDF_OPMODE op_mode)
 {
 	enum qdf_proto_subtype subtype = QDF_PROTO_INVALID;
 	uint32_t dp_dhcp_trace;
@@ -1789,12 +2233,15 @@ static bool qdf_log_dhcp_pkt(uint8_t vdev_id, struct sk_buff *skb,
 
 	subtype = qdf_nbuf_get_dhcp_subtype(skb);
 
-	if (dp_dhcp_event && dir == QDF_RX)
+	if (dp_dhcp_event && dir == QDF_RX) {
 		qdf_dp_log_proto_pkt_info(skb->data + QDF_NBUF_SRC_MAC_OFFSET,
 					  skb->data + QDF_NBUF_DEST_MAC_OFFSET,
 					  QDF_PROTO_TYPE_DHCP, subtype, dir,
 					  QDF_TRACE_DEFAULT_MSDU_ID,
 					  QDF_TX_RX_STATUS_INVALID);
+		qdf_fill_wlan_connectivity_log(QDF_PROTO_TYPE_DHCP, subtype,
+					       QDF_RX, 0, op_mode, vdev_id, 0);
+	}
 
 	if (dp_dhcp_trace) {
 		QDF_NBUF_CB_DP_TRACE_PRINT(skb) = true;
@@ -1810,7 +2257,7 @@ static bool qdf_log_dhcp_pkt(uint8_t vdev_id, struct sk_buff *skb,
 					       skb->data +
 					       QDF_NBUF_DEST_MAC_OFFSET,
 					       QDF_PROTO_TYPE_DHCP, subtype,
-					       dir, pdev_id, true));
+					       dir, pdev_id, true, 0));
 
 		switch (subtype) {
 		case QDF_PROTO_DHCP_DISCOVER:
@@ -1871,7 +2318,7 @@ static bool qdf_log_arp_pkt(uint8_t vdev_id, struct sk_buff *skb,
 					       QDF_NBUF_DEST_MAC_OFFSET,
 					       QDF_PROTO_TYPE_ARP,
 					       proto_subtype, dir, pdev_id,
-					       true));
+					       true, 0));
 
 		if (QDF_PROTO_ARP_REQ == proto_subtype)
 			g_qdf_dp_trace_data.arp_req++;
@@ -1885,15 +2332,16 @@ static bool qdf_log_arp_pkt(uint8_t vdev_id, struct sk_buff *skb,
 
 
 bool qdf_dp_trace_log_pkt(uint8_t vdev_id, struct sk_buff *skb,
-			  enum qdf_proto_dir dir, uint8_t pdev_id)
+			  enum qdf_proto_dir dir, uint8_t pdev_id,
+			  enum QDF_OPMODE op_mode)
 {
 	if (!qdf_dp_get_proto_bitmap() && !qdf_dp_get_proto_event_bitmap())
 		return false;
 	if (qdf_log_arp_pkt(vdev_id, skb, dir, pdev_id))
 		return true;
-	if (qdf_log_dhcp_pkt(vdev_id, skb, dir, pdev_id))
+	if (qdf_log_dhcp_pkt(vdev_id, skb, dir, pdev_id, op_mode))
 		return true;
-	if (qdf_log_eapol_pkt(vdev_id, skb, dir, pdev_id))
+	if (qdf_log_eapol_pkt(vdev_id, skb, dir, pdev_id, op_mode))
 		return true;
 	if (qdf_log_icmp_pkt(vdev_id, skb, dir, pdev_id))
 		return true;
@@ -2093,24 +2541,25 @@ void qdf_dp_display_proto_pkt(struct qdf_dp_trace_record_s *record,
 	loc = qdf_dp_trace_fill_meta_str(prepend_str, sizeof(prepend_str),
 					 index, info, record);
 	DPTRACE_PRINT("%s [%d] [%s] SA: "
-		      QDF_MAC_ADDR_FMT " %s DA: "
-		      QDF_MAC_ADDR_FMT,
+		      QDF_MAC_ADDR_FMT " %s DA:"
+		      QDF_MAC_ADDR_FMT " proto priv data = %08x",
 		      prepend_str,
 		      buf->vdev_id,
 		      qdf_dp_subtype_to_str(buf->subtype),
 		      QDF_MAC_ADDR_REF(buf->sa.bytes),
 		      qdf_dp_dir_to_str(buf->dir),
-		      QDF_MAC_ADDR_REF(buf->da.bytes));
+		      QDF_MAC_ADDR_REF(buf->da.bytes),
+		      buf->proto_priv_data);
 }
 qdf_export_symbol(qdf_dp_display_proto_pkt);
 
 void qdf_dp_trace_proto_pkt(enum QDF_DP_TRACE_ID code, uint8_t vdev_id,
 		uint8_t *sa, uint8_t *da, enum qdf_proto_type type,
 		enum qdf_proto_subtype subtype, enum qdf_proto_dir dir,
-		uint8_t pdev_id, bool print)
+		uint8_t pdev_id, bool print, uint32_t proto_priv_data)
 {
 	struct qdf_dp_trace_proto_buf buf;
-	int buf_size = sizeof(struct qdf_dp_trace_ptr_buf);
+	int buf_size = sizeof(struct qdf_dp_trace_proto_buf);
 
 	if (qdf_dp_enable_check(NULL, code, dir) == false)
 		return;
@@ -2124,6 +2573,7 @@ void qdf_dp_trace_proto_pkt(enum QDF_DP_TRACE_ID code, uint8_t vdev_id,
 	buf.type = type;
 	buf.subtype = subtype;
 	buf.vdev_id = vdev_id;
+	buf.proto_priv_data = proto_priv_data;
 	qdf_dp_add_record(code, pdev_id,
 			  (uint8_t *)&buf, buf_size, NULL, 0, print);
 }
@@ -2274,23 +2724,6 @@ void qdf_dp_track_noack_check(qdf_nbuf_t nbuf, enum qdf_proto_subtype *subtype)
 }
 qdf_export_symbol(qdf_dp_track_noack_check);
 
-enum qdf_dp_tx_rx_status qdf_dp_get_status_from_htt(uint8_t status)
-{
-	switch (status) {
-	case QDF_TX_COMP_STATUS_OK:
-		return QDF_TX_RX_STATUS_OK;
-	case QDF_TX_COMP_STATUS_STAT_DISCARD:
-	case QDF_TX_COMP_STATUS_STAT_DROP:
-		return QDF_TX_RX_STATUS_FW_DISCARD;
-	case QDF_TX_COMP_STATUS_STAT_NO_ACK:
-		return QDF_TX_RX_STATUS_NO_ACK;
-	default:
-		return QDF_TX_RX_STATUS_MAX;
-	}
-}
-
-qdf_export_symbol(qdf_dp_get_status_from_htt);
-
 enum qdf_dp_tx_rx_status qdf_dp_get_status_from_a_status(uint8_t status)
 {
 	if (status == QDF_A_STATUS_ERROR)
@@ -2300,37 +2733,33 @@ enum qdf_dp_tx_rx_status qdf_dp_get_status_from_a_status(uint8_t status)
 	else
 		return QDF_TX_RX_STATUS_MAX;
 }
-
 qdf_export_symbol(qdf_dp_get_status_from_a_status);
 
-/**
- * qdf_dp_trace_ptr() - record dptrace
- * @code: dptrace code
- * @pdev_id: pdev_id
- * @data: data
- * @size: size of data
- * @msdu_id: msdu_id
- * @status: return status
- *
- * Return: none
- */
 void qdf_dp_trace_ptr(qdf_nbuf_t nbuf, enum QDF_DP_TRACE_ID code,
 		uint8_t pdev_id, uint8_t *data, uint8_t size,
-		uint16_t msdu_id, uint16_t status)
+		uint16_t msdu_id, uint16_t buf_arg_status,
+		enum qdf_dp_tx_rx_status qdf_tx_status,
+		enum QDF_OPMODE op_mode)
 {
 	struct qdf_dp_trace_ptr_buf buf;
 	int buf_size = sizeof(struct qdf_dp_trace_ptr_buf);
 	enum qdf_proto_type pkt_type;
+	enum qdf_proto_subtype subtype;
 
 	pkt_type = qdf_dp_get_pkt_proto_type(nbuf);
 	if ((code == QDF_DP_TRACE_FREE_PACKET_PTR_RECORD ||
 	     code == QDF_DP_TRACE_LI_DP_FREE_PACKET_PTR_RECORD) &&
-	    qdf_dp_proto_log_enable_check(pkt_type, status))
+	    qdf_dp_proto_log_enable_check(pkt_type, qdf_tx_status)) {
+		subtype = qdf_dp_get_pkt_subtype(nbuf, pkt_type);
 		qdf_dp_log_proto_pkt_info(nbuf->data + QDF_NBUF_SRC_MAC_OFFSET,
 					 nbuf->data + QDF_NBUF_DEST_MAC_OFFSET,
-					 pkt_type,
-					 qdf_dp_get_pkt_subtype(nbuf, pkt_type),
-					 QDF_TX, msdu_id, status);
+					 pkt_type, subtype,
+					 QDF_TX, msdu_id, qdf_tx_status);
+		qdf_fill_wlan_connectivity_log(pkt_type, subtype,
+					       QDF_TX, qdf_tx_status, op_mode,
+					       QDF_NBUF_CB_TX_VDEV_CTX(nbuf),
+					       nbuf->data);
+	}
 
 	if (qdf_dp_enable_check(nbuf, code, QDF_TX) == false)
 		return;
@@ -2340,7 +2769,7 @@ void qdf_dp_trace_ptr(qdf_nbuf_t nbuf, enum QDF_DP_TRACE_ID code,
 
 	qdf_mem_copy(&buf.cookie, data, size);
 	buf.msdu_id = msdu_id;
-	buf.status = status;
+	buf.status = buf_arg_status;
 	qdf_dp_add_record(code, pdev_id, (uint8_t *)&buf, buf_size, NULL, 0,
 			  QDF_NBUF_CB_DP_TRACE_PRINT(nbuf));
 }
@@ -2974,7 +3403,7 @@ void qdf_dp_trace_dump_all(uint32_t count, uint8_t pdev_id)
 		      g_qdf_dp_trace_data.num, g_qdf_dp_trace_data.head,
 		      g_qdf_dp_trace_data.tail);
 
-	/* aquire the lock so that only one thread at a time can read
+	/* acquire the lock so that only one thread at a time can read
 	 * the ring buffer
 	 */
 	spin_lock_bh(&l_dp_trace_lock);
@@ -3174,7 +3603,6 @@ struct category_name_info g_qdf_category_name[MAX_SUPPORTED_CATEGORY] = {
 	[QDF_MODULE_ID_DIRECT_BUF_RX] = {"DIRECT_BUF_RX"},
 	[QDF_MODULE_ID_DISA] = {"disa"},
 	[QDF_MODULE_ID_GREEN_AP] = {"GREEN_AP"},
-	[QDF_MODULE_ID_EXTAP] = {"EXTAP"},
 	[QDF_MODULE_ID_FD] = {"FILS discovery"},
 	[QDF_MODULE_ID_FTM] = {"FTM"},
 	[QDF_MODULE_ID_OCB] = {"OCB"},
@@ -3190,14 +3618,13 @@ struct category_name_info g_qdf_category_name[MAX_SUPPORTED_CATEGORY] = {
 	[QDF_MODULE_ID_CMN_MLME] = {"CMN_MLME"},
 	[QDF_MODULE_ID_BSSCOLOR] = {"BSSCOLOR"},
 	[QDF_MODULE_ID_CFR] = {"CFR"},
-	[QDF_MODULE_ID_TX_CAPTURE] = {"TX_CAPTURE_ENHANCE"},
+	[QDF_MODULE_ID_DP_TX_CAPTURE] = {"TX_CAPTURE_ENHANCE"},
 	[QDF_MODULE_ID_INTEROP_ISSUES_AP] = {"INTEROP_ISSUES_AP"},
-	[QDF_MODULE_ID_BLACKLIST_MGR] = {"blm"},
+	[QDF_MODULE_ID_DENYLIST_MGR] = {"dlm"},
 	[QDF_MODULE_ID_QLD] = {"QLD"},
 	[QDF_MODULE_ID_DYNAMIC_MODE_CHG] = {"Dynamic Mode Change"},
 	[QDF_MODULE_ID_COEX] = {"COEX"},
 	[QDF_MODULE_ID_MON_FILTER] = {"Monitor Filter"},
-	[QDF_MODULE_ID_ANY] = {"ANY"},
 	[QDF_MODULE_ID_PKT_CAPTURE] = {"pkt_capture"},
 	[QDF_MODULE_ID_RPTR] = {"RPTR"},
 	[QDF_MODULE_ID_6GHZ] = {"6GHZ"},
@@ -3206,6 +3633,44 @@ struct category_name_info g_qdf_category_name[MAX_SUPPORTED_CATEGORY] = {
 	[QDF_MODULE_ID_GPIO] = {"GPIO_CFG"},
 	[QDF_MODULE_ID_IFMGR] = {"IF_MGR"},
 	[QDF_MODULE_ID_DIAG] = {"DIAG"},
+	[QDF_MODULE_ID_DP_INIT] = {"DP_INIT"},
+	[QDF_MODULE_ID_DP_TX] = {"DP_TX"},
+	[QDF_MODULE_ID_DP_RX] = {"DP_RX"},
+	[QDF_MODULE_ID_DP_STATS] = {"DP_STATS"},
+	[QDF_MODULE_ID_DP_HTT] = {"DP_HTT"},
+	[QDF_MODULE_ID_DP_PEER] = {"DP_PEER"},
+	[QDF_MODULE_ID_DP_RX_ERROR] = {"DP_RX_ERROR"},
+	[QDF_MODULE_ID_DP_HTT_TX_STATS] = {"DP_HTT_TX_STATS"},
+	[QDF_MODULE_ID_DP_RX_MON_STATUS] = {"DP_RX_MON_STATUS"},
+	[QDF_MODULE_ID_DP_RX_MON_DEST] = {"DP_RX_MON_DEST"},
+	[QDF_MODULE_ID_DP_REO] = {"DP_REO"},
+	[QDF_MODULE_ID_DP_TX_COMP] = {"DP_TX_COMP"},
+	[QDF_MODULE_ID_DP_VDEV] = {"DP_VDEV"},
+	[QDF_MODULE_ID_DP_CDP] = {"DP_CDP"},
+	[QDF_MODULE_ID_TSO] = {"TSO"},
+	[QDF_MODULE_ID_ME] = {"ME"},
+	[QDF_MODULE_ID_QWRAP] = {"QWRAP"},
+	[QDF_MODULE_ID_DBDC_REP] = {"DBDC_REP"},
+	[QDF_MODULE_ID_EXT_AP] = {"EXT_AP"},
+	[QDF_MODULE_ID_MLO] = {"MLO_MGR"},
+	[QDF_MODULE_ID_MGMT_RX_REO] = {"MGMT_RX_REO"},
+	[QDF_MODULE_ID_MLOIE] = {"MLOIE"},
+	[QDF_MODULE_ID_MBSS] = {"MBSS"},
+	[QDF_MODULE_ID_MON] = {"MONITOR"},
+	[QDF_MODULE_ID_AFC] = {"AFC"},
+	[QDF_MODULE_ID_TWT] = {"TWT"},
+	[QDF_MODULE_ID_SON] = {"SON"},
+	[QDF_MODULE_ID_WLAN_PRE_CAC] = {"PRE_CAC"},
+	[QDF_MODULE_ID_T2LM] = {"T2LM"},
+	[QDF_MODULE_ID_DP_SAWF] = {"DP_SAWF"},
+	[QDF_MODULE_ID_SCS] = {"SCS"},
+	[QDF_MODULE_ID_DP_UMAC_RESET] = {"UMAC_HW_RESET"},
+	[QDF_MODULE_ID_COAP] = {"COAP"},
+	[QDF_MODULE_ID_FTM_TIME_SYNC] = {"Time Sync"},
+	[QDF_MODULE_ID_WIFI_RADAR] = {"WIFI RADAR"},
+	[QDF_MODULE_ID_CDP] =  {"CDP"},
+	[QDF_MODULE_ID_QMI] = {"QMI"},
+	[QDF_MODULE_ID_ANY] = {"ANY"},
 };
 qdf_export_symbol(g_qdf_category_name);
 
@@ -3243,9 +3708,86 @@ void qdf_trace_display(void)
 }
 qdf_export_symbol(qdf_trace_display);
 
+#ifdef WLAN_MAX_LOGS_PER_SEC
+static qdf_time_t __log_window_end;
+static qdf_atomic_t __log_window_count;
+uint32_t qdf_rl_print_count = WLAN_MAX_LOGS_PER_SEC;
+uint32_t qdf_rl_print_time = 1;
+uint32_t qdf_rl_print_suppressed;
+
+/**
+ * qdf_detected_excessive_logging() - Excessive logging detected
+ *
+ * Track logging count using a quasi-tumbling window.
+ * If the max logging count for a given window is exceeded,
+ * return true else fails.
+ *
+ * Return: true/false
+ */
+bool qdf_detected_excessive_logging(void)
+{
+	qdf_time_t now = qdf_system_ticks();
+	bool excessive_prints = false;
+
+	/*
+	 * If 'now' is more recent than the end of the window, reset.
+	 *
+	 * Note: This is not thread safe, and can result in more than one reset.
+	 * For our purposes, this is fine.
+	 */
+	if (!qdf_atomic_read(&__log_window_count)) {
+		__log_window_end = now + (qdf_system_ticks_per_sec * qdf_rl_print_time);
+	} else if (qdf_system_time_after(now, __log_window_end)) {
+		__log_window_end = now + (qdf_system_ticks_per_sec * qdf_rl_print_time);
+		qdf_atomic_set(&__log_window_count, 0);
+	}
+
+	if (qdf_atomic_inc_return(&__log_window_count) > qdf_rl_print_count)
+		excessive_prints = true;
+
+	return excessive_prints;
+}
+
+void qdf_rl_print_count_set(uint32_t rl_print_count)
+{
+	qdf_rl_print_count = rl_print_count;
+}
+
+qdf_export_symbol(qdf_rl_print_count_set);
+
+void qdf_rl_print_time_set(uint32_t rl_print_time)
+{
+	qdf_rl_print_time = rl_print_time;
+}
+
+qdf_export_symbol(qdf_rl_print_time_set);
+
+void qdf_rl_print_suppressed_log(void)
+{
+	if (qdf_rl_print_suppressed) {
+		pr_err("QDF Ratelimiting: %d prints suppressed",
+		       qdf_rl_print_suppressed);
+		qdf_rl_print_suppressed = 0;
+	}
+}
+
+void qdf_rl_print_suppressed_inc(void)
+{
+	qdf_rl_print_suppressed++;
+}
+#else
+#define qdf_rl_print_suppressed_log()
+#define qdf_rl_print_suppressed_inc()
+#endif /* WLAN_MAX_LOGS_PER_SEC */
+
 #ifdef QDF_TRACE_PRINT_ENABLE
 static inline void print_to_console(char *str_buffer)
 {
+	if (qdf_in_interrupt() && qdf_detected_excessive_logging()) {
+		qdf_rl_print_suppressed_inc();
+		return;
+	}
+	qdf_rl_print_suppressed_log();
 	pr_err("%s\n", str_buffer);
 }
 #else
@@ -3650,7 +4192,6 @@ static void set_default_trace_levels(struct category_info *cinfo)
 		[QDF_MODULE_ID_DISA] = QDF_TRACE_LEVEL_NONE,
 		[QDF_MODULE_ID_GREEN_AP] = QDF_TRACE_LEVEL_ERROR,
 		[QDF_MODULE_ID_FTM] = QDF_TRACE_LEVEL_ERROR,
-		[QDF_MODULE_ID_EXTAP] = QDF_TRACE_LEVEL_NONE,
 		[QDF_MODULE_ID_FD] = QDF_TRACE_LEVEL_ERROR,
 		[QDF_MODULE_ID_OCB] = QDF_TRACE_LEVEL_ERROR,
 		[QDF_MODULE_ID_IPA] = QDF_TRACE_LEVEL_NONE,
@@ -3663,14 +4204,13 @@ static void set_default_trace_levels(struct category_info *cinfo)
 		[QDF_MODULE_ID_CMN_MLME] = QDF_TRACE_LEVEL_INFO,
 		[QDF_MODULE_ID_BSSCOLOR] = QDF_TRACE_LEVEL_ERROR,
 		[QDF_MODULE_ID_CFR] = QDF_TRACE_LEVEL_ERROR,
-		[QDF_MODULE_ID_TX_CAPTURE] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_TX_CAPTURE] = QDF_TRACE_LEVEL_FATAL,
 		[QDF_MODULE_ID_INTEROP_ISSUES_AP] = QDF_TRACE_LEVEL_NONE,
-		[QDF_MODULE_ID_BLACKLIST_MGR] = QDF_TRACE_LEVEL_NONE,
+		[QDF_MODULE_ID_DENYLIST_MGR] = QDF_TRACE_LEVEL_NONE,
 		[QDF_MODULE_ID_QLD] = QDF_TRACE_LEVEL_ERROR,
 		[QDF_MODULE_ID_DYNAMIC_MODE_CHG] = QDF_TRACE_LEVEL_INFO,
 		[QDF_MODULE_ID_COEX] = QDF_TRACE_LEVEL_ERROR,
 		[QDF_MODULE_ID_MON_FILTER] = QDF_TRACE_LEVEL_INFO,
-		[QDF_MODULE_ID_ANY] = QDF_TRACE_LEVEL_INFO,
 		[QDF_MODULE_ID_PKT_CAPTURE] = QDF_TRACE_LEVEL_NONE,
 		[QDF_MODULE_ID_RPTR] = QDF_TRACE_LEVEL_INFO,
 		[QDF_MODULE_ID_6GHZ] = QDF_TRACE_LEVEL_ERROR,
@@ -3679,6 +4219,43 @@ static void set_default_trace_levels(struct category_info *cinfo)
 		[QDF_MODULE_ID_GPIO] = QDF_TRACE_LEVEL_NONE,
 		[QDF_MODULE_ID_IFMGR] = QDF_TRACE_LEVEL_ERROR,
 		[QDF_MODULE_ID_DIAG] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_DP_INIT] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_TX] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_RX] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_STATS] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_HTT] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_PEER] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_RX_ERROR] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_HTT_TX_STATS] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_RX_MON_STATUS] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_RX_MON_DEST] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_REO] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_TX_COMP] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_VDEV] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DP_CDP] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_TSO] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_ME] = QDF_TRACE_LEVEL_INFO,
+		[QDF_MODULE_ID_QWRAP] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_DBDC_REP] = QDF_TRACE_LEVEL_FATAL,
+		[QDF_MODULE_ID_EXT_AP] = QDF_TRACE_LEVEL_NONE,
+		[QDF_MODULE_ID_MLO] = QDF_TRACE_LEVEL_INFO,
+		[QDF_MODULE_ID_MLOIE] = QDF_TRACE_LEVEL_INFO,
+		[QDF_MODULE_ID_MBSS] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_MON] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_MGMT_RX_REO] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_TWT] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_WLAN_PRE_CAC] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_T2LM] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_DP_SAWF] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_SCS] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_DP_UMAC_RESET] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_COAP] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_FTM_TIME_SYNC] = QDF_TRACE_LEVEL_NONE,
+		[QDF_MODULE_ID_AFC] = QDF_TRACE_LEVEL_NONE,
+		[QDF_MODULE_ID_WIFI_RADAR] = QDF_TRACE_LEVEL_NONE,
+		[QDF_MODULE_ID_TARGET] = QDF_TRACE_LEVEL_NONE,
+		[QDF_MODULE_ID_QMI] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_ANY] = QDF_TRACE_LEVEL_INFO,
 	};
 
 	for (i = 0; i < MAX_SUPPORTED_CATEGORY; i++) {
@@ -3719,6 +4296,65 @@ void qdf_shared_print_ctrl_init(void)
 			"LOG_SHARED_OBJ");
 }
 qdf_export_symbol(qdf_shared_print_ctrl_init);
+#endif
+
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+QDF_STATUS qdf_module_param_handler(void *context, const char *str_param,
+				    const char *str)
+{
+	QDF_STATUS status = QDF_STATUS_E_FAILURE;
+	uint16_t param = 0;
+	uint32_t flush_tmr_prd;
+	bool dump_flag;
+
+	while (param < QDF_PARAM_MAX) {
+		if (qdf_str_eq(qdf_module_param[param], str_param)) {
+			switch (param) {
+			case MEM_DEBUG_DISABLED:
+				status = qdf_mem_debug_disabled_config_set(str);
+				break;
+			case QDF_DBG_MASK:
+				status = qdf_int32_parse(str, &qdf_dbg_mask);
+				break;
+			case PREALLOC_DISABLED:
+				status = qdf_prealloc_disabled_config_set(str);
+				break;
+			case QDF_LOG_DUMP_AT_KERNEL_ENABLE:
+				status = qdf_bool_parse(str, &dump_flag);
+				qdf_log_dump_at_kernel_enable = dump_flag;
+				break;
+			case QDF_DBG_ARR:
+				qdf_dbg_arr[0] = (char *)str;
+				status = QDF_STATUS_SUCCESS;
+				break;
+			case QDF_LOG_FLUSH_TIMER_PERIOD:
+				status = qdf_uint32_parse(str, &flush_tmr_prd);
+				qdf_log_flush_timer_period = flush_tmr_prd;
+				break;
+			default:
+				break;
+			}
+			return status;
+		}
+		param++;
+	}
+
+	return QDF_STATUS_SUCCESS;
+}
+
+void qdf_initialize_module_param_from_ini(void)
+{
+	QDF_STATUS status;
+	char *path = QDF_WIFI_MODULE_PARAMS_FILE;
+
+	status = qdf_ini_parse(path, NULL, qdf_module_param_handler, NULL);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		QDF_TRACE_ERROR(QDF_MODULE_ID_QDF,
+				"Failed to parse *.ini file @ %s; status:%d",
+				path, status);
+		return;
+	}
+}
 #endif
 
 QDF_STATUS qdf_print_set_category_verbose(unsigned int idx,
@@ -4046,3 +4682,128 @@ qdf_export_symbol(__qdf_bug);
 #endif /* CONFIG_SLUB_DEBUG */
 #endif /* PANIC_ON_BUG */
 
+#ifdef WLAN_QCOM_VA_MINIDUMP
+static bool qdf_va_md_initialized;
+static qdf_list_t qdf_va_md_list;
+static qdf_spinlock_t qdf_va_md_list_lock;
+#define QDF_MINIDUMP_LIST_SIZE 128
+
+struct qdf_va_md_entry {
+	qdf_list_node_t node;
+	struct va_md_entry data;
+};
+
+static int qdf_va_md_notif_handler(struct notifier_block *this,
+				   unsigned long event, void *ptr)
+{
+	struct qdf_va_md_entry *entry;
+	struct qdf_va_md_entry *next;
+
+	qdf_spin_lock_irqsave(&qdf_va_md_list_lock);
+	qdf_list_for_each_del(&qdf_va_md_list, entry, next, node) {
+		qcom_va_md_add_region(&entry->data);
+	}
+
+	qdf_spin_unlock_irqrestore(&qdf_va_md_list_lock);
+	return NOTIFY_OK;
+}
+
+static struct notifier_block qdf_va_md_notif_blk = {
+	.notifier_call = qdf_va_md_notif_handler,
+	.priority = INT_MAX,
+};
+
+void __qdf_minidump_init(void)
+{
+	int ret;
+
+	if (qdf_va_md_initialized)
+		return;
+
+	qdf_spinlock_create(&qdf_va_md_list_lock);
+	qdf_list_create(&qdf_va_md_list, QDF_MINIDUMP_LIST_SIZE);
+	ret = qcom_va_md_register(qdf_trace_wlan_modname(),
+				  &qdf_va_md_notif_blk);
+	qdf_va_md_initialized = !ret;
+}
+
+qdf_export_symbol(__qdf_minidump_init);
+
+void __qdf_minidump_deinit(void)
+{
+	struct qdf_va_md_entry *entry;
+	struct qdf_va_md_entry *next;
+
+	if (!qdf_va_md_initialized)
+		return;
+
+	qdf_va_md_initialized = false;
+	qcom_va_md_unregister(qdf_trace_wlan_modname(),
+			      &qdf_va_md_notif_blk);
+	qdf_spin_lock_irqsave(&qdf_va_md_list_lock);
+	qdf_list_for_each_del(&qdf_va_md_list, entry, next, node) {
+		qdf_list_remove_node(&qdf_va_md_list, &entry->node);
+		qdf_mem_free(entry);
+	}
+
+	qdf_list_destroy(&qdf_va_md_list);
+	qdf_spin_unlock_irqrestore(&qdf_va_md_list_lock);
+	qdf_spinlock_destroy(&qdf_va_md_list_lock);
+}
+
+qdf_export_symbol(__qdf_minidump_deinit);
+
+void __qdf_minidump_log(void *start_addr, size_t size, const char *name)
+{
+	struct qdf_va_md_entry *entry;
+	QDF_STATUS status;
+
+	if (!qdf_va_md_initialized)
+		return;
+
+	entry = qdf_mem_malloc(sizeof(*entry));
+	if (!entry) {
+		qdf_err("malloc failed for %s: %pK, %zu",
+			name, start_addr, size);
+		return;
+	}
+
+	qdf_str_lcopy(entry->data.owner, name, sizeof(entry->data.owner));
+	entry->data.vaddr = (unsigned long)start_addr;
+	entry->data.size = size;
+
+	qdf_spin_lock_irqsave(&qdf_va_md_list_lock);
+	status = qdf_list_insert_front(&qdf_va_md_list, &entry->node);
+	qdf_spin_unlock_irqrestore(&qdf_va_md_list_lock);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		qdf_err("Failed to insert qdf va md entry, status %d", status);
+		qdf_mem_free(entry);
+	}
+}
+
+qdf_export_symbol(__qdf_minidump_log);
+
+void __qdf_minidump_remove(void *addr, size_t size, const char *name)
+{
+	struct qdf_va_md_entry *entry;
+	struct qdf_va_md_entry *next;
+
+	if (!qdf_va_md_initialized)
+		return;
+
+	qdf_spin_lock_irqsave(&qdf_va_md_list_lock);
+	qdf_list_for_each_del(&qdf_va_md_list, entry, next, node) {
+		if (entry->data.vaddr == (unsigned long)addr &&
+		    entry->data.size == size &&
+		    !qdf_str_cmp(entry->data.owner, name)) {
+			qdf_list_remove_node(&qdf_va_md_list, &entry->node);
+			qdf_mem_free(entry);
+			break;
+		}
+	}
+
+	qdf_spin_unlock_irqrestore(&qdf_va_md_list_lock);
+}
+
+qdf_export_symbol(__qdf_minidump_remove);
+#endif

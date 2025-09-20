@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -27,7 +28,6 @@
 
 /* Include Files */
 #include  <qdf_types.h>         /* For QDF_MODULE_ID... */
-#include  <stdarg.h>            /* For va_list... */
 #include  <qdf_status.h>
 #include  <qdf_nbuf.h>
 #include  <i_qdf_types.h>
@@ -180,13 +180,59 @@ typedef struct s_qdf_trace_data {
 	uint16_t dump_count;
 } t_qdf_trace_data;
 
+#ifdef CONNECTIVITY_DIAG_EVENT
+/**
+ * enum diag_dp_tx_rx_status - TX/RX packet status
+ * @DIAG_TX_RX_STATUS_INVALID: default invalid status
+ * @DIAG_TX_RX_STATUS_OK: successfully sent + acked
+ * @DIAG_TX_RX_STATUS_DISCARD: queued but not sent over air
+ * @DIAG_TX_RX_STATUS_NO_ACK: packet sent but no ack received
+ * @DIAG_TX_RX_STATUS_DROP: packet dropped due to congestion
+ * @DIAG_TX_RX_STATUS_DOWNLOAD_SUCC: packet delivered to target
+ * @DIAG_TX_RX_STATUS_DEFAULT: default status
+ * @DIAG_TX_RX_STATUS_MAX:
+ */
+enum diag_dp_tx_rx_status {
+	DIAG_TX_RX_STATUS_INVALID,
+	DIAG_TX_RX_STATUS_OK,
+	DIAG_TX_RX_STATUS_FW_DISCARD,
+	DIAG_TX_RX_STATUS_NO_ACK,
+	DIAG_TX_RX_STATUS_DROP,
+	DIAG_TX_RX_STATUS_DOWNLOAD_SUCC,
+	DIAG_TX_RX_STATUS_DEFAULT,
+	DIAG_TX_RX_STATUS_MAX
+};
+
+/**
+ * enum diag_tx_status - Used by attribute
+ * @DIAG_TX_STATUS_FAIL: Indicates frame is not sent over the air.
+ * @DIAG_TX_STATUS_NO_ACK: Indicates packet sent but acknowledgment
+ * is not received.
+ * @DIAG_TX_STATUS_ACK: Indicates the frame is successfully sent and
+ * acknowledged.
+ */
+enum diag_tx_status {
+	DIAG_TX_STATUS_FAIL = 1,
+	DIAG_TX_STATUS_NO_ACK = 2,
+	DIAG_TX_STATUS_ACK = 3
+};
+
+/**
+ * wlan_get_diag_tx_status() - Gives the diag logging specific tx status
+ * @tx_status: fw specific TX status
+ *
+ * Returns TX status specified in enum diag_tx_status
+ */
+enum diag_tx_status wlan_get_diag_tx_status(enum qdf_dp_tx_rx_status tx_status);
+#endif
+
 #define CASE_RETURN_STRING(str) case ((str)): return (uint8_t *)(# str);
 
 #ifndef MAX_QDF_DP_TRACE_RECORDS
 #define MAX_QDF_DP_TRACE_RECORDS       2000
 #endif
 
-#define QDF_DP_TRACE_RECORD_SIZE       40
+#define QDF_DP_TRACE_RECORD_SIZE       50 /* bytes */
 #define INVALID_QDF_DP_TRACE_ADDR      0xffffffff
 #define QDF_DP_TRACE_VERBOSITY_HIGH		4
 #define QDF_DP_TRACE_VERBOSITY_MEDIUM		3
@@ -221,7 +267,9 @@ typedef struct s_qdf_trace_data {
  * @QDF_DP_TRACE_FREE_PACKET_PTR_RECORD - tx completion ptr record
  * @QDF_DP_TRACE_LOW_VERBOSITY - below this are part of low verbosity
  * @QDF_DP_TRACE_HDD_TX_PACKET_PTR_RECORD - HDD layer ptr record
+ * @QDF_DP_TRACE_TX_PACKET_PTR_RECORD - DP component Tx ptr record
  * @QDF_DP_TRACE_LI_DP_TX_PACKET_PTR_RECORD - Lithium DP layer ptr record
+ * @QDF_DP_TRACE_RX_PACKET_PTR_RECORD - DP component Rx ptr record
  * @QDF_DP_TRACE_RX_HDD_PACKET_PTR_RECORD - HDD RX record
  * @QDF_DP_TRACE_CE_PACKET_PTR_RECORD - CE layer ptr record
  * @QDF_DP_TRACE_CE_FAST_PACKET_PTR_RECORD- CE fastpath ptr record
@@ -267,7 +315,9 @@ enum  QDF_DP_TRACE_ID {
 	QDF_DP_TRACE_FREE_PACKET_PTR_RECORD,
 	QDF_DP_TRACE_LOW_VERBOSITY,
 	QDF_DP_TRACE_HDD_TX_PACKET_PTR_RECORD,
+	QDF_DP_TRACE_TX_PACKET_PTR_RECORD,
 	QDF_DP_TRACE_LI_DP_TX_PACKET_PTR_RECORD,
+	QDF_DP_TRACE_RX_PACKET_PTR_RECORD,
 	QDF_DP_TRACE_RX_HDD_PACKET_PTR_RECORD,
 	QDF_DP_TRACE_CE_PACKET_PTR_RECORD,
 	QDF_DP_TRACE_CE_FAST_PACKET_PTR_RECORD,
@@ -350,6 +400,8 @@ struct qdf_dp_trace_ptr_buf {
  * @type: packet type
  * @subtype: packet subtype
  * @dir: direction
+ * @proto_priv_data: protocol private data
+ * can be stored in this.
  */
 struct qdf_dp_trace_proto_buf {
 	struct qdf_mac_addr sa;
@@ -358,6 +410,11 @@ struct qdf_dp_trace_proto_buf {
 	uint8_t type;
 	uint8_t subtype;
 	uint8_t dir;
+	/* for ICMP priv data is bit offset 38 to 42
+	 * 38-40 ICMP_ICMP_ID and
+	 * 40-42 ICMP_SEQ_NUM_OFFSET
+	 */
+	uint32_t proto_priv_data;
 };
 
 /**
@@ -538,6 +595,8 @@ enum qdf_dpt_debugfs_state {
 	QDF_DPT_DEBUGFS_STATE_SHOW_COMPLETE,
 };
 
+#define QDF_WIFI_MODULE_PARAMS_FILE "wifi_module_param.ini"
+
 typedef void (*tp_qdf_trace_cb)(void *p_mac, tp_qdf_trace_record, uint16_t);
 typedef void (*tp_qdf_state_info_cb) (char **buf, uint16_t *size);
 #ifdef WLAN_FEATURE_MEMDUMP_ENABLE
@@ -595,6 +654,59 @@ QDF_STATUS qdf_trace_spin_lock_init(void)
 }
 #endif
 #endif
+
+#ifdef WLAN_MAX_LOGS_PER_SEC
+/**
+ * qdf_detected_excessive_logging() - Excessive logging detected
+ *
+ * Track logging count using a quasi-tumbling window.
+ * If the max logging count for a given window is exceeded,
+ * return true else fails.
+ *
+ * Return: true/false
+ */
+bool qdf_detected_excessive_logging(void);
+
+/**
+ * qdf_rl_print_count_set() - set the ratelimiting print count
+ * @rl_print_time: ratelimiting print count
+ *
+ * Return: none
+ */
+void qdf_rl_print_count_set(uint32_t rl_print_count);
+
+/**
+ * qdf_rl_print_time_set() - set the ratelimiting print time
+ * @rl_print_time: ratelimiting print time
+ *
+ * Return: none
+ */
+void qdf_rl_print_time_set(uint32_t rl_print_time);
+
+/**
+ * qdf_rl_print_suppressed_log() - print the suppressed logs count
+ *
+ * Return: none
+ */
+void qdf_rl_print_suppressed_log(void);
+
+/**
+ * qdf_rl_print_suppressed_inc() - increment the suppressed logs count
+ *
+ * Return: none
+ */
+void qdf_rl_print_suppressed_inc(void);
+
+#else /* WLAN_MAX_LOGS_PER_SEC */
+static inline bool qdf_detected_excessive_logging(void)
+{
+	return false;
+}
+static inline void qdf_rl_print_count_set(uint32_t rl_print_count) {}
+static inline void qdf_rl_print_time_set(uint32_t rl_print_time) {}
+static inline void qdf_rl_print_suppressed_log(void) {}
+static inline void qdf_rl_print_suppressed_inc(void) {}
+#endif /* WLAN_MAX_LOGS_PER_SEC */
 
 #ifdef ENABLE_MTRACE_LOG
 /**
@@ -667,11 +779,13 @@ void qdf_dp_set_no_of_record(uint32_t val);
  * @skb: skb pointer
  * @dir: direction
  * @pdev_id: pdev_id
+ * @op_mode: Vdev Operation mode
  *
  * Return: true: some protocol was logged, false: no protocol was logged.
  */
 bool qdf_dp_trace_log_pkt(uint8_t vdev_id, struct sk_buff *skb,
-			  enum qdf_proto_dir dir, uint8_t pdev_id);
+			  enum qdf_proto_dir dir, uint8_t pdev_id,
+			  enum QDF_OPMODE op_mode);
 
 void qdf_dp_trace_init(bool live_mode_config, uint8_t thresh,
 				uint16_t time_limit, uint8_t verbosity,
@@ -791,9 +905,25 @@ enum qdf_dp_tx_rx_status qdf_dp_get_status_from_htt(uint8_t status);
  * Return : the status that from qdf_dp_tx_rx_status
  */
 enum qdf_dp_tx_rx_status qdf_dp_get_status_from_a_status(uint8_t status);
+/**
+ * qdf_dp_trace_ptr() - record dptrace
+ * @code: dptrace code
+ * @pdev_id: pdev_id
+ * @data: data
+ * @size: size of data
+ * @msdu_id: msdu_id
+ * @status: return status
+ * @qdf_tx_status: qdf tx rx status
+ * @op_mode: Vdev Operation mode
+ *
+ * Return: none
+ */
 void qdf_dp_trace_ptr(qdf_nbuf_t nbuf, enum QDF_DP_TRACE_ID code,
 		      uint8_t pdev_id, uint8_t *data, uint8_t size,
-		      uint16_t msdu_id, uint16_t status);
+		      uint16_t msdu_id, uint16_t buf_arg_status,
+		      enum qdf_dp_tx_rx_status qdf_tx_status,
+		      enum QDF_OPMODE op_mode);
+
 void qdf_dp_trace_throttle_live_mode(bool high_bw_request);
 
 /**
@@ -833,14 +963,15 @@ uint8_t qdf_dp_get_no_of_record(void);
  * @dir: direction
  * @pdev_id: pdev id
  * @print: to print this proto pkt or not
- *
+ * @proto_priv_data: protocol specific private
+ * data.
  * Return: none
  */
 void
 qdf_dp_trace_proto_pkt(enum QDF_DP_TRACE_ID code, uint8_t vdev_id,
 	uint8_t *sa, uint8_t *da, enum qdf_proto_type type,
 	enum qdf_proto_subtype subtype, enum qdf_proto_dir dir,
-	uint8_t pdev_id, bool print);
+	uint8_t pdev_id, bool print, uint32_t proto_priv_data);
 
 void qdf_dp_trace_disable_live_mode(void);
 void qdf_dp_trace_enable_live_mode(void);
@@ -953,7 +1084,8 @@ void qdf_dp_track_noack_check(qdf_nbuf_t nbuf, enum qdf_proto_subtype *subtype);
 #else
 static inline
 bool qdf_dp_trace_log_pkt(uint8_t vdev_id, struct sk_buff *skb,
-			  enum qdf_proto_dir dir, uint8_t pdev_id)
+			  enum qdf_proto_dir dir, uint8_t pdev_id,
+			  enum QDF_OPMODE op_mode)
 {
 	return false;
 }
@@ -1360,6 +1492,24 @@ int qdf_print_ctrl_register(const struct category_info *cinfo,
 			    void *custom_ctx,
 			    const char *pctrl_name);
 
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+/**
+ * qdf_update_module_param() - Update qdf module params
+ *
+ *
+ * Read the file which has wifi module params, parse and update
+ * qdf module params.
+ *
+ * Return: void
+ */
+void qdf_initialize_module_param_from_ini(void);
+#else
+static inline
+void qdf_initialize_module_param_from_ini(void)
+{
+}
+#endif
+
 /**
  * qdf_shared_print_ctrl_init() - Initialize the shared print ctrl obj with
  *                                all categories set to the default level
@@ -1500,6 +1650,30 @@ bool qdf_print_get_node_flag(unsigned int idx);
 
 #endif
 
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+/**
+ * qdf_module_param_handler() - Function to store module params
+ *
+ * @context : NULL, unused.
+ * @key : Name of the module param
+ * @value: Value of the module param
+ *
+ * Handler function to be called from qdf_ini_parse()
+ * function when a valid parameter is found in a file.
+ *
+ * Return : QDF_STATUS_SUCCESS on Success
+ */
+QDF_STATUS qdf_module_param_handler(void *context, const char *key,
+				    const char *value);
+#else
+static inline
+QDF_STATUS qdf_module_param_handler(void *context, const char *key,
+				    const char *value)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
+
 /**
  * qdf_logging_init() - Initialize msg logging functionality
  *
@@ -1528,25 +1702,53 @@ void qdf_logging_exit(void);
 int qdf_sprint_symbol(char *buffer, void *addr);
 
 /**
+ * qdf_minidump_init() - Initialize minidump functionality
+ *
+ *
+ * Return: void
+ */
+static inline
+void qdf_minidump_init(void)
+{
+	__qdf_minidump_init();
+}
+
+/**
+ * qdf_minidump_deinit() - De-initialize minidump functionality
+ *
+ *
+ * Return: void
+ */
+static inline
+void qdf_minidump_deinit(void)
+{
+	__qdf_minidump_deinit();
+}
+
+/**
  * qdf_minidump_log() - Log memory address to be included in minidump
  * @start_addr: Start address of the memory to be dumped
  * @size: Size in bytes
  * @name: String to identify this entry
  */
 static inline
-void qdf_minidump_log(void *start_addr, size_t size, const char *name)
+void qdf_minidump_log(void *start_addr,
+		      const size_t size, const char *name)
 {
 	__qdf_minidump_log(start_addr, size, name);
 }
 
 /**
  * qdf_minidump_remove() - Remove memory address from minidump
- * @addr: Start address of the memory previously added
+ * @start_addr: Start address of the memory previously added
+ * @size: Size in bytes
+ * @name: String to identify this entry
  */
 static inline
-void qdf_minidump_remove(void *addr)
+void qdf_minidump_remove(void *start_addr,
+			 const size_t size, const char *name)
 {
-	__qdf_minidump_remove(addr);
+	__qdf_minidump_remove(start_addr, size, name);
 }
 
 #endif /* __QDF_TRACE_H */

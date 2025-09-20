@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2017-2018, 2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2017-2018, 2020-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -30,8 +31,8 @@
 #include "wlan_scan_manager_6ghz.h"
 
 /**
- * struct scan_event_listners - listeners interested in a particular scan event
- * @count: number of listners
+ * struct scan_event_listeners - listeners interested in a particular scan event
+ * @count: number of listeners
  * @cb: callback handler
  */
 struct scan_event_listeners {
@@ -50,7 +51,6 @@ bool scm_is_scan_allowed(struct wlan_objmgr_vdev *vdev);
 /**
  * scm_scan_start_req() - scan start req core api
  * @msg: scheduler message object containing start scan req params
- * @req: start scan req params
  *
  * The API to start a scan
  *
@@ -61,7 +61,6 @@ QDF_STATUS scm_scan_start_req(struct scheduler_msg *msg);
 /**
  * scm_scan_cancel_req() - scan cancel req core api
  * @msg: scheduler message object containing stop scan params
- * @req: stop scan params
  *
  * The API to cancel a scan
  *
@@ -127,5 +126,15 @@ QDF_STATUS scm_scan_start_flush_callback(struct scheduler_msg *msg);
  * Return: QDF_STATUS
  */
 QDF_STATUS scm_scan_cancel_flush_callback(struct scheduler_msg *msg);
+
+/**
+ * scm_disable_obss_pdev_scan() - Public API to disable pdev obss scan
+ * @psoc: psoc pointer
+ * @pdev: pdev pointer
+ *
+ * Return: void
+ */
+void scm_disable_obss_pdev_scan(struct wlan_objmgr_psoc *psoc,
+				struct wlan_objmgr_pdev *pdev);
 
 #endif

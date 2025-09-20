@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
  * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -21,9 +21,7 @@
 #include "htc_internal.h"
 #include "htc_credit_history.h"
 #include <qdf_nbuf.h>           /* qdf_nbuf_t */
-
-/* HTC Control message receive timeout msec */
-#define HTC_CONTROL_RX_TIMEOUT     6000
+#include <wbuff.h>
 
 #if defined(WLAN_DEBUG) || defined(DEBUG)
 void debug_dump_bytes(uint8_t *buffer, uint16_t length, char *pDescription)
@@ -74,6 +72,20 @@ static A_STATUS htc_process_trailer(HTC_TARGET *target,
 				    uint8_t *pBuffer,
 				    int Length, HTC_ENDPOINT_ID FromEndpoint);
 
+#ifdef WLAN_FEATURE_CE_RX_BUFFER_REUSE
+static void htc_rx_nbuf_free(qdf_nbuf_t nbuf)
+{
+	nbuf = wbuff_buff_put(nbuf);
+	if (nbuf)
+		qdf_nbuf_free(nbuf);
+}
+#else
+static inline void htc_rx_nbuf_free(qdf_nbuf_t nbuf)
+{
+	return qdf_nbuf_free(nbuf);
+}
+#endif
+
 static void do_recv_completion_pkt(HTC_ENDPOINT *pEndpoint,
 				   HTC_PACKET *pPacket)
 {
@@ -83,7 +95,7 @@ static void do_recv_completion_pkt(HTC_ENDPOINT *pEndpoint,
 				 pEndpoint->Id,
 				 pPacket));
 		if (pPacket)
-			qdf_nbuf_free(pPacket->pPktContext);
+			htc_rx_nbuf_free(pPacket->pPktContext);
 	} else {
 		AR_DEBUG_PRINTF(ATH_DEBUG_RECV,
 				("HTC calling ep %d recv callback on packet %pK\n",
@@ -213,7 +225,7 @@ qdf_nbuf_t rx_sg_to_single_netbuf(HTC_TARGET *target)
 		qdf_mem_copy(anbdata_new, anbdata, qdf_nbuf_len(skb));
 		qdf_nbuf_put_tail(new_skb, qdf_nbuf_len(skb));
 		anbdata_new += qdf_nbuf_len(skb);
-		qdf_nbuf_free(skb);
+		htc_rx_nbuf_free(skb);
 		skb = qdf_nbuf_queue_remove(rx_sg_queue);
 	} while (skb);
 
@@ -223,7 +235,7 @@ qdf_nbuf_t rx_sg_to_single_netbuf(HTC_TARGET *target)
 _failed:
 
 	while ((skb = qdf_nbuf_queue_remove(rx_sg_queue)) != NULL)
-		qdf_nbuf_free(skb);
+		htc_rx_nbuf_free(skb);
 
 	RESET_RX_SG_CONFIG(target);
 	return NULL;
@@ -435,7 +447,6 @@ QDF_STATUS htc_rx_completion_handler(void *Context, qdf_nbuf_t netbuf,
 				/* Requester will clear this flag */
 				target->CtrlResponseProcessing = true;
 				UNLOCK_HTC_RX(target);
-
 				qdf_event_set(&target->ctrl_response_valid);
 				break;
 #ifdef HTC_MSG_WAKEUP_FROM_SUSPEND_ID
@@ -482,7 +493,7 @@ QDF_STATUS htc_rx_completion_handler(void *Context, qdf_nbuf_t netbuf,
 				break;
 			}
 
-			qdf_nbuf_free(netbuf);
+			htc_rx_nbuf_free(netbuf);
 			netbuf = NULL;
 			break;
 		}
@@ -520,7 +531,7 @@ _out:
 #endif
 
 	if (netbuf)
-		qdf_nbuf_free(netbuf);
+		htc_rx_nbuf_free(netbuf);
 
 	return status;
 
@@ -625,7 +636,7 @@ QDF_STATUS htc_wait_recv_ctrl_message(HTC_TARGET *target)
 
 	/* Wait for BMI request/response transaction to complete */
 	if (qdf_wait_single_event(&target->ctrl_response_valid,
-				  HTC_CONTROL_RX_TIMEOUT)) {
+				  (target->HTCInitInfo.htc_ready_timeout_ms))) {
 		AR_DEBUG_PRINTF(ATH_DEBUG_ERR,
 			("Failed to receive control message\n"));
 		return QDF_STATUS_E_FAILURE;

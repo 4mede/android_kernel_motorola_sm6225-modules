@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2018,2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018,2020-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -22,6 +23,7 @@
 #include <qdf_lock.h>
 #include <qdf_hang_event_notifier.h>
 #include <qdf_notifier.h>
+#include "qdf_ssr_driver_dump.h"
 
 struct HTC_CREDIT_HISTORY {
 	enum htc_credit_exchange_type type;
@@ -43,7 +45,7 @@ struct HTC_CREDIT_HISTORY htc_credit_history_buffer[HTC_CREDIT_HISTORY_MAX];
 
 #define NUM_HANG_CREDIT_HISTORY 1
 
-#ifdef QCA_WIFI_NAPIER_EMULATION
+#ifdef QCA_WIFI_EMULATION
 #define HTC_EMULATION_DELAY_IN_MS 20
 /**
  * htc_add_delay(): Adds a delay in before proceeding, only for emulation
@@ -60,11 +62,30 @@ static inline void htc_add_emulation_delay(void)
 }
 #endif
 
+void htc_credit_history_deinit(void)
+{
+	qdf_ssr_driver_dump_unregister_region("htc_credit_history_length");
+	qdf_ssr_driver_dump_unregister_region("htc_credit_history_idx");
+	qdf_ssr_driver_dump_unregister_region("htc_credit");
+	qdf_minidump_remove(&htc_credit_history_buffer,
+			    sizeof(htc_credit_history_buffer), "htc_credit");
+}
 void htc_credit_history_init(void)
 {
 	qdf_spinlock_create(&g_htc_credit_lock);
 	g_htc_credit_history_idx = 0;
 	g_htc_credit_history_length = 0;
+	qdf_minidump_log(&htc_credit_history_buffer,
+			 sizeof(htc_credit_history_buffer), "htc_credit");
+	qdf_ssr_driver_dump_register_region("htc_credit",
+					    htc_credit_history_buffer,
+					    sizeof(htc_credit_history_buffer));
+	qdf_ssr_driver_dump_register_region("htc_credit_history_idx",
+					    &g_htc_credit_history_idx,
+					    sizeof(g_htc_credit_history_idx));
+	qdf_ssr_driver_dump_register_region("htc_credit_history_length",
+					    &g_htc_credit_history_length,
+					    sizeof(g_htc_credit_history_length));
 }
 
 /**

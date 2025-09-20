@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -40,6 +41,10 @@
 /*Buckets for latency between 250 to 500 ms*/
 #define HIF_SCHED_LATENCY_BUCKET_251_500 500
 
+#ifndef IRQ_DISABLED_MAX_DURATION_NS
+#define IRQ_DISABLED_MAX_DURATION_NS 100000000
+#endif
+
 struct hif_exec_context;
 
 struct hif_execution_ops {
@@ -57,14 +62,14 @@ struct hif_execution_ops {
  * @context_name: a pointer to a const string for debugging.
  *		this should help whenever there could be ambiguity
  *		in what type of context the void* context points to
- * @irq: irq handle coresponding to hw block
- * @os_irq: irq handle for irq_afinity
+ * @irq: irq handle corresponding to hw block
+ * @os_irq: irq handle for irq_affinity
  * @cpu: the cpu this context should be affined to
  * @work_complete: Function call called when leaving the execution context to
  *	determine if this context should reschedule or wait for an interrupt.
  *	This function may be used as a hook for post processing.
  *
- * @sched_latency_stats: schdule latency stats for different latency buckets
+ * @sched_latency_stats: schedule latency stats for different latency buckets
  * @tstamp: timestamp when napi poll happens
  * @irq_disable: called before scheduling the context.
  * @irq_enable: called when the context leaves polling mode
@@ -75,6 +80,8 @@ struct hif_execution_ops {
  * @force_break: flag to indicate if HIF execution context was forced to return
  *		 to HIF. This means there is more work to be done. Hence do not
  *		 call napi_complete.
+ * @force_napi_complete: do a force napi_complete when this flag is set to -1
+ * @irq_disabled_start_time: irq disabled start time for single MSI
  */
 struct hif_exec_context {
 	struct hif_execution_ops *sched_ops;
@@ -106,10 +113,15 @@ struct hif_exec_context {
 	enum hif_exec_type type;
 	unsigned long long poll_start_time;
 	bool force_break;
-#ifdef HIF_CPU_PERF_AFFINE_MASK
+#if defined(FEATURE_IRQ_AFFINITY) || defined(HIF_CPU_PERF_AFFINE_MASK) || \
+	defined(HIF_CPU_CLEAR_AFFINITY)
 	/* Stores the affinity hint mask for each WLAN IRQ */
 	qdf_cpu_mask new_cpu_mask[HIF_MAX_GRP_IRQ];
 #endif
+#ifdef FEATURE_IRQ_AFFINITY
+	qdf_atomic_t force_napi_complete;
+#endif
+	unsigned long long irq_disabled_start_time;
 };
 
 /**
@@ -160,18 +172,28 @@ struct hif_exec_context *hif_exec_get_ctx(struct hif_opaque_softc *hif,
 					  uint8_t id);
 void hif_exec_kill(struct hif_opaque_softc *scn);
 
-#ifdef HIF_CPU_PERF_AFFINE_MASK
+#if defined(HIF_CPU_PERF_AFFINE_MASK) || defined(FEATURE_IRQ_AFFINITY)
 /**
  * hif_pci_irq_set_affinity_hint() - API to set IRQ affinity
  * @hif_ext_group: hif_ext_group to extract the irq info
+ * @perf: affine to perf cluster or non-perf cluster
  *
- * This function will set the IRQ affinity to the gold cores
- * only for defconfig builds
+ * This function will set the IRQ affinity to gold cores
+ * or silver cores based on perf flag
  *
  * Return: none
  */
-void hif_pci_irq_set_affinity_hint(
-	struct hif_exec_context *hif_ext_group);
+void hif_pci_irq_set_affinity_hint(struct hif_exec_context *hif_ext_group,
+				   bool perf);
+#else
+static inline
+void hif_pci_irq_set_affinity_hint(struct hif_exec_context *hif_ext_group,
+				   bool perf)
+{
+}
+#endif
+
+#ifdef HIF_CPU_PERF_AFFINE_MASK
 
 /**
  * hif_pci_ce_irq_set_affinity_hint() - API to set IRQ affinity
@@ -194,10 +216,6 @@ static inline void hif_ce_irq_remove_affinity_hint(int irq)
 	hif_irq_affinity_remove(irq);
 }
 #else
-static inline void hif_pci_irq_set_affinity_hint(
-	struct hif_exec_context *hif_ext_group)
-{
-}
 
 static inline void hif_pci_ce_irq_set_affinity_hint(
 	struct hif_softc *scn)
@@ -208,5 +226,25 @@ static inline void hif_ce_irq_remove_affinity_hint(int irq)
 {
 }
 #endif /* ifdef HIF_CPU_PERF_AFFINE_MASK */
+
+#ifdef HIF_CPU_CLEAR_AFFINITY
+/*
+ * hif_pci_config_irq_clear_affinity() - Remove cpu affinity of IRQ
+ * @scn: HIF handle
+ * @intr_ctxt: interrupt group index
+ * @cpu: CPU core to clear
+ *
+ * Return: None
+ */
+void hif_pci_config_irq_clear_cpu_affinity(struct hif_softc *scn,
+					   int intr_ctxt_id, int cpu);
+#else
+static inline
+void hif_pci_config_irq_clear_cpu_affinity(struct hif_softc *scn,
+					   int intr_ctxt_id, int cpu)
+{
+}
+#endif /* HIF_CPU_CLEAR_AFFINITY */
+
 #endif
 

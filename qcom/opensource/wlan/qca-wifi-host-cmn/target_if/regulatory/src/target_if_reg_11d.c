@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -49,7 +49,7 @@ bool tgt_if_regulatory_is_11d_offloaded(struct wlan_objmgr_psoc *psoc)
  * tgt_reg_11d_new_cc_handler() - 11d country code event handler
  * @handle: scn handle
  * @event_buf: event buffer
- * @len: legth of @event_buf
+ * @len: length of @event_buf
  *
  * Return: 0 on success
  */

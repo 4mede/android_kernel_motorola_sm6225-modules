@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -25,7 +26,7 @@
 /**
  * __qdf_ipa_wdi_meter_evt_type_t - type of event client callback is
  * for AP+STA mode metering
- * @IPA_GET_WDI_SAP_STATS: get IPA_stats betwen SAP and STA -
+ * @IPA_GET_WDI_SAP_STATS: get IPA_stats between SAP and STA -
  *			use ipa_get_wdi_sap_stats structure
  * @IPA_SET_WIFI_QUOTA: set quota limit on STA -
  *			use ipa_set_wifi_quota structure
@@ -483,10 +484,37 @@ typedef enum ipa_rm_resource_name __qdf_ipa_rm_resource_name_t;
 typedef enum ipa_wlan_event __qdf_ipa_wlan_event_t;
 typedef struct ipa_wlan_msg __qdf_ipa_wlan_msg_t;
 
+#ifdef IPA_WDS_EASYMESH_FEATURE
+/**
+ * __qdf_ipa_ast_info_type_t - AST entry create/update information
+ */
+typedef struct ipa_ast_info_type __qdf_ipa_ast_info_type_t;
+
+#define QDF_IPA_WLAN_MSG_WDS_UPDATE(ipa_msg)	\
+	(((struct ipa_wlan_msg *)(ipa_msg))->ast_update)
+#endif
+
 #define QDF_IPA_WLAN_MSG_NAME(ipa_msg)	\
 	(((struct ipa_wlan_msg *)(ipa_msg))->name)
 #define QDF_IPA_WLAN_MSG_MAC_ADDR(ipa_msg)	\
 	(((struct ipa_wlan_msg *)(ipa_msg))->mac_addr)
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+#define QDF_IPA_WLAN_MSG_NETDEV_IF_ID(ipa_msg)	\
+	(((struct ipa_wlan_msg *)(ipa_msg))->if_index)
+#else
+/**
+ * ipa_wlan_msg_if_index - Netdev interface id
+ */
+struct ipa_wlan_msg_if_index {
+	char name[IPA_RESOURCE_NAME_MAX];
+	uint8_t mac_addr[IPA_MAC_ADDR_SIZE];
+	uint16_t if_index;
+};
+
+#define QDF_IPA_WLAN_MSG_NETDEV_IF_ID(ipa_msg)	\
+	(((struct ipa_wlan_msg_if_index *)(ipa_msg))->if_index)
+#endif
 
 typedef struct ipa_wlan_msg_ex __qdf_ipa_wlan_msg_ex_t;
 
@@ -550,15 +578,27 @@ typedef struct ipa_wlan_hdr_attrib_val __qdf_ipa_wlan_hdr_attrib_val_t;
 #define __QDF_IPA_VOLTAGE_LEVEL IPA_VOLTAGE_SVS
 
 #define __QDF_IPA_CLIENT_WLAN1_PROD IPA_CLIENT_WLAN1_PROD
+#define __QDF_IPA_CLIENT_WLAN3_PROD IPA_CLIENT_WLAN3_PROD
 #define __QDF_IPA_CLIENT_WLAN1_CONS IPA_CLIENT_WLAN1_CONS
 #define __QDF_IPA_CLIENT_WLAN2_CONS IPA_CLIENT_WLAN2_CONS
 #define __QDF_IPA_CLIENT_WLAN3_CONS IPA_CLIENT_WLAN3_CONS
 #define __QDF_IPA_CLIENT_WLAN4_CONS IPA_CLIENT_WLAN4_CONS
+#define __QDF_IPA_CLIENT_WLAN4_PROD IPA_CLIENT_WLAN4_PROD
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)) && \
+	(LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
+#define __QDF_IPA_CLIENT_WLAN_WDI2_CONS IPA_CLIENT_WLAN4_CONS
+#define __QDF_IPA_CLIENT_WLAN_WDI2_PROD IPA_CLIENT_WLAN4_PROD
+#else
+#define __QDF_IPA_CLIENT_WLAN_WDI2_CONS IPA_CLIENT_WLAN1_CONS
+#define __QDF_IPA_CLIENT_WLAN_WDI2_PROD IPA_CLIENT_WLAN1_PROD
+#endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
 #define IPA_LAN_RX_NAPI_SUPPORT
 #endif
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 /*
  * Resume / Suspend
  */
@@ -606,15 +646,6 @@ static inline int __qdf_ipa_put_hdr(u32 hdr_hdl)
 static inline int __qdf_ipa_copy_hdr(struct ipa_ioc_copy_hdr *copy)
 {
 	return ipa_copy_hdr(copy);
-}
-
-/*
- * Messaging
- */
-static inline int __qdf_ipa_send_msg(struct ipa_msg_meta *meta, void *buff,
-		ipa_msg_free_fn callback)
-{
-	return ipa_send_msg(meta, buff, callback);
 }
 
 static inline int __qdf_ipa_register_pull_msg(struct ipa_msg_meta *meta,
@@ -670,28 +701,12 @@ static inline int __qdf_ipa_tx_dp_mul(
 	return ipa_tx_dp_mul(dst, data_desc);
 }
 
-static inline void __qdf_ipa_free_skb(struct ipa_rx_data *rx_in)
-{
-	return ipa_free_skb(rx_in);;
-}
-
 /*
  * System pipes
  */
 static inline u16 __qdf_ipa_get_smem_restr_bytes(void)
 {
 	return ipa_get_smem_restr_bytes();
-}
-
-static inline int __qdf_ipa_setup_sys_pipe(struct ipa_sys_connect_params *sys_in,
-		u32 *clnt_hdl)
-{
-	return ipa_setup_sys_pipe(sys_in, clnt_hdl);
-}
-
-static inline int __qdf_ipa_teardown_sys_pipe(u32 clnt_hdl)
-{
-	return ipa_teardown_sys_pipe(clnt_hdl);
 }
 
 static inline int __qdf_ipa_connect_wdi_pipe(struct ipa_wdi_in_params *in,
@@ -730,18 +745,6 @@ static inline int __qdf_ipa_uc_wdi_get_dbpa(
 {
 	return ipa_uc_wdi_get_dbpa(out);
 }
-
-static inline int __qdf_ipa_uc_reg_rdyCB(
-	struct ipa_wdi_uc_ready_params *param)
-{
-	return ipa_uc_reg_rdyCB(param);
-}
-
-static inline int __qdf_ipa_uc_dereg_rdyCB(void)
-{
-	return ipa_uc_dereg_rdyCB();
-}
-
 
 /*
  * Resource manager
@@ -849,19 +852,9 @@ static inline void __qdf_ipa_bam_reg_dump(void)
 	return ipa_bam_reg_dump();
 }
 
-static inline int __qdf_ipa_get_wdi_stats(struct IpaHwStatsWDIInfoData_t *stats)
-{
-	return ipa_get_wdi_stats(stats);
-}
-
 static inline int __qdf_ipa_get_ep_mapping(enum ipa_client_type client)
 {
 	return ipa_get_ep_mapping(client);
-}
-
-static inline bool __qdf_ipa_is_ready(void)
-{
-	return ipa_is_ready();
 }
 
 static inline void __qdf_ipa_proxy_clk_vote(void)
@@ -937,11 +930,58 @@ static inline int __qdf_ipa_stop_gsi_channel(u32 clnt_hdl)
 	return ipa_stop_gsi_channel(clnt_hdl);
 }
 
+#endif
+static inline void __qdf_ipa_free_skb(struct ipa_rx_data *rx_in)
+{
+	return ipa_free_skb(rx_in);
+}
+
+static inline int __qdf_ipa_get_wdi_stats(struct IpaHwStatsWDIInfoData_t *stats)
+{
+	return ipa_get_wdi_stats(stats);
+}
+
+static inline int __qdf_ipa_uc_reg_rdyCB(struct ipa_wdi_uc_ready_params *param)
+{
+	return ipa_uc_reg_rdyCB(param);
+}
+
+static inline int __qdf_ipa_uc_dereg_rdyCB(void)
+{
+	return ipa_uc_dereg_rdyCB();
+}
+
 static inline int __qdf_ipa_register_ipa_ready_cb(
 	void (*ipa_ready_cb)(void *user_data),
 	void *user_data)
 {
 	return ipa_register_ipa_ready_cb(ipa_ready_cb, user_data);
+}
+
+static inline
+int __qdf_ipa_setup_sys_pipe(struct ipa_sys_connect_params *sys_in,
+			     u32 *clnt_hdl)
+{
+	return ipa_setup_sys_pipe(sys_in, clnt_hdl);
+}
+
+static inline int __qdf_ipa_teardown_sys_pipe(u32 clnt_hdl)
+{
+	return ipa_teardown_sys_pipe(clnt_hdl);
+}
+
+/*
+ * Messaging
+ */
+static inline int __qdf_ipa_send_msg(struct ipa_msg_meta *meta, void *buff,
+				     ipa_msg_free_fn callback)
+{
+	return ipa_send_msg(meta, buff, callback);
+}
+
+static inline bool __qdf_ipa_is_ready(void)
+{
+	return ipa_is_ready();
 }
 
 #ifdef FEATURE_METERING

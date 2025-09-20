@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -91,7 +92,7 @@ typedef struct {
 } __attribute__ ((packed)) qcom_ie_age;
 
 /**
- * struct osif_scan_pdev - OS scan private strcutre
+ * struct osif_scan_pdev - OS scan private structure
  * scan_req_q: Scan request queue
  * scan_req_q_lock: Protect scan request queue
  * req_id: Scan request Id
@@ -153,6 +154,9 @@ struct scan_req {
  * inapplicable.
  * @dwell_time_passive_6g: 6 GHz specific passive dwell time. Ignored if zero or
  * inapplicable.
+ * @scan_probe_unicast_ra: Use BSSID in probe request frame RA.
+ * @scan_f_2ghz: Scan only 2GHz channels
+ * @scan_f_5ghz: Scan only 5+6GHz channels
  */
 struct scan_params {
 	uint8_t source;
@@ -167,6 +171,9 @@ struct scan_params {
 	uint32_t dwell_time_passive;
 	uint32_t dwell_time_active_6g;
 	uint32_t dwell_time_passive_6g;
+	bool scan_probe_unicast_ra;
+	bool scan_f_2ghz;
+	bool scan_f_5ghz;
 };
 
 /**
@@ -437,6 +444,7 @@ void wlan_config_sched_scan_plans_to_wiphy(struct wiphy *wiphy,
  * @netdev: Net device
  * @req : Scan request
  * @aborted : true scan aborted false scan success
+ * @osif_priv: OS private structure
  *
  * This function notifies scan done to cfg80211
  *
@@ -444,5 +452,26 @@ void wlan_config_sched_scan_plans_to_wiphy(struct wiphy *wiphy,
  */
 void wlan_cfg80211_scan_done(struct net_device *netdev,
 			     struct cfg80211_scan_request *req,
-			     bool aborted);
+			     bool aborted, struct pdev_osif_priv *osif_priv);
+
+/**
+ * convert_nl_scan_priority_to_internal() - Convert NL80211 based scan prioirty
+ * value to internal scan priority value
+ * @nl_scan_priority : Scan priority value received in vendor attribute
+ *
+ * Return: Internal scan priority value
+ */
+enum scan_priority convert_nl_scan_priority_to_internal(
+	enum qca_wlan_vendor_scan_priority nl_scan_priority);
+
+/**
+ * wlan_is_scan_allowed() - Allow/reject scan if any scan is running
+ * @vdev: vdev on which current scan issued
+ *
+ * Check if any other scan is in queue and decide whether to allow or reject
+ * current scan based on simultaneous_scan feature support
+ *
+ * Return: True if current scan can be allowed
+ */
+bool wlan_is_scan_allowed(struct wlan_objmgr_vdev *vdev);
 #endif

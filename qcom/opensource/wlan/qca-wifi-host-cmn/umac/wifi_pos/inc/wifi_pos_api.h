@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -25,11 +26,15 @@
 
 /* Include files */
 #include "wifi_pos_utils_pub.h"
-#include "../src/wifi_pos_utils_i.h"
+#include "wifi_pos_utils_i.h"
 
 /* forward reference */
 struct wlan_objmgr_psoc;
 struct wifi_pos_driver_caps;
+
+#ifdef WIFI_POS_CONVERGED
+struct wifi_pos_osif_ops;
+#endif
 
 /**
  * enum RTT_FIELD_ID - identifies which field is being specified
@@ -86,6 +91,7 @@ struct wifi_pos_interface {
  * @OEM_ERR_NULL_MESSAGE_HEADER: Invalid message header
  * @OEM_ERR_INVALID_MESSAGE_TYPE: Invalid message type
  * @OEM_ERR_INVALID_MESSAGE_LENGTH: Invalid length in message body
+ * @OEM_ERR_REQUEST_REJECTED: Request is rejected by the driver
  */
 enum oem_err_msg {
 	OEM_ERR_NULL_CONTEXT = 1,
@@ -93,7 +99,8 @@ enum oem_err_msg {
 	OEM_ERR_INVALID_SIGNATURE,
 	OEM_ERR_NULL_MESSAGE_HEADER,
 	OEM_ERR_INVALID_MESSAGE_TYPE,
-	OEM_ERR_INVALID_MESSAGE_LENGTH
+	OEM_ERR_INVALID_MESSAGE_LENGTH,
+	OEM_ERR_REQUEST_REJECTED
 };
 
 /* this struct is needed since MLME is not converged yet */
@@ -340,6 +347,24 @@ struct wlan_lmac_if_rx_ops;
 void wifi_pos_register_rx_ops(struct wlan_lmac_if_rx_ops *rx_ops);
 
 /**
+ * wifi_pos_get_tx_ops: api to get tx ops
+ * @psoc: pointer to psoc object
+ *
+ * Return: tx ops
+ */
+struct wlan_lmac_if_wifi_pos_tx_ops *
+wifi_pos_get_tx_ops(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * wifi_pos_get_rx_ops: api to get rx ops
+ * @psoc: pointer to psoc object
+ *
+ * Return: rx ops
+ */
+struct wlan_lmac_if_wifi_pos_rx_ops *
+wifi_pos_get_rx_ops(struct wlan_objmgr_psoc *psoc);
+
+/**
  * ucfg_wifi_pos_get_ftm_cap: API to get fine timing measurement caps
  * @psoc: psoc object
  *
@@ -399,6 +424,23 @@ bool wifi_pos_is_app_registered(struct wlan_objmgr_psoc *psoc);
  */
 struct wlan_objmgr_psoc *wifi_pos_get_psoc(void);
 
+/**
+ * wifi_pos_get_legacy_ops() - Get wifi pos legacy ops
+ *
+ * Return: Pointer to legacy ops
+ */
+struct wifi_pos_legacy_ops *wifi_pos_get_legacy_ops(void);
+
+/**
+ * wifi_pos_set_legacy_ops() - Set Wifi Pos legacy ops
+ * @psoc: PSOC pointer
+ * @legacy_ops: Legacy ops
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+wifi_pos_set_legacy_ops(struct wlan_objmgr_psoc *psoc,
+			struct wifi_pos_legacy_ops *legacy_ops);
 #else
 static inline QDF_STATUS wifi_pos_init(void)
 {
@@ -510,7 +552,66 @@ QDF_STATUS wifi_pos_register_get_pdev_id_by_dev_name(
 		struct wlan_objmgr_psoc *psoc,
 		QDF_STATUS (*handler)(char *dev_name, uint8_t *pdev_id,
 				      struct wlan_objmgr_psoc **psoc));
-#endif
+
+/**
+ * wifi_pos_register_get_max_fw_phymode_for_channels: API to register callback
+ * to get FW phymode for the given channels.
+ * @psoc:  pointer to global psoc object
+ * @handler: callback to be registered
+ *
+ * Return: QDF_STATUS_SUCCESS in case of success, error codes in case of failure
+ */
+QDF_STATUS wifi_pos_register_get_max_fw_phymode_for_channels(
+		struct wlan_objmgr_psoc *psoc,
+		QDF_STATUS (*handler)(struct wlan_objmgr_pdev *pdev,
+				      struct wifi_pos_channel_power *chan_list,
+				      uint16_t wifi_pos_num_chans));
+#endif /* CNSS_GENL */
+
+#if !defined(CNSS_GENL) && defined(WLAN_RTT_MEASUREMENT_NOTIFICATION)
+/**
+ * ucfg_wifi_pos_measurement_request_notification: ucfg API to notify
+ * measurement request received from the LOWI application
+ * @pdev: Pointer to pdev structure
+ * @req: Pointer to wifi_pos_req_msg structure
+ *
+ * Return: QDF_STATUS_SUCCESS in case of success, error codes in
+ * case of failure
+ */
+QDF_STATUS ucfg_wifi_pos_measurement_request_notification(
+		struct wlan_objmgr_pdev *pdev,
+		struct wifi_pos_req_msg *req);
+
+/**
+ * wifi_pos_register_measurement_request_notification: API to register a
+ * callback that needs to be called when the driver receives a measurement
+ * request from the LOWI application.
+ * @psoc: pointer to global psoc object
+ * @handler: callback to be registered
+ *
+ * Return: QDF_STATUS_SUCCESS in case of success, error codes in case of
+ * failure.
+ */
+QDF_STATUS wifi_pos_register_measurement_request_notification(
+		struct wlan_objmgr_psoc *psoc,
+		QDF_STATUS (*handler)(struct wlan_objmgr_pdev *pdev,
+				      struct rtt_channel_info *chinfo));
+#else
+static inline QDF_STATUS ucfg_wifi_pos_measurement_request_notification(
+		struct wlan_objmgr_pdev *pdev,
+		struct wifi_pos_req_msg *req)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS wifi_pos_register_measurement_request_notification(
+		struct wlan_objmgr_psoc *psoc,
+		QDF_STATUS (*handler)(struct wlan_objmgr_pdev *pdev,
+				      struct rtt_channel_info *chinfo))
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif /*!defined(CNSS_GENL) && defined(WLAN_RTT_MEASUREMENT_NOTIFICATION)*/
 
 /**
  * wifi_pos_send_report_resp: Send report to osif
@@ -539,4 +640,61 @@ QDF_STATUS wifi_pos_send_report_resp(struct wlan_objmgr_psoc *psoc,
 QDF_STATUS wifi_pos_convert_host_pdev_id_to_target(
 	struct wlan_objmgr_psoc *psoc, uint32_t host_pdev_id,
 	uint32_t *target_pdev_id);
+
+#ifdef WIFI_POS_CONVERGED
+/**
+ * wifi_pos_get_peer_private_object() - Wifi Pos get peer private object
+ * @peer: Peer object pointer
+ *
+ * Return: Peer private object pointer
+ */
+struct wlan_wifi_pos_peer_priv_obj *
+wifi_pos_get_peer_private_object(struct wlan_objmgr_peer *peer);
+
+/**
+ * wifi_pos_register_osif_callbacks() - Register OSIF callbacks
+ * @ops: Osif callbacks pointer
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS wifi_pos_register_osif_callbacks(struct wifi_pos_osif_ops *ops);
+
+/**
+ * wifi_pos_get_osif_callbacks() - Get OS IF callbacks
+ *
+ * Return: struct wifi_pos_osif_ops pointer
+ */
+struct wifi_pos_osif_ops *wifi_pos_get_osif_callbacks(void);
+#endif /* WIFI_POS_CONVERGED */
+
+#if defined(WIFI_POS_CONVERGED) && defined(WLAN_FEATURE_RTT_11AZ_SUPPORT)
+/**
+ * wifi_pos_set_rsta_sec_ltf_cap() - Set RSTA secure LTF capability
+ * @val: Value
+ *
+ * Return: None
+ **/
+void
+wifi_pos_set_rsta_sec_ltf_cap(bool val);
+
+/**
+ * wifi_pos_get_rsta_sec_ltf_cap  - Get RSTA secure LTF capability
+ *
+ * Return: True or false
+ */
+bool wifi_pos_get_rsta_sec_ltf_cap(void);
+
+/**
+ * wifi_pos_set_rsta_11az_ranging_cap() - Enable/Disable R-STA 11az ranging
+ * @val: Value to set
+ */
+void wifi_pos_set_rsta_11az_ranging_cap(bool val);
+
+/**
+ * wifi_pos_get_rsta_11az_ranging_cap() - Get if RSTA 11az ranging is enabled
+ *
+ * Return: True if 11az ranging is enabled
+ */
+bool wifi_pos_get_rsta_11az_ranging_cap(void);
 #endif
+#endif /* _WIFI_POS_API_H_ */

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -36,6 +37,14 @@
 #include "i_host_diag_core_log.h"
 #include "host_diag_core_log.h"
 #include "ani_global.h"
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0))
+/*
+ * Commit 359745d78351 ("proc: remove PDE_DATA() completely")
+ * Replaced PDE_DATA() with pde_data()
+ */
+#define pde_data(inode) PDE_DATA(inode)
+#endif
 
 #define PKTLOG_DEVNAME_SIZE     32
 #define MAX_WLANDEV             1
@@ -81,6 +90,7 @@ static const struct proc_ops pktlog_fops = {
 	.proc_open = pktlog_open,
 	.proc_release = pktlog_release,
 	.proc_read = pktlog_read,
+	.proc_lseek = default_llseek,
 };
 #else
 static struct file_operations pktlog_fops = {
@@ -125,7 +135,7 @@ int pktlog_alloc_buf(struct hif_opaque_softc *scn)
 	}
 	qdf_spin_unlock_bh(&pl_info->log_lock);
 
-	buffer = vmalloc((page_cnt + 2) * PAGE_SIZE);
+	buffer = qdf_mem_valloc((page_cnt + 2) * PAGE_SIZE);
 	if (!buffer) {
 		return -ENOMEM;
 	}
@@ -182,7 +192,7 @@ void pktlog_release_buf(struct hif_opaque_softc *scn)
 		ClearPageReserved(vpg);
 	}
 
-	vfree(pl_info->buf);
+	qdf_mem_vfree(pl_info->buf);
 	pl_info->buf = NULL;
 }
 
@@ -874,7 +884,7 @@ __pktlog_read(struct file *file, char *buf, size_t nbytes, loff_t *ppos)
 	struct ath_pktlog_info *pl_info;
 	struct ath_pktlog_buf *log_buf;
 
-	pl_info = PDE_DATA(file->f_path.dentry->d_inode);
+	pl_info = pde_data(file->f_path.dentry->d_inode);
 	if (!pl_info)
 		return 0;
 
@@ -1017,7 +1027,7 @@ rd_done:
 static ssize_t
 pktlog_read(struct file *file, char *buf, size_t nbytes, loff_t *ppos)
 {
-	struct ath_pktlog_info *info = PDE_DATA(file->f_path.dentry->d_inode);
+	struct ath_pktlog_info *info = pde_data(file->f_path.dentry->d_inode);
 	struct qdf_op_sync *op_sync;
 	ssize_t err_size;
 

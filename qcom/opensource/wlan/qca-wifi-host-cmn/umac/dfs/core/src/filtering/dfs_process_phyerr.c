@@ -1,6 +1,7 @@
 /*
- * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
  * Copyright (c) 2002-2010, Atheros Communications Inc.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -28,6 +29,7 @@
 #include "wlan_dfs_mlme_api.h"
 #include "../dfs_internal.h"
 
+#ifdef WLAN_DFS_PARTIAL_OFFLOAD
 /**
  * dfs_get_event_freqwidth() - Get frequency width.
  * @dfs: Pointer to wlan_dfs structure.
@@ -112,14 +114,27 @@ static inline uint16_t dfs_get_event_freqcentre(struct wlan_dfs *dfs,
 	return dfs_chan2freq(dfs->dfs_curchan);
 }
 
-int dfs_process_phyerr_owl(struct wlan_dfs *dfs,
-		void *buf,
-		uint16_t datalen,
-		uint8_t rssi,
-		uint8_t ext_rssi,
-		uint32_t rs_tstamp,
-		uint64_t fulltsf,
-		struct dfs_phy_err *e)
+/**
+ * dfs_process_phyerr_owl() - Process an Owl-style phy error.
+ * @dfs: Pointer to wlan_dfs structure.
+ * @buf: Phyerr buffer
+ * @datalen: Phyerr buf len
+ * @rssi: RSSI
+ * @ext_rssi: Extension RSSI.
+ * @rs_tstamp: Time stamp.
+ * @fulltsf: TSF64.
+ * @e: Pointer to dfs_phy_err structure.
+ *
+ * Return: Returns 1.
+ */
+static int dfs_process_phyerr_owl(struct wlan_dfs *dfs,
+				  void *buf,
+				  uint16_t datalen,
+				  uint8_t rssi,
+				  uint8_t ext_rssi,
+				  uint32_t rs_tstamp,
+				  uint64_t fulltsf,
+				  struct dfs_phy_err *e)
 {
 	const char *cbuf = (const char *) buf;
 	uint8_t dur;
@@ -170,14 +185,27 @@ int dfs_process_phyerr_owl(struct wlan_dfs *dfs,
 	return 1;
 }
 
-int dfs_process_phyerr_sowl(struct wlan_dfs *dfs,
-		void *buf,
-		uint16_t datalen,
-		uint8_t rssi,
-		uint8_t ext_rssi,
-		uint32_t rs_tstamp,
-		uint64_t fulltsf,
-		struct dfs_phy_err *e)
+/**
+ * dfs_process_phyerr_sowl() -Process a Sowl/Howl style phy error.
+ * @dfs: Pointer to wlan_dfs structure.
+ * @buf: Phyerr buffer
+ * @datalen: Phyerr buf len
+ * @rssi: RSSI
+ * @ext_rssi: Extension RSSI.
+ * @rs_tstamp: Time stamp.
+ * @fulltsf: TSF64.
+ * @e: Pointer to dfs_phy_err structure.
+ *
+ * Return: Returns 1.
+ */
+static int dfs_process_phyerr_sowl(struct wlan_dfs *dfs,
+				   void *buf,
+				   uint16_t datalen,
+				   uint8_t rssi,
+				   uint8_t ext_rssi,
+				   uint32_t rs_tstamp,
+				   uint64_t fulltsf,
+				   struct dfs_phy_err *e)
 {
 #define EXT_CH_RADAR_FOUND 0x02
 #define PRI_CH_RADAR_FOUND 0x01
@@ -310,14 +338,28 @@ int dfs_process_phyerr_sowl(struct wlan_dfs *dfs,
 	return 1;
 }
 
-int dfs_process_phyerr_merlin(struct wlan_dfs *dfs,
-		void *buf,
-		uint16_t datalen,
-		uint8_t rssi,
-		uint8_t ext_rssi,
-		uint32_t rs_tstamp,
-		uint64_t fulltsf,
-		struct dfs_phy_err *e)
+/**
+ * dfs_process_phyerr_merlin() - Process a Merlin/Osprey style phy error.
+ *                               dfs_phy_err struct.
+ * @dfs: Pointer to wlan_dfs structure.
+ * @buf: Phyerr buffer
+ * @datalen: Phyerr buf len
+ * @rssi: RSSI
+ * @ext_rssi: Extension RSSI.
+ * @rs_tstamp: Time stamp.
+ * @fulltsf: TSF64.
+ * @e: Pointer to dfs_phy_err structure.
+ *
+ * Return: Returns 1.
+ */
+static int dfs_process_phyerr_merlin(struct wlan_dfs *dfs,
+				     void *buf,
+				     uint16_t datalen,
+				     uint8_t rssi,
+				     uint8_t ext_rssi,
+				     uint32_t rs_tstamp,
+				     uint64_t fulltsf,
+				     struct dfs_phy_err *e)
 {
 	const char *cbuf = (const char *) buf;
 	uint8_t pulse_bw_info = 0;
@@ -571,7 +613,7 @@ void dfs_process_phyerr(struct wlan_dfs *dfs, void *buf, uint16_t datalen,
 	if (dfs->dfs_debug_mask & WLAN_DEBUG_DFS_PHYERR_PKT)
 		dfs_dump_phyerr_contents(buf, datalen);
 
-	if (WLAN_IS_CHAN_RADAR(dfs->dfs_curchan)) {
+	if (WLAN_IS_CHAN_RADAR(dfs, dfs->dfs_curchan)) {
 		dfs_debug(dfs, WLAN_DEBUG_DFS1,
 			"Radar already found in the channel, do not queue radar data");
 		return;
@@ -727,7 +769,7 @@ void dfs_process_phyerr(struct wlan_dfs *dfs, void *buf, uint16_t datalen,
 	 * If the channel is a turbo G channel, then the event is for the
 	 * adaptive radio (AR) pattern matching rather than radar detection.
 	 */
-	if ((dfs->dfs_curchan->dfs_ch_flags & CHANNEL_108G) == CHANNEL_108G) {
+	if (WLAN_IS_CHAN_108G(dfs->dfs_curchan)) {
 		if (!(dfs->dfs_proc_phyerr & DFS_AR_EN)) {
 			dfs_debug(dfs, WLAN_DEBUG_DFS2,
 				"DFS_AR_EN not enabled");
@@ -850,8 +892,9 @@ void dfs_process_phyerr(struct wlan_dfs *dfs, void *buf, uint16_t datalen,
 #undef PRI_CH_RADAR_FOUND
 #undef EXT_CH_RADAR_EARLY_FOUND
 }
+#endif /* WLAN_DFS_PARTIAL_OFFLOAD */
 
-#ifdef QCA_MCL_DFS_SUPPORT
+#ifdef MOBILE_DFS_SUPPORT
 void dfs_process_phyerr_filter_offload(struct wlan_dfs *dfs,
 	struct radar_event_info *wlan_radar_event)
 {
@@ -878,7 +921,7 @@ void dfs_process_phyerr_filter_offload(struct wlan_dfs *dfs,
 		return;
 	}
 
-	if (WLAN_IS_CHAN_RADAR(dfs->dfs_curchan)) {
+	if (WLAN_IS_CHAN_RADAR(dfs, dfs->dfs_curchan)) {
 		dfs_debug(dfs, WLAN_DEBUG_DFS1,
 			"Radar already found in the channel, do not queue radar data");
 		return;

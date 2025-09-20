@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -36,6 +37,10 @@
 #include <wmi_unified_api.h>
 #include <wmi_unified_crypto_api.h>
 #include <cdp_txrx_peer_ops.h>
+#include <wlan_objmgr_pdev_obj.h>
+#include <wlan_objmgr_peer_obj.h>
+#include "wlan_crypto_def_i.h"
+#include "wlan_crypto_obj_mgr_i.h"
 
 #ifdef FEATURE_WLAN_WAPI
 #ifdef FEATURE_WAPI_BIG_ENDIAN
@@ -127,25 +132,30 @@ static inline void wlan_crypto_set_wapi_key(struct wlan_objmgr_vdev *vdev,
 }
 #endif /* FEATURE_WLAN_WAPI */
 
-#ifdef BIG_ENDIAN_HOST
-static void wlan_crypto_endianness_conversion(uint8_t *dest, uint8_t *src,
-					      uint32_t keylen)
+QDF_STATUS
+target_if_crypto_vdev_set_param(struct wlan_objmgr_psoc *psoc, uint32_t vdev_id,
+				uint32_t param_id, uint32_t param_value)
 {
-	int8_t i;
+	wmi_unified_t wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+	struct vdev_set_params param = {0};
 
-	for (i = 0; i < roundup(keylen, sizeof(uint32_t)) / 4; i++) {
-		*dest = le32_to_cpu(*src);
-		dest++;
-		src++;
+	if (!wmi_handle) {
+		target_if_err("Invalid wmi handle");
+		return QDF_STATUS_E_INVAL;
 	}
+
+	if (vdev_id >= WLAN_MAX_VDEVS) {
+		target_if_err("vdev_id: %d is invalid, reject the req: param id %d val %d",
+			      vdev_id, param_id, param_value);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	param.vdev_id = vdev_id;
+	param.param_id = param_id;
+	param.param_value = param_value;
+
+	return wmi_unified_vdev_set_param_send(wmi_handle, &param);
 }
-#else
-static void wlan_crypto_endianness_conversion(uint8_t *dest, uint8_t *src,
-					      uint32_t keylen)
-{
-	qdf_mem_copy(dest, src, keylen);
-}
-#endif
 
 QDF_STATUS target_if_crypto_set_key(struct wlan_objmgr_vdev *vdev,
 				    struct wlan_crypto_key *req,
@@ -154,7 +164,9 @@ QDF_STATUS target_if_crypto_set_key(struct wlan_objmgr_vdev *vdev,
 	struct set_key_params params = {0};
 	struct wlan_objmgr_psoc *psoc;
 	struct wlan_objmgr_pdev *pdev;
+	struct wlan_objmgr_peer *peer;
 	enum cdp_sec_type sec_type = cdp_sec_type_none;
+	enum wlan_peer_type peer_type = 0;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 	uint32_t pn[4] = {0, 0, 0, 0};
 	bool peer_exist = false;
@@ -196,19 +208,34 @@ QDF_STATUS target_if_crypto_set_key(struct wlan_objmgr_vdev *vdev,
 		pairwise = true;
 		params.key_flags |= PAIRWISE_USAGE;
 	}
-	qdf_mem_copy(&params.key_rsc_ctr,
+	qdf_mem_copy(&params.key_rsc_counter,
 		     &req->keyrsc[0], sizeof(uint64_t));
 
-	peer_exist = cdp_find_peer_exist(soc, pdev->pdev_objmgr.wlan_pdev_id,
-					 req->macaddr);
 	target_if_debug("key_type %d, mac: %02x:%02x:%02x:%02x:%02x:%02x",
 			key_type, req->macaddr[0], req->macaddr[1],
 			req->macaddr[2], req->macaddr[3], req->macaddr[4],
 			req->macaddr[5]);
 
-	if ((key_type == WLAN_CRYPTO_KEY_TYPE_UNICAST) && !peer_exist) {
-		target_if_err("Invalid peer");
-		return QDF_STATUS_E_FAILURE;
+	if (wlan_vdev_mlme_get_opmode(vdev) != QDF_NAN_DISC_MODE) {
+		peer_exist = cdp_find_peer_exist(soc,
+						 pdev->pdev_objmgr.wlan_pdev_id,
+						 req->macaddr);
+
+		peer = wlan_objmgr_get_peer_by_mac(psoc, req->macaddr,
+						   WLAN_CRYPTO_ID);
+		if (peer) {
+			peer_type = wlan_peer_get_peer_type(peer);
+			if (peer_type == WLAN_PEER_RTT_PASN &&
+			    key_type == WLAN_CRYPTO_KEY_TYPE_UNICAST)
+				peer_exist = true;
+
+			wlan_objmgr_peer_release_ref(peer, WLAN_CRYPTO_ID);
+		}
+
+		if ((key_type == WLAN_CRYPTO_KEY_TYPE_UNICAST) && !peer_exist) {
+			target_if_err("Invalid peer");
+			return QDF_STATUS_E_FAILURE;
+		}
 	}
 
 	params.key_cipher = wlan_crypto_cipher_to_wmi_cipher(req->cipher_type);
@@ -234,13 +261,15 @@ QDF_STATUS target_if_crypto_set_key(struct wlan_objmgr_vdev *vdev,
 		break;
 	}
 
-	wlan_crypto_endianness_conversion(&params.key_data[0],
-					  &req->keyval[0],
-					  req->keylen);
+	qdf_mem_copy(&params.key_data[0], &req->keyval[0], req->keylen);
 	params.key_len = req->keylen;
 
 	/* Set PN check & security type in data path */
-	qdf_mem_copy(&pn[0], &params.key_rsc_ctr, sizeof(pn));
+	qdf_mem_copy(&pn[0], &params.key_rsc_counter, sizeof(uint64_t));
+
+	if (peer_type == WLAN_PEER_RTT_PASN)
+		goto send_install_key;
+
 	cdp_set_pn_check(soc, vdev->vdev_objmgr.vdev_id, req->macaddr,
 			 sec_type, pn);
 
@@ -250,17 +279,156 @@ QDF_STATUS target_if_crypto_set_key(struct wlan_objmgr_vdev *vdev,
 	cdp_set_key(soc, vdev->vdev_objmgr.vdev_id, req->macaddr, pairwise,
 		    (uint32_t *)(req->keyval + WLAN_CRYPTO_IV_SIZE +
 		     WLAN_CRYPTO_MIC_LEN));
-
+send_install_key:
 	target_if_debug("vdev_id:%d, key: idx:%d,len:%d", params.vdev_id,
 			params.key_idx, params.key_len);
 	target_if_debug("peer mac "QDF_MAC_ADDR_FMT,
-			 QDF_MAC_ADDR_REF(params.peer_mac));
+			QDF_MAC_ADDR_REF(params.peer_mac));
 	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_CRYPTO, QDF_TRACE_LEVEL_DEBUG,
-			   &params.key_rsc_ctr, sizeof(uint64_t));
+			   &params.key_rsc_counter, sizeof(uint64_t));
 	status = wmi_unified_setup_install_key_cmd(pdev_wmi_handle, &params);
 
 	/* Zero-out local key variables */
 	qdf_mem_zero(&params, sizeof(struct set_key_params));
+
+	return status;
+}
+
+/**
+ * target_if_crypto_install_key_comp_evt_handler() - install key complete
+ *   handler
+ * @handle: wma handle
+ * @event: event data
+ * @len: data length
+ *
+ * This event is sent by fw once WPA/WPA2 keys are installed in fw.
+ *
+ * Return: 0 for success or error code
+ */
+static int
+target_if_crypto_install_key_comp_evt_handler(void *handle, uint8_t *event,
+					      uint32_t len)
+{
+	struct wlan_crypto_comp_priv *priv_obj;
+	struct wlan_objmgr_psoc *psoc;
+	struct wlan_objmgr_vdev *vdev;
+	struct wmi_install_key_comp_event params;
+	QDF_STATUS status;
+	wmi_unified_t wmi_handle;
+	struct crypto_add_key_result result;
+
+	if (!event || !handle) {
+		target_if_err("invalid param");
+		return -EINVAL;
+	}
+
+	psoc = target_if_get_psoc_from_scn_hdl(handle);
+	if (!psoc) {
+		target_if_err("psoc is null");
+		return -EINVAL;
+	}
+
+	wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+	if (!wmi_handle) {
+		target_if_err("invalid wmi handle");
+		return -EINVAL;
+	}
+
+	status = wmi_extract_install_key_comp_event(wmi_handle, event,
+						    len, &params);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		target_if_err("received invalid buf from target");
+		return -EINVAL;
+	}
+
+	target_if_debug("vdev %d mac " QDF_MAC_ADDR_FMT " ix %x flags %x status %d",
+			params.vdev_id,
+			QDF_MAC_ADDR_REF(params.peer_macaddr),
+			params.key_ix, params.key_flags, params.status);
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, params.vdev_id,
+						    WLAN_CRYPTO_ID);
+	if (!vdev) {
+		target_if_err("vdev %d is null", params.vdev_id);
+		return -EINVAL;
+	}
+
+	priv_obj = wlan_get_vdev_crypto_obj(vdev);
+	if (!priv_obj) {
+		target_if_err("priv_obj is null");
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_CRYPTO_ID);
+		return -EINVAL;
+	}
+
+	result.vdev_id = params.vdev_id;
+	result.key_ix = params.key_ix;
+	result.key_flags = params.key_flags;
+	result.status = params.status;
+	qdf_mem_copy(result.peer_macaddr, params.peer_macaddr,
+		     QDF_MAC_ADDR_SIZE);
+
+	if (priv_obj->add_key_cb)
+		priv_obj->add_key_cb(priv_obj->add_key_ctx, &result);
+
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_CRYPTO_ID);
+
+	return 0;
+}
+
+static QDF_STATUS
+target_if_crypto_register_events(struct wlan_objmgr_psoc *psoc)
+{
+	QDF_STATUS status;
+
+	if (!psoc || !GET_WMI_HDL_FROM_PSOC(psoc)) {
+		target_if_err("psoc or psoc->tgt_if_handle is null");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	status = wmi_unified_register_event_handler(
+			get_wmi_unified_hdl_from_psoc(psoc),
+			wmi_vdev_install_key_complete_event_id,
+			target_if_crypto_install_key_comp_evt_handler,
+			WMI_RX_WORK_CTX);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		target_if_err("register_event_handler failed: err %d", status);
+		return status;
+	}
+
+	return QDF_STATUS_SUCCESS;
+}
+
+static QDF_STATUS
+target_if_crypto_deregister_events(struct wlan_objmgr_psoc *psoc)
+{
+	if (!psoc || !GET_WMI_HDL_FROM_PSOC(psoc)) {
+		target_if_err("psoc or psoc->tgt_if_handle is null");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	wmi_unified_unregister_event_handler(
+			get_wmi_unified_hdl_from_psoc(psoc),
+			wmi_vdev_install_key_complete_event_id);
+
+	return QDF_STATUS_SUCCESS;
+}
+
+static QDF_STATUS
+target_if_crypto_set_ltf_keyseed(struct wlan_objmgr_psoc *psoc,
+				 struct wlan_crypto_ltf_keyseed_data *data)
+{
+	QDF_STATUS status;
+	wmi_unified_t wmi = GET_WMI_HDL_FROM_PSOC(psoc);
+
+	if (!psoc || !wmi) {
+		target_if_err("%s is null", !psoc ? "psoc" : "wmi_handle");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	status = wmi_send_vdev_set_ltf_key_seed_cmd(wmi, data);
+	if (QDF_IS_STATUS_ERROR(status))
+		target_if_err("set LTF keyseed failed");
+
 	return status;
 }
 
@@ -275,6 +443,10 @@ QDF_STATUS target_if_crypto_register_tx_ops(struct wlan_lmac_if_tx_ops *tx_ops)
 	crypto = &tx_ops->crypto_tx_ops;
 
 	crypto->set_key = target_if_crypto_set_key;
+	crypto->set_ltf_keyseed = target_if_crypto_set_ltf_keyseed;
+	crypto->set_vdev_param  = target_if_crypto_vdev_set_param;
+	crypto->register_events = target_if_crypto_register_events;
+	crypto->deregister_events = target_if_crypto_deregister_events;
 
 	return QDF_STATUS_SUCCESS;
 }

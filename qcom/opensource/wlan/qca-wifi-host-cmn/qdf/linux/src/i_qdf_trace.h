@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -33,12 +34,28 @@
 #include <linux/minidump_tlv.h>
 #endif
 
+/*
+ * The CONFIG_QCOM_MINIDUMP feature can only be used
+ * beginning with kernel version msm-4.19 since that is
+ * when msm_minidump_removerefion() was added.
+ */
+#if IS_ENABLED(CONFIG_QCOM_MINIDUMP) && \
+	(LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
+#if IS_ENABLED(CONFIG_QCOM_VA_MINIDUMP)
+#define WLAN_QCOM_VA_MINIDUMP
+#else
+#define WLAN_QCOM_MINIDUMP
+#endif
+
+#include <soc/qcom/minidump.h>
+#endif
+
 #if !defined(__printf)
 #define __printf(a, b)
 #endif
 
 /* QDF_TRACE is the macro invoked to add trace messages to code.  See the
- * documenation for qdf_trace_msg() for the parameters etc. for this function.
+ * documentation for qdf_trace_msg() for the parameters etc. for this function.
  *
  * NOTE:  Code QDF_TRACE() macros into the source code.  Do not code directly
  * to the qdf_trace_msg() function.
@@ -78,18 +95,23 @@
  * second. This means any subsequent calls to this API from the same location
  * within 1/QDF_MAX_LOGS_PER_SEC seconds will be dropped.
  *
- * Return: None
+ * Return: return rate_limted as below:
+ *      true if the logging message is bypassed
+ *      false if the logging message is printed out
  */
 #define __QDF_TRACE_RATE_LIMITED(params...)\
-	do {\
+	({\
 		static ulong __last_ticks;\
 		ulong __ticks = jiffies;\
+		bool rate_limited = true;\
 		if (time_after(__ticks,\
 			       __last_ticks + HZ / QDF_MAX_LOGS_PER_SEC)) {\
 			QDF_TRACE(params);\
 			__last_ticks = __ticks;\
+			rate_limited = false;\
 		} \
-	} while (0)
+		rate_limited;\
+	})
 
 #define __QDF_TRACE_HEX_DUMP_RATE_LIMITED(params...)\
 	do {\
@@ -102,7 +124,7 @@
 		} \
 	} while (0)
 #else
-#define __QDF_TRACE_RATE_LIMITED(arg ...)
+#define __QDF_TRACE_RATE_LIMITED(arg ...) ({true; })
 #define __QDF_TRACE_HEX_DUMP_RATE_LIMITED(arg ...)
 #endif
 
@@ -123,6 +145,8 @@
 
 static inline void __qdf_trace_noop(QDF_MODULE_ID module,
 				    const char *format, ...) { }
+static inline bool __qdf_trace_noop_ret(QDF_MODULE_ID module,
+					const char *format, ...) {return true; }
 static inline void __qdf_trace_dummy(QDF_MODULE_ID module,
 				     QDF_TRACE_LEVEL level,
 				     const char *format, ...) { }
@@ -150,8 +174,8 @@ static inline void __qdf_trace_hexdump_dummy(QDF_MODULE_ID module,
 #else
 #define QDF_TRACE_FATAL(params...) __qdf_trace_noop(params)
 #define QDF_TRACE_FATAL_NO_FL(params...) __qdf_trace_noop(params)
-#define QDF_TRACE_FATAL_RL(params...) __qdf_trace_noop(params)
-#define QDF_TRACE_FATAL_RL_NO_FL(params...) __qdf_trace_noop(params)
+#define QDF_TRACE_FATAL_RL(params...) __qdf_trace_noop_ret(params)
+#define QDF_TRACE_FATAL_RL_NO_FL(params...) __qdf_trace_noop_ret(params)
 #define QDF_VTRACE_FATAL(params...) __qdf_trace_noop(params)
 #define QDF_TRACE_HEX_DUMP_FATAL_RL(params...) __qdf_trace_noop(params)
 #endif
@@ -172,8 +196,8 @@ static inline void __qdf_trace_hexdump_dummy(QDF_MODULE_ID module,
 #else
 #define QDF_TRACE_ERROR(params...) __qdf_trace_noop(params)
 #define QDF_TRACE_ERROR_NO_FL(params...) __qdf_trace_noop(params)
-#define QDF_TRACE_ERROR_RL(params...) __qdf_trace_noop(params)
-#define QDF_TRACE_ERROR_RL_NO_FL(params...) __qdf_trace_noop(params)
+#define QDF_TRACE_ERROR_RL(params...) __qdf_trace_noop_ret(params)
+#define QDF_TRACE_ERROR_RL_NO_FL(params...) __qdf_trace_noop_ret(params)
 #define QDF_VTRACE_ERROR(params...) __qdf_trace_noop(params)
 #define QDF_TRACE_HEX_DUMP_ERROR_RL(params...) __qdf_trace_noop(params)
 #endif
@@ -194,8 +218,8 @@ static inline void __qdf_trace_hexdump_dummy(QDF_MODULE_ID module,
 #else
 #define QDF_TRACE_WARN(params...) __qdf_trace_noop(params)
 #define QDF_TRACE_WARN_NO_FL(params...) __qdf_trace_noop(params)
-#define QDF_TRACE_WARN_RL(params...) __qdf_trace_noop(params)
-#define QDF_TRACE_WARN_RL_NO_FL(params...) __qdf_trace_noop(params)
+#define QDF_TRACE_WARN_RL(params...) __qdf_trace_noop_ret(params)
+#define QDF_TRACE_WARN_RL_NO_FL(params...) __qdf_trace_noop_ret(params)
 #define QDF_VTRACE_WARN(params...) __qdf_trace_noop(params)
 #define QDF_TRACE_HEX_DUMP_WARN_RL(params...) __qdf_trace_noop(params)
 #endif
@@ -216,8 +240,8 @@ static inline void __qdf_trace_hexdump_dummy(QDF_MODULE_ID module,
 #else
 #define QDF_TRACE_INFO(params...) __qdf_trace_noop(params)
 #define QDF_TRACE_INFO_NO_FL(params...) __qdf_trace_noop(params)
-#define QDF_TRACE_INFO_RL(params...) __qdf_trace_noop(params)
-#define QDF_TRACE_INFO_RL_NO_FL(params...) __qdf_trace_noop(params)
+#define QDF_TRACE_INFO_RL(params...) __qdf_trace_noop_ret(params)
+#define QDF_TRACE_INFO_RL_NO_FL(params...) __qdf_trace_noop_ret(params)
 #define QDF_VTRACE_INFO(params...) __qdf_trace_noop(params)
 #define QDF_TRACE_HEX_DUMP_INFO_RL(params...) __qdf_trace_noop(params)
 #endif
@@ -238,8 +262,8 @@ static inline void __qdf_trace_hexdump_dummy(QDF_MODULE_ID module,
 #else
 #define QDF_TRACE_DEBUG(params...) __qdf_trace_noop(params)
 #define QDF_TRACE_DEBUG_NO_FL(params...) __qdf_trace_noop(params)
-#define QDF_TRACE_DEBUG_RL(params...) __qdf_trace_noop(params)
-#define QDF_TRACE_DEBUG_RL_NO_FL(params...) __qdf_trace_noop(params)
+#define QDF_TRACE_DEBUG_RL(params...) __qdf_trace_noop_ret(params)
+#define QDF_TRACE_DEBUG_RL_NO_FL(params...) __qdf_trace_noop_ret(params)
 #define QDF_VTRACE_DEBUG(params...) __qdf_trace_noop(params)
 #define QDF_TRACE_HEX_DUMP_DEBUG_RL(params...) __qdf_trace_noop(params)
 #endif
@@ -457,6 +481,16 @@ static inline void __qdf_bug(void)
 
 #ifdef CONFIG_QCA_MINIDUMP
 static inline void
+__qdf_minidump_init(void)
+{
+}
+
+static inline void
+__qdf_minidump_deinit(void)
+{
+}
+
+static inline void
 __qdf_minidump_log(void *start_addr, size_t size, const char *name)
 {
 	if (minidump_fill_segments((const uintptr_t)start_addr, size,
@@ -468,14 +502,130 @@ __qdf_minidump_log(void *start_addr, size_t size, const char *name)
 }
 
 static inline void
-__qdf_minidump_remove(void *addr)
+__qdf_minidump_remove(void *addr, size_t size, const char *name)
 {
 	minidump_remove_segments((const uintptr_t)addr);
 }
+
+#elif defined(WLAN_QCOM_MINIDUMP)
+#define MAX_WLAN_MINIDUMP_ENTRIES 4
+
+enum minidump_log_type {
+	MD_HTC_CREDIT = 0,
+	MD_WLAN_LOGS,
+	MD_WMI_TX_CMP,
+	MD_HAL_SOC,
+};
+
+static const char *minidump_table[MAX_WLAN_MINIDUMP_ENTRIES];
+
+static int qdf_get_name_idx(const char *name)
+{
+	int i;
+	static const char * const wlan_str[] = {
+		[MD_HTC_CREDIT] = "htc_credit",
+		[MD_WLAN_LOGS] = "wlan_logs",
+		[MD_WMI_TX_CMP] = "wmi_tx_cmp",
+		[MD_HAL_SOC] = "hal_soc"
+	};
+
+	for (i = 0; i < ARRAY_SIZE(wlan_str); i++) {
+		if (strncmp(name, wlan_str[i], strlen(wlan_str[i])) == 0)
+			return i;
+	}
+
+	return -EINVAL;
+}
+
+static inline void
+__qdf_minidump_log(void *start_addr, const size_t size,
+		   const char *name)
+{
+	struct md_region md_entry;
+	int ret, index;
+
+	index  = qdf_get_name_idx(name);
+	if (index < 0) {
+		QDF_TRACE_ERROR_NO_FL(QDF_MODULE_ID_QDF,
+				      "%s: invalid entry %s\n",
+				      __func__, name);
+		QDF_DEBUG_PANIC("Unknown minidump entry");
+		return;
+	}
+	snprintf(md_entry.name, sizeof(md_entry.name), name);
+	md_entry.virt_addr = (uintptr_t)start_addr;
+	md_entry.phys_addr = virt_to_phys(start_addr);
+	md_entry.size = size;
+	ret = msm_minidump_add_region(&md_entry);
+	if (ret < 0) {
+		QDF_TRACE_ERROR_NO_FL(QDF_MODULE_ID_QDF,
+				      "%s: failed to log %pK (%s)\n",
+				      __func__, start_addr, name);
+		minidump_table[index] = NULL;
+	} else {
+		minidump_table[index] = name;
+	}
+}
+
+static inline void
+__qdf_minidump_remove(void *start_addr, const size_t size,
+		      const char *name)
+{
+	struct md_region md_entry;
+	int index;
+
+	index = qdf_get_name_idx(name);
+	if (index < 0 || !minidump_table[index]) {
+		QDF_TRACE_ERROR_NO_FL(QDF_MODULE_ID_QDF,
+				      "%s: entry was not added",
+				      __func__);
+		return;
+	}
+	snprintf(md_entry.name, sizeof(md_entry.name), name);
+	md_entry.virt_addr = (uintptr_t)start_addr;
+	md_entry.phys_addr = virt_to_phys(start_addr);
+	md_entry.size = size;
+	msm_minidump_remove_region(&md_entry);
+	minidump_table[index] = NULL;
+}
+
+static inline void
+__qdf_minidump_init(void)
+{
+}
+
+static inline void
+__qdf_minidump_deinit(void)
+{
+}
+
+#elif defined(WLAN_QCOM_VA_MINIDUMP)
+void __qdf_minidump_init(void);
+
+void __qdf_minidump_deinit(void);
+
+void __qdf_minidump_log(void *start_addr, size_t size, const char *name);
+
+void __qdf_minidump_remove(void *addr, size_t size, const char *name);
 #else
-static inline void
-__qdf_minidump_log(void *start_addr, size_t size, const char *name) {}
-static inline void
-__qdf_minidump_remove(void *addr) {}
+static inline
+void __qdf_minidump_init(void)
+{
+}
+
+static inline
+void __qdf_minidump_deinit(void)
+{
+}
+
+static inline
+void __qdf_minidump_log(void *start_addr, size_t size, const char *name)
+{
+}
+
+static inline
+void __qdf_minidump_remove(void *addr, size_t size, const char *name)
+{
+}
 #endif
 #endif /* __I_QDF_TRACE_H */

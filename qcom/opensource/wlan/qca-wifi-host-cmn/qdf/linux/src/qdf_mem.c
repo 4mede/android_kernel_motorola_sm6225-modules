@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -28,7 +29,6 @@
 #include "qdf_mc_timer.h"
 #include "qdf_module.h"
 #include <qdf_trace.h>
-#include "qdf_atomic.h"
 #include "qdf_str.h"
 #include "qdf_talloc.h"
 #include <linux/debugfs.h>
@@ -36,9 +36,40 @@
 #include <linux/string.h>
 #include <qdf_list.h>
 
-#if IS_ENABLED(CONFIG_WCNSS_MEM_PRE_ALLOC)
+#ifdef CNSS_MEM_PRE_ALLOC
+#ifdef CONFIG_CNSS_OUT_OF_TREE
+#include "cnss_prealloc.h"
+#else
 #include <net/cnss_prealloc.h>
 #endif
+#endif
+
+/* cnss prealloc maintains various prealloc pools of 8Kb, 16Kb, 32Kb and so
+ * on and allocates buffer from the pool for wlan driver. When wlan driver
+ * requests to free the memory buffer then cnss prealloc derives slab_cache
+ * from virtual memory via page struct to identify prealloc pool id to put
+ * back memory buffer into the pool. Kernel 5.17 removed slab_cache from page
+ * struct. So add headroom to store cache pointer at the beginning of
+ * allocated memory buffer to use it later in identifying prealloc pool id.
+ */
+#if defined(CNSS_MEM_PRE_ALLOC) && defined(CONFIG_CNSS_OUT_OF_TREE)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 17, 0))
+static inline bool add_headroom_for_cnss_prealloc_cache_ptr(void)
+{
+	return true;
+}
+#else /* (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 17, 0)) */
+static inline bool add_headroom_for_cnss_prealloc_cache_ptr(void)
+{
+	return false;
+}
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 17, 0)) */
+#else /* defined(CNSS_MEM_PRE_ALLOC) && defined(CONFIG_CNSS_OUT_OF_TREE) */
+static inline bool add_headroom_for_cnss_prealloc_cache_ptr(void)
+{
+	return false;
+}
+#endif /* defined(CNSS_MEM_PRE_ALLOC) && defined(CONFIG_CNSS_OUT_OF_TREE) */
 
 #if defined(MEMORY_DEBUG) || defined(NBUF_MEMORY_DEBUG)
 static bool mem_debug_disabled;
@@ -60,11 +91,35 @@ static bool is_initial_mem_debug_disabled;
  * @kmalloc: total kmalloc allocations
  * @dma: total dma allocations
  * @skb: total skb allocations
+ * @skb_total: total skb allocations in host driver
+ * @dp_tx_skb: total Tx skb allocations in datapath
+ * @dp_rx_skb: total Rx skb allocations in datapath
+ * @skb_mem_max: high watermark for skb allocations
+ * @dp_tx_skb_mem_max: high watermark for Tx DP skb allocations
+ * @dp_rx_skb_mem_max: high watermark for Rx DP skb allocations
+ * @dp_tx_skb_count: DP Tx buffer count
+ * @dp_tx_skb_count_max: High watermark for DP Tx buffer count
+ * @dp_rx_skb_count: DP Rx buffer count
+ * @dp_rx_skb_count_max: High watermark for DP Rx buffer count
+ * @tx_descs_outstanding: Current pending Tx descs count
+ * @tx_descs_max: High watermark for pending Tx descs count
  */
 static struct __qdf_mem_stat {
 	qdf_atomic_t kmalloc;
 	qdf_atomic_t dma;
 	qdf_atomic_t skb;
+	qdf_atomic_t skb_total;
+	qdf_atomic_t dp_tx_skb;
+	qdf_atomic_t dp_rx_skb;
+	int32_t skb_mem_max;
+	int32_t dp_tx_skb_mem_max;
+	int32_t dp_rx_skb_mem_max;
+	qdf_atomic_t dp_tx_skb_count;
+	int32_t dp_tx_skb_count_max;
+	qdf_atomic_t dp_rx_skb_count;
+	int32_t dp_rx_skb_count_max;
+	qdf_atomic_t tx_descs_outstanding;
+	int32_t tx_descs_max;
 } qdf_mem_stat;
 
 #ifdef MEMORY_DEBUG
@@ -83,7 +138,7 @@ enum list_type {
  * @type:            type of the list to be parsed
  * @threshold:       configured by user by overwriting the respective debugfs
  *                   sys entry. This is to list the functions which requested
- *                   memory/dma allocations more than threshold nubmer of times.
+ *                   memory/dma allocations more than threshold number of times.
  */
 struct major_alloc_priv {
 	enum list_type type;
@@ -131,6 +186,9 @@ struct qdf_mem_header {
 	uint64_t time;
 };
 
+/* align the qdf_mem_header to 8 bytes */
+#define QDF_DMA_MEM_HEADER_ALIGN 8
+
 static uint64_t WLAN_MEM_HEADER = 0x6162636465666768;
 static uint64_t WLAN_MEM_TRAILER = 0x8081828384858687;
 
@@ -139,10 +197,13 @@ static inline struct qdf_mem_header *qdf_mem_get_header(void *ptr)
 	return (struct qdf_mem_header *)ptr - 1;
 }
 
+/* make sure the header pointer is 8bytes aligned */
 static inline struct qdf_mem_header *qdf_mem_dma_get_header(void *ptr,
 							    qdf_size_t size)
 {
-	return (struct qdf_mem_header *) ((uint8_t *) ptr + size);
+	return (struct qdf_mem_header *)
+				qdf_roundup((size_t)((uint8_t *)ptr + size),
+					    QDF_DMA_MEM_HEADER_ALIGN);
 }
 
 static inline uint64_t *qdf_mem_get_trailer(struct qdf_mem_header *header)
@@ -161,7 +222,7 @@ static inline void *qdf_mem_get_ptr(struct qdf_mem_header *header)
 
 /* number of bytes needed for the qdf dma memory debug information */
 #define QDF_DMA_MEM_DEBUG_SIZE \
-	(sizeof(struct qdf_mem_header))
+	(sizeof(struct qdf_mem_header) + QDF_DMA_MEM_HEADER_ALIGN)
 
 static void qdf_mem_trailer_init(struct qdf_mem_header *header)
 {
@@ -470,9 +531,50 @@ static int qdf_err_printer(void *priv, const char *fmt, ...)
 
 #endif /* MEMORY_DEBUG */
 
-u_int8_t prealloc_disabled = 1;
-qdf_declare_param(prealloc_disabled, byte);
+bool prealloc_disabled = 1;
+qdf_declare_param(prealloc_disabled, bool);
 qdf_export_symbol(prealloc_disabled);
+
+int qdf_mem_malloc_flags(void)
+{
+	if (in_interrupt() || !preemptible() || rcu_preempt_depth())
+		return GFP_ATOMIC;
+
+	return GFP_KERNEL;
+}
+
+qdf_export_symbol(qdf_mem_malloc_flags);
+
+/**
+ * qdf_prealloc_disabled_config_get() - Get the user configuration of
+ *                                       prealloc_disabled
+ *
+ * Return: value of prealloc_disabled qdf module argument
+ */
+bool qdf_prealloc_disabled_config_get(void)
+{
+	return prealloc_disabled;
+}
+
+qdf_export_symbol(qdf_prealloc_disabled_config_get);
+
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+/**
+ * qdf_prealloc_disabled_config_set() - Set prealloc_disabled
+ * @str_value: value of the module param
+ *
+ * This function will set qdf module param prealloc_disabled
+ *
+ * Return: QDF_STATUS_SUCCESS on Success
+ */
+QDF_STATUS qdf_prealloc_disabled_config_set(const char *str_value)
+{
+	QDF_STATUS status;
+
+	status = qdf_bool_parse(str_value, &prealloc_disabled);
+	return status;
+}
+#endif
 
 #if defined WLAN_DEBUGFS
 
@@ -707,7 +809,6 @@ qdf_print_major_nbuf_allocs(uint32_t threshold,
 	uint32_t nbuf_iter;
 	unsigned long irq_flag = 0;
 	QDF_NBUF_TRACK *p_node;
-	QDF_NBUF_TRACK *p_prev;
 	struct __qdf_mem_info table[QDF_MEM_STAT_TABLE_SIZE];
 	struct qdf_mem_header meta;
 	bool is_full;
@@ -740,7 +841,6 @@ qdf_print_major_nbuf_allocs(uint32_t threshold,
 				qdf_mem_zero(table, sizeof(table));
 			}
 
-			p_prev = p_node;
 			p_node = p_node->p_next;
 		}
 		qdf_nbuf_release_track_lock(nbuf_iter, irq_flag);
@@ -1045,6 +1145,83 @@ void qdf_mem_skb_dec(qdf_size_t size)
 {
 	qdf_atomic_sub(size, &qdf_mem_stat.skb);
 }
+
+void qdf_mem_skb_total_inc(qdf_size_t size)
+{
+	int32_t skb_mem_max = 0;
+
+	qdf_atomic_add(size, &qdf_mem_stat.skb_total);
+	skb_mem_max = qdf_atomic_read(&qdf_mem_stat.skb_total);
+	if (qdf_mem_stat.skb_mem_max < skb_mem_max)
+		qdf_mem_stat.skb_mem_max = skb_mem_max;
+}
+
+void qdf_mem_skb_total_dec(qdf_size_t size)
+{
+	qdf_atomic_sub(size, &qdf_mem_stat.skb_total);
+}
+
+void qdf_mem_dp_tx_skb_inc(qdf_size_t size)
+{
+	int32_t curr_dp_tx_skb_mem_max = 0;
+
+	qdf_atomic_add(size, &qdf_mem_stat.dp_tx_skb);
+	curr_dp_tx_skb_mem_max = qdf_atomic_read(&qdf_mem_stat.dp_tx_skb);
+	if (qdf_mem_stat.dp_tx_skb_mem_max < curr_dp_tx_skb_mem_max)
+		qdf_mem_stat.dp_tx_skb_mem_max = curr_dp_tx_skb_mem_max;
+}
+
+void qdf_mem_dp_tx_skb_dec(qdf_size_t size)
+{
+	qdf_atomic_sub(size, &qdf_mem_stat.dp_tx_skb);
+}
+
+void qdf_mem_dp_rx_skb_inc(qdf_size_t size)
+{
+	int32_t curr_dp_rx_skb_mem_max = 0;
+
+	qdf_atomic_add(size, &qdf_mem_stat.dp_rx_skb);
+	curr_dp_rx_skb_mem_max = qdf_atomic_read(&qdf_mem_stat.dp_rx_skb);
+	if (qdf_mem_stat.dp_rx_skb_mem_max < curr_dp_rx_skb_mem_max)
+		qdf_mem_stat.dp_rx_skb_mem_max = curr_dp_rx_skb_mem_max;
+}
+
+void qdf_mem_dp_rx_skb_dec(qdf_size_t size)
+{
+	qdf_atomic_sub(size, &qdf_mem_stat.dp_rx_skb);
+}
+
+void qdf_mem_dp_tx_skb_cnt_inc(void)
+{
+	int32_t curr_dp_tx_skb_count_max = 0;
+
+	qdf_atomic_add(1, &qdf_mem_stat.dp_tx_skb_count);
+	curr_dp_tx_skb_count_max =
+		qdf_atomic_read(&qdf_mem_stat.dp_tx_skb_count);
+	if (qdf_mem_stat.dp_tx_skb_count_max < curr_dp_tx_skb_count_max)
+		qdf_mem_stat.dp_tx_skb_count_max = curr_dp_tx_skb_count_max;
+}
+
+void qdf_mem_dp_tx_skb_cnt_dec(void)
+{
+	qdf_atomic_sub(1, &qdf_mem_stat.dp_tx_skb_count);
+}
+
+void qdf_mem_dp_rx_skb_cnt_inc(void)
+{
+	int32_t curr_dp_rx_skb_count_max = 0;
+
+	qdf_atomic_add(1, &qdf_mem_stat.dp_rx_skb_count);
+	curr_dp_rx_skb_count_max =
+		qdf_atomic_read(&qdf_mem_stat.dp_rx_skb_count);
+	if (qdf_mem_stat.dp_rx_skb_count_max < curr_dp_rx_skb_count_max)
+		qdf_mem_stat.dp_rx_skb_count_max = curr_dp_rx_skb_count_max;
+}
+
+void qdf_mem_dp_rx_skb_cnt_dec(void)
+{
+	qdf_atomic_sub(1, &qdf_mem_stat.dp_rx_skb_count);
+}
 #endif
 
 void qdf_mem_kmalloc_dec(qdf_size_t size)
@@ -1233,7 +1410,15 @@ void __qdf_mempool_free(qdf_device_t osdev, __qdf_mempool_t pool, void *buf)
 }
 qdf_export_symbol(__qdf_mempool_free);
 
-#if IS_ENABLED(CONFIG_WCNSS_MEM_PRE_ALLOC)
+#ifdef CNSS_MEM_PRE_ALLOC
+static bool qdf_might_be_prealloc(void *ptr)
+{
+	if (ksize(ptr) > WCNSS_PRE_ALLOC_GET_THRESHOLD)
+		return true;
+	else
+		return false;
+}
+
 /**
  * qdf_mem_prealloc_get() - conditionally pre-allocate memory
  * @size: the number of bytes to allocate
@@ -1255,6 +1440,9 @@ static void *qdf_mem_prealloc_get(size_t size)
 	if (!ptr)
 		return NULL;
 
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		ptr += sizeof(void *);
+
 	memset(ptr, 0, size);
 
 	return ptr;
@@ -1265,6 +1453,11 @@ static inline bool qdf_mem_prealloc_put(void *ptr)
 	return wcnss_prealloc_put(ptr);
 }
 #else
+static bool qdf_might_be_prealloc(void *ptr)
+{
+	return false;
+}
+
 static inline void *qdf_mem_prealloc_get(size_t size)
 {
 	return NULL;
@@ -1274,15 +1467,7 @@ static inline bool qdf_mem_prealloc_put(void *ptr)
 {
 	return false;
 }
-#endif /* CONFIG_WCNSS_MEM_PRE_ALLOC */
-
-static int qdf_mem_malloc_flags(void)
-{
-	if (in_interrupt() || irqs_disabled() || in_atomic())
-		return GFP_ATOMIC;
-
-	return GFP_KERNEL;
-}
+#endif /* CNSS_MEM_PRE_ALLOC */
 
 /* External Function implementation */
 #ifdef MEMORY_DEBUG
@@ -1305,6 +1490,24 @@ bool qdf_mem_debug_config_get(void)
 #endif /* DISABLE_MEM_DBG_LOAD_CONFIG */
 
 /**
+ * qdf_mem_debug_disabled_set() - Set mem_debug_disabled
+ * @str_value: value of the module param
+ *
+ * This function will se qdf module param mem_debug_disabled
+ *
+ * Return: QDF_STATUS_SUCCESS on Success
+ */
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+QDF_STATUS qdf_mem_debug_disabled_config_set(const char *str_value)
+{
+	QDF_STATUS status;
+
+	status = qdf_bool_parse(str_value, &mem_debug_disabled);
+	return status;
+}
+#endif
+
+/**
  * qdf_mem_debug_init() - initialize qdf memory debug functionality
  *
  * Return: none
@@ -1318,7 +1521,7 @@ static void qdf_mem_debug_init(void)
 	if (is_initial_mem_debug_disabled)
 		return;
 
-	/* Initalizing the list with maximum size of 60000 */
+	/* Initializing the list with maximum size of 60000 */
 	for (i = 0; i < QDF_DEBUG_DOMAIN_COUNT; ++i)
 		qdf_list_create(&qdf_mem_domains[i], 60000);
 	qdf_spinlock_create(&qdf_mem_list_lock);
@@ -1411,6 +1614,9 @@ void *qdf_mem_malloc_debug(size_t size, const char *func, uint32_t line,
 		return NULL;
 	}
 
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		size += sizeof(void *);
+
 	ptr = qdf_mem_prealloc_get(size);
 	if (ptr)
 		return ptr;
@@ -1443,9 +1649,105 @@ void *qdf_mem_malloc_debug(size_t size, const char *func, uint32_t line,
 
 	qdf_mem_kmalloc_inc(ksize(header));
 
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		ptr += sizeof(void *);
+
 	return ptr;
 }
 qdf_export_symbol(qdf_mem_malloc_debug);
+
+void *qdf_mem_malloc_atomic_debug(size_t size, const char *func,
+				  uint32_t line, void *caller)
+{
+	QDF_STATUS status;
+	enum qdf_debug_domain current_domain = qdf_debug_domain_get();
+	qdf_list_t *mem_list = qdf_mem_list_get(current_domain);
+	struct qdf_mem_header *header;
+	void *ptr;
+	unsigned long start, duration;
+
+	if (is_initial_mem_debug_disabled)
+		return qdf_mem_malloc_atomic_debug_fl(size, func, line);
+
+	if (!size || size > QDF_MEM_MAX_MALLOC) {
+		qdf_err("Cannot malloc %zu bytes @ %s:%d", size, func, line);
+		return NULL;
+	}
+
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		size += sizeof(void *);
+
+	ptr = qdf_mem_prealloc_get(size);
+	if (ptr)
+		return ptr;
+
+	start = qdf_mc_timer_get_system_time();
+	header = kzalloc(size + QDF_MEM_DEBUG_SIZE, GFP_ATOMIC);
+	duration = qdf_mc_timer_get_system_time() - start;
+
+	if (duration > QDF_MEM_WARN_THRESHOLD)
+		qdf_warn("Malloc slept; %lums, %zuB @ %s:%d",
+			 duration, size, func, line);
+
+	if (!header) {
+		qdf_warn("Failed to malloc %zuB @ %s:%d", size, func, line);
+		return NULL;
+	}
+
+	qdf_mem_header_init(header, size, func, line, caller);
+	qdf_mem_trailer_init(header);
+	ptr = qdf_mem_get_ptr(header);
+
+	qdf_spin_lock_irqsave(&qdf_mem_list_lock);
+	status = qdf_list_insert_front(mem_list, &header->node);
+	qdf_spin_unlock_irqrestore(&qdf_mem_list_lock);
+	if (QDF_IS_STATUS_ERROR(status))
+		qdf_err("Failed to insert memory header; status %d", status);
+
+	qdf_mem_kmalloc_inc(ksize(header));
+
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		ptr += sizeof(void *);
+
+	return ptr;
+}
+
+qdf_export_symbol(qdf_mem_malloc_atomic_debug);
+
+void *qdf_mem_malloc_atomic_debug_fl(size_t size, const char *func,
+				     uint32_t line)
+{
+	void *ptr;
+
+	if (!size || size > QDF_MEM_MAX_MALLOC) {
+		qdf_nofl_err("Cannot malloc %zu bytes @ %s:%d", size, func,
+			     line);
+		return NULL;
+	}
+
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		size += sizeof(void *);
+
+	ptr = qdf_mem_prealloc_get(size);
+	if (ptr)
+		return ptr;
+
+	ptr = kzalloc(size, GFP_ATOMIC);
+	if (!ptr) {
+		qdf_nofl_warn("Failed to malloc %zuB @ %s:%d",
+			      size, func, line);
+		return NULL;
+	}
+
+	qdf_mem_kmalloc_inc(ksize(ptr));
+
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		ptr += sizeof(void *);
+
+	return ptr;
+}
+
+qdf_export_symbol(qdf_mem_malloc_atomic_debug_fl);
 
 void qdf_mem_free_debug(void *ptr, const char *func, uint32_t line)
 {
@@ -1461,6 +1763,9 @@ void qdf_mem_free_debug(void *ptr, const char *func, uint32_t line)
 	/* freeing a null pointer is valid */
 	if (qdf_unlikely(!ptr))
 		return;
+
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		ptr = ptr - sizeof(void *);
 
 	if (qdf_mem_prealloc_put(ptr))
 		return;
@@ -1531,7 +1836,7 @@ void qdf_mem_check_for_leaks(void)
  */
 void qdf_mem_multi_pages_alloc_debug(qdf_device_t osdev,
 				     struct qdf_mem_multi_page_t *pages,
-				     size_t element_size, uint16_t element_num,
+				     size_t element_size, uint32_t element_num,
 				     qdf_dma_context_t memctxt, bool cacheable,
 				     const char *func, uint32_t line,
 				     void *caller)
@@ -1681,6 +1986,15 @@ void *qdf_mem_malloc_atomic_fl(size_t size, const char *func, uint32_t line)
 {
 	void *ptr;
 
+	if (!size || size > QDF_MEM_MAX_MALLOC) {
+		qdf_nofl_err("Cannot malloc %zu bytes @ %s:%d", size, func,
+			     line);
+		return NULL;
+	}
+
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		size += sizeof(void *);
+
 	ptr = qdf_mem_prealloc_get(size);
 	if (ptr)
 		return ptr;
@@ -1693,6 +2007,9 @@ void *qdf_mem_malloc_atomic_fl(size_t size, const char *func, uint32_t line)
 	}
 
 	qdf_mem_kmalloc_inc(ksize(ptr));
+
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		ptr += sizeof(void *);
 
 	return ptr;
 }
@@ -1716,7 +2033,7 @@ qdf_export_symbol(qdf_mem_malloc_atomic_fl);
  */
 void qdf_mem_multi_pages_alloc(qdf_device_t osdev,
 			       struct qdf_mem_multi_page_t *pages,
-			       size_t element_size, uint16_t element_num,
+			       size_t element_size, uint32_t element_num,
 			       qdf_dma_context_t memctxt, bool cacheable)
 {
 	uint16_t page_idx;
@@ -1878,8 +2195,13 @@ void __qdf_mem_free(void *ptr)
 	if (!ptr)
 		return;
 
-	if (qdf_mem_prealloc_put(ptr))
-		return;
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		ptr = ptr - sizeof(void *);
+
+	if (qdf_might_be_prealloc(ptr)) {
+		if (qdf_mem_prealloc_put(ptr))
+			return;
+	}
 
 	qdf_mem_kmalloc_dec(ksize(ptr));
 
@@ -1898,6 +2220,9 @@ void *__qdf_mem_malloc(size_t size, const char *func, uint32_t line)
 		return NULL;
 	}
 
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		size += sizeof(void *);
+
 	ptr = qdf_mem_prealloc_get(size);
 	if (ptr)
 		return ptr;
@@ -1908,10 +2233,40 @@ void *__qdf_mem_malloc(size_t size, const char *func, uint32_t line)
 
 	qdf_mem_kmalloc_inc(ksize(ptr));
 
+	if (add_headroom_for_cnss_prealloc_cache_ptr())
+		ptr += sizeof(void *);
+
 	return ptr;
 }
 
 qdf_export_symbol(__qdf_mem_malloc);
+
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+void __qdf_untracked_mem_free(void *ptr)
+{
+	if (!ptr)
+		return;
+
+	kfree(ptr);
+}
+
+void *__qdf_untracked_mem_malloc(size_t size, const char *func, uint32_t line)
+{
+	void *ptr;
+
+	if (!size || size > QDF_MEM_MAX_MALLOC) {
+		qdf_nofl_err("Cannot malloc %zu bytes @ %s:%d", size, func,
+			     line);
+		return NULL;
+	}
+
+	ptr = kzalloc(size, qdf_mem_malloc_flags());
+	if (!ptr)
+		return NULL;
+
+	return ptr;
+}
+#endif
 
 void *qdf_aligned_malloc_fl(uint32_t *size,
 			    void **vaddr_unaligned,
@@ -1969,6 +2324,73 @@ void *qdf_aligned_malloc_fl(uint32_t *size,
 }
 
 qdf_export_symbol(qdf_aligned_malloc_fl);
+
+#if defined(DP_UMAC_HW_RESET_SUPPORT) || defined(WLAN_SUPPORT_PPEDS)
+/**
+ * qdf_tx_desc_pool_free_bufs() - Go through elems and call the registered  cb
+ * @ctxt: Context to be passed to the cb
+ * @pages: Multi page information storage
+ * @elem_size: Each element size
+ * @elem_count: Total number of elements should be allocated
+ * @cacheable: Coherent memory or cacheable memory
+ * @cb: Callback to free the elements
+ * @elem_list: elem list for delayed free
+ *
+ * Return: 0 on Succscc, or Error code
+ */
+int qdf_tx_desc_pool_free_bufs(void *ctxt, struct qdf_mem_multi_page_t *pages,
+			       uint32_t elem_size, uint32_t elem_count,
+			       uint8_t cacheable, qdf_mem_release_cb cb,
+			       void *elem_list)
+{
+	uint16_t i, i_int;
+	void *page_info;
+	void *elem;
+	uint32_t num_link = 0;
+
+	for (i = 0; i < pages->num_pages; i++) {
+		if (cacheable)
+			page_info = pages->cacheable_pages[i];
+		else
+			page_info = pages->dma_pages[i].page_v_addr_start;
+
+		if (!page_info)
+			return -ENOMEM;
+
+		elem = page_info;
+		for (i_int = 0; i_int < pages->num_element_per_page; i_int++) {
+			if (i_int == (pages->num_element_per_page - 1)) {
+				cb(ctxt, elem, elem_list);
+
+				if ((i + 1) == pages->num_pages)
+					break;
+				if (cacheable)
+					elem =
+					(void *)(pages->cacheable_pages[i + 1]);
+				else
+					elem = (void *)(pages->
+					dma_pages[i + 1].page_v_addr_start);
+
+				num_link++;
+
+				break;
+			}
+
+			cb(ctxt, elem, elem_list);
+			elem = ((char *)elem + elem_size);
+			num_link++;
+
+			/* Last link established exit */
+			if (num_link == (elem_count - 1))
+				break;
+		}
+	}
+
+	return 0;
+}
+
+qdf_export_symbol(qdf_tx_desc_pool_free_bufs);
+#endif
 
 /**
  * qdf_mem_multi_page_link() - Make links for multi page elements
@@ -2546,3 +2968,240 @@ int32_t qdf_skb_mem_stats_read(void)
 
 qdf_export_symbol(qdf_skb_mem_stats_read);
 
+int32_t qdf_skb_total_mem_stats_read(void)
+{
+	return qdf_atomic_read(&qdf_mem_stat.skb_total);
+}
+
+qdf_export_symbol(qdf_skb_total_mem_stats_read);
+
+int32_t qdf_skb_max_mem_stats_read(void)
+{
+	return qdf_mem_stat.skb_mem_max;
+}
+
+qdf_export_symbol(qdf_skb_max_mem_stats_read);
+
+int32_t qdf_dp_tx_skb_mem_stats_read(void)
+{
+	return qdf_atomic_read(&qdf_mem_stat.dp_tx_skb);
+}
+
+qdf_export_symbol(qdf_dp_tx_skb_mem_stats_read);
+
+int32_t qdf_dp_rx_skb_mem_stats_read(void)
+{
+	return qdf_atomic_read(&qdf_mem_stat.dp_rx_skb);
+}
+
+qdf_export_symbol(qdf_dp_rx_skb_mem_stats_read);
+
+int32_t qdf_mem_dp_tx_skb_cnt_read(void)
+{
+	return qdf_atomic_read(&qdf_mem_stat.dp_tx_skb_count);
+}
+
+qdf_export_symbol(qdf_mem_dp_tx_skb_cnt_read);
+
+int32_t qdf_mem_dp_tx_skb_max_cnt_read(void)
+{
+	return qdf_mem_stat.dp_tx_skb_count_max;
+}
+
+qdf_export_symbol(qdf_mem_dp_tx_skb_max_cnt_read);
+
+int32_t qdf_mem_dp_rx_skb_cnt_read(void)
+{
+	return qdf_atomic_read(&qdf_mem_stat.dp_rx_skb_count);
+}
+
+qdf_export_symbol(qdf_mem_dp_rx_skb_cnt_read);
+
+int32_t qdf_mem_dp_rx_skb_max_cnt_read(void)
+{
+	return qdf_mem_stat.dp_rx_skb_count_max;
+}
+
+qdf_export_symbol(qdf_mem_dp_rx_skb_max_cnt_read);
+
+int32_t qdf_dp_tx_skb_max_mem_stats_read(void)
+{
+	return qdf_mem_stat.dp_tx_skb_mem_max;
+}
+
+qdf_export_symbol(qdf_dp_tx_skb_max_mem_stats_read);
+
+int32_t qdf_dp_rx_skb_max_mem_stats_read(void)
+{
+	return qdf_mem_stat.dp_rx_skb_mem_max;
+}
+
+qdf_export_symbol(qdf_dp_rx_skb_max_mem_stats_read);
+
+int32_t qdf_mem_tx_desc_cnt_read(void)
+{
+	return qdf_atomic_read(&qdf_mem_stat.tx_descs_outstanding);
+}
+
+qdf_export_symbol(qdf_mem_tx_desc_cnt_read);
+
+int32_t qdf_mem_tx_desc_max_read(void)
+{
+	return qdf_mem_stat.tx_descs_max;
+}
+
+qdf_export_symbol(qdf_mem_tx_desc_max_read);
+
+void qdf_mem_tx_desc_cnt_update(qdf_atomic_t pending_tx_descs,
+				int32_t tx_descs_max)
+{
+	qdf_mem_stat.tx_descs_outstanding = pending_tx_descs;
+	qdf_mem_stat.tx_descs_max = tx_descs_max;
+}
+
+qdf_export_symbol(qdf_mem_tx_desc_cnt_update);
+
+void qdf_mem_stats_init(void)
+{
+	qdf_mem_stat.skb_mem_max = 0;
+	qdf_mem_stat.dp_tx_skb_mem_max = 0;
+	qdf_mem_stat.dp_rx_skb_mem_max = 0;
+	qdf_mem_stat.dp_tx_skb_count_max = 0;
+	qdf_mem_stat.dp_rx_skb_count_max = 0;
+	qdf_mem_stat.tx_descs_max = 0;
+}
+
+qdf_export_symbol(qdf_mem_stats_init);
+
+void *__qdf_mem_valloc(size_t size, const char *func, uint32_t line)
+{
+	void *ptr;
+
+	if (!size) {
+		qdf_err("Valloc called with 0 bytes @ %s:%d", func, line);
+		return NULL;
+	}
+
+	ptr = vzalloc(size);
+
+	return ptr;
+}
+
+qdf_export_symbol(__qdf_mem_valloc);
+
+void __qdf_mem_vfree(void *ptr)
+{
+	if (qdf_unlikely(!ptr))
+		return;
+
+	vfree(ptr);
+}
+
+qdf_export_symbol(__qdf_mem_vfree);
+
+#if IS_ENABLED(CONFIG_ARM_SMMU) && defined(ENABLE_SMMU_S1_TRANSLATION)
+int
+qdf_iommu_domain_get_attr(qdf_iommu_domain_t *domain,
+			  enum qdf_iommu_attr attr, void *data)
+{
+	return __qdf_iommu_domain_get_attr(domain, attr, data);
+}
+
+qdf_export_symbol(qdf_iommu_domain_get_attr);
+#endif
+
+#ifdef ENHANCED_OS_ABSTRACTION
+void qdf_update_mem_map_table(qdf_device_t osdev,
+			      qdf_mem_info_t *mem_info,
+			      qdf_dma_addr_t dma_addr,
+			      uint32_t mem_size)
+{
+	if (!mem_info) {
+		qdf_nofl_err("%s: NULL mem_info", __func__);
+		return;
+	}
+
+	__qdf_update_mem_map_table(osdev, mem_info, dma_addr, mem_size);
+}
+
+qdf_export_symbol(qdf_update_mem_map_table);
+
+qdf_dma_addr_t qdf_mem_paddr_from_dmaaddr(qdf_device_t osdev,
+					  qdf_dma_addr_t dma_addr)
+{
+	return __qdf_mem_paddr_from_dmaaddr(osdev, dma_addr);
+}
+
+qdf_export_symbol(qdf_mem_paddr_from_dmaaddr);
+#endif
+
+#ifdef QCA_KMEM_CACHE_SUPPORT
+qdf_kmem_cache_t
+__qdf_kmem_cache_create(const char *cache_name,
+			qdf_size_t size)
+{
+	struct kmem_cache *cache;
+
+	cache = kmem_cache_create(cache_name, size,
+				  0, 0, NULL);
+
+	if (!cache)
+		return NULL;
+
+	return cache;
+}
+qdf_export_symbol(__qdf_kmem_cache_create);
+
+void
+__qdf_kmem_cache_destroy(qdf_kmem_cache_t cache)
+{
+	kmem_cache_destroy(cache);
+}
+
+qdf_export_symbol(__qdf_kmem_cache_destroy);
+
+void*
+__qdf_kmem_cache_alloc(qdf_kmem_cache_t cache)
+{
+	int flags = GFP_KERNEL;
+
+	if (in_interrupt() || irqs_disabled() || in_atomic())
+		flags = GFP_ATOMIC;
+
+	return kmem_cache_alloc(cache, flags);
+}
+
+qdf_export_symbol(__qdf_kmem_cache_alloc);
+
+void
+__qdf_kmem_cache_free(qdf_kmem_cache_t cache, void *node)
+
+{
+	kmem_cache_free(cache, node);
+}
+
+qdf_export_symbol(__qdf_kmem_cache_free);
+#else
+qdf_kmem_cache_t
+__qdf_kmem_cache_create(const char *cache_name,
+			qdf_size_t size)
+{
+	return NULL;
+}
+
+void
+__qdf_kmem_cache_destroy(qdf_kmem_cache_t cache)
+{
+}
+
+void *
+__qdf_kmem_cache_alloc(qdf_kmem_cache_t cache)
+{
+	return NULL;
+}
+
+void
+__qdf_kmem_cache_free(qdf_kmem_cache_t cache, void *node)
+{
+}
+#endif

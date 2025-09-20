@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -16,7 +16,7 @@
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
-#include "hal_hw_headers.h"
+#include "hal_li_hw_headers.h"
 #include "hal_internal.h"
 #include "hal_api.h"
 #include "target_type.h"
@@ -34,6 +34,12 @@
 	RXPCU_PPDU_END_INFO_9_RX_PPDU_DURATION_MASK
 #define UNIFIED_RXPCU_PPDU_END_INFO_8_RX_PPDU_DURATION_LSB \
 	RXPCU_PPDU_END_INFO_9_RX_PPDU_DURATION_LSB
+#define UNIFIED_RXPCU_PPDU_END_INFO_11_PHYRX_ABORT_REQUEST_INFO_DETAILS_PHYRX_ABORT_REASON_OFFSET \
+	RXPCU_PPDU_END_INFO_11_PHYRX_ABORT_REQUEST_INFO_DETAILS_PHYRX_ABORT_REASON_OFFSET
+#define UNIFIED_RXPCU_PPDU_END_INFO_11_PHYRX_ABORT_REQUEST_INFO_DETAILS_PHYRX_ABORT_REASON_MASK \
+	RXPCU_PPDU_END_INFO_11_PHYRX_ABORT_REQUEST_INFO_DETAILS_PHYRX_ABORT_REASON_MASK
+#define UNIFIED_RXPCU_PPDU_END_INFO_11_PHYRX_ABORT_REQUEST_INFO_DETAILS_PHYRX_ABORT_REASON_LSB \
+	RXPCU_PPDU_END_INFO_11_PHYRX_ABORT_REQUEST_INFO_DETAILS_PHYRX_ABORT_REASON_LSB
 #define UNIFIED_PHYRX_HT_SIG_0_HT_SIG_INFO_PHYRX_HT_SIG_INFO_DETAILS_OFFSET \
 	PHYRX_HT_SIG_0_PHYRX_HT_SIG_INFO_DETAILS_MCS_OFFSET
 #define UNIFIED_PHYRX_L_SIG_B_0_L_SIG_B_INFO_PHYRX_L_SIG_B_INFO_DETAILS_OFFSET \
@@ -118,10 +124,11 @@
 		 (UMAC_WINDOW_ADDRESS_9000 << 12) | \
 		 WINDOW_ENABLE_BIT)
 
-#include <hal_9000_tx.h>
-#include <hal_9000_rx.h>
+#include "hal_9000_tx.h"
 #include <hal_generic_api.h>
-#include <hal_wbm.h>
+#include "hal_li_rx.h"
+#include "hal_li_api.h"
+#include "hal_li_generic_api.h"
 
 /**
  * hal_rx_sw_mon_desc_info_get_9000(): API to read the
@@ -172,6 +179,9 @@ hal_rx_sw_mon_desc_info_get_9000(hal_ring_desc_t rxdma_dst_ring_desc,
 	desc_info->rxdma_push_reason = HAL_RX_GET(sw_mon_ring,
 						  SW_MONITOR_RING_6,
 						  RXDMA_PUSH_REASON);
+	desc_info->rxdma_error_code = HAL_RX_GET(sw_mon_ring,
+						 SW_MONITOR_RING_6,
+						 RXDMA_ERROR_CODE);
 	desc_info->ppdu_id = HAL_RX_GET(sw_mon_ring,
 					SW_MONITOR_RING_7,
 					PHY_PPDU_ID);
@@ -194,6 +204,25 @@ static uint32_t hal_rx_msdu_start_nss_get_9000(uint8_t *buf)
 	mimo_ss_bitmap = HAL_RX_MSDU_START_MIMO_SS_BITMAP(msdu_start);
 
 	return qdf_get_hweight8(mimo_ss_bitmap);
+}
+
+/**
+ * hal_rx_msdu_start_get_len_9000(): API to get the MSDU length
+ * from rx_msdu_start TLV
+ *
+ * @ buf: pointer to the start of RX PKT TLV headers
+ * Return: (uint32_t)msdu length
+ */
+static uint32_t hal_rx_msdu_start_get_len_9000(uint8_t *buf)
+{
+	struct rx_pkt_tlvs *pkt_tlvs = (struct rx_pkt_tlvs *)buf;
+	struct rx_msdu_start *msdu_start =
+				&pkt_tlvs->msdu_start_tlv.rx_msdu_start;
+	uint32_t msdu_len;
+
+	msdu_len = HAL_RX_MSDU_START_MSDU_LEN_GET(msdu_start);
+
+	return msdu_len;
 }
 
 /**
@@ -260,7 +289,7 @@ static uint8_t hal_rx_get_tlv_9000(void *rx_tlv)
  *
  *@rx_tlv_hdr: start address of rx_pkt_tlvs
  *
- * Return: true if RX_MPDU_START is valied, else false.
+ * Return: true if RX_MPDU_START is valid, else false.
  */
 uint8_t hal_rx_mpdu_start_tlv_tag_valid_9000(void *rx_tlv_hdr)
 {
@@ -893,6 +922,25 @@ static uint8_t hal_rx_get_mpdu_frame_control_valid_9000(uint8_t *buf)
 	return HAL_RX_MPDU_GET_FRAME_CONTROL_VALID(rx_mpdu_info);
 }
 
+/**
+ * hal_rx_get_mpdu_frame_control_field_9000(): Function
+ * to retrieve frame control field
+ *
+ * @nbuf: Network buffer
+ * Returns: value of frame control field
+ *
+ */
+static uint16_t hal_rx_get_mpdu_frame_control_field_9000(uint8_t *buf)
+{
+	struct rx_pkt_tlvs *pkt_tlvs = hal_rx_get_pkt_tlvs(buf);
+	struct rx_mpdu_info *rx_mpdu_info = hal_rx_get_mpdu_info(pkt_tlvs);
+	uint16_t frame_ctrl = 0;
+
+	frame_ctrl = HAL_RX_MPDU_GET_FRAME_CONTROL_FIELD(rx_mpdu_info);
+
+	return frame_ctrl;
+}
+
 /*
  * hal_rx_mpdu_get_addr1_9000(): API to check get address1 of the mpdu
  *
@@ -1109,18 +1157,25 @@ static uint32_t hal_rx_hw_desc_get_ppduid_get_9000(void *rx_tlv_hdr,
 
 /**
  * hal_reo_status_get_header_9000 - Process reo desc info
- * @d - Pointer to reo descriptior
+ * @ring_desc: REO status ring descriptor
  * @b - tlv type info
  * @h1 - Pointer to hal_reo_status_header where info to be stored
  *
  * Return - none.
  *
  */
-static void hal_reo_status_get_header_9000(uint32_t *d, int b, void *h1)
+static void hal_reo_status_get_header_9000(hal_ring_desc_t ring_desc, int b,
+					   void *h1)
 {
+	uint32_t *d = (uint32_t *)ring_desc;
 	uint32_t val1 = 0;
 	struct hal_reo_status_header *h =
 			(struct hal_reo_status_header *)h1;
+
+	/* Offsets of descriptor fields defined in HW headers start
+	 * from the field after TLV header
+	 */
+	d += HAL_GET_NUM_DWORDS(sizeof(struct tlv_32_hdr));
 
 	switch (b) {
 	case HAL_REO_QUEUE_STATS_STATUS_TLV:
@@ -1742,129 +1797,197 @@ void hal_compute_reo_remap_ix2_ix3_9000(uint32_t *ring, uint32_t num_rings,
 		break;
 	}
 }
-struct hal_hw_txrx_ops qcn9000_hal_hw_txrx_ops = {
+
+static void hal_hw_txrx_ops_attach_qcn9000(struct hal_soc *hal_soc)
+{
 
 	/* init and setup */
-	hal_srng_dst_hw_init_generic,
-	hal_srng_src_hw_init_generic,
-	hal_get_hw_hptp_generic,
-	hal_reo_setup_generic,
-	hal_setup_link_idle_list_generic,
-	hal_get_window_address_9000,
-	NULL,
+	hal_soc->ops->hal_srng_dst_hw_init = hal_srng_dst_hw_init_generic;
+	hal_soc->ops->hal_srng_src_hw_init = hal_srng_src_hw_init_generic;
+	hal_soc->ops->hal_get_hw_hptp = hal_get_hw_hptp_generic;
+	hal_soc->ops->hal_reo_setup = hal_reo_setup_generic_li;
+	hal_soc->ops->hal_get_window_address = hal_get_window_address_9000;
 
 	/* tx */
-	hal_tx_desc_set_dscp_tid_table_id_9000,
-	hal_tx_set_dscp_tid_map_9000,
-	hal_tx_update_dscp_tid_9000,
-	hal_tx_desc_set_lmac_id_9000,
-	hal_tx_desc_set_buf_addr_generic,
-	hal_tx_desc_set_search_type_generic,
-	hal_tx_desc_set_search_index_generic,
-	hal_tx_desc_set_cache_set_num_generic,
-	hal_tx_comp_get_status_generic,
-	hal_tx_comp_get_release_reason_generic,
-	hal_get_wbm_internal_error_generic,
-	hal_tx_desc_set_mesh_en_9000,
-	hal_tx_init_cmd_credit_ring_9000,
+	hal_soc->ops->hal_tx_desc_set_dscp_tid_table_id =
+		hal_tx_desc_set_dscp_tid_table_id_9000;
+	hal_soc->ops->hal_tx_set_dscp_tid_map = hal_tx_set_dscp_tid_map_9000;
+	hal_soc->ops->hal_tx_update_dscp_tid = hal_tx_update_dscp_tid_9000;
+	hal_soc->ops->hal_tx_desc_set_lmac_id = hal_tx_desc_set_lmac_id_9000;
+	hal_soc->ops->hal_tx_desc_set_buf_addr =
+					hal_tx_desc_set_buf_addr_generic_li;
+	hal_soc->ops->hal_tx_desc_set_search_type =
+					hal_tx_desc_set_search_type_generic_li;
+	hal_soc->ops->hal_tx_desc_set_search_index =
+					hal_tx_desc_set_search_index_generic_li;
+	hal_soc->ops->hal_tx_desc_set_cache_set_num =
+				hal_tx_desc_set_cache_set_num_generic_li;
+	hal_soc->ops->hal_tx_comp_get_status =
+					hal_tx_comp_get_status_generic_li;
+	hal_soc->ops->hal_tx_comp_get_release_reason =
+		hal_tx_comp_get_release_reason_generic_li;
+	hal_soc->ops->hal_get_wbm_internal_error =
+					hal_get_wbm_internal_error_generic_li;
+	hal_soc->ops->hal_tx_desc_set_mesh_en = hal_tx_desc_set_mesh_en_9000;
+	hal_soc->ops->hal_tx_init_cmd_credit_ring =
+					hal_tx_init_cmd_credit_ring_9000;
 
 	/* rx */
-	hal_rx_msdu_start_nss_get_9000,
-	hal_rx_mon_hw_desc_get_mpdu_status_9000,
-	hal_rx_get_tlv_9000,
-	hal_rx_proc_phyrx_other_receive_info_tlv_9000,
-	hal_rx_dump_msdu_start_tlv_9000,
-	hal_rx_dump_msdu_end_tlv_9000,
-	hal_get_link_desc_size_9000,
-	hal_rx_mpdu_start_tid_get_9000,
-	hal_rx_msdu_start_reception_type_get_9000,
-	hal_rx_msdu_end_da_idx_get_9000,
-	hal_rx_msdu_desc_info_get_ptr_9000,
-	hal_rx_link_desc_msdu0_ptr_9000,
-	hal_reo_status_get_header_9000,
-	hal_rx_status_get_tlv_info_generic,
-	hal_rx_wbm_err_info_get_generic,
-	hal_rx_dump_mpdu_start_tlv_generic,
+	hal_soc->ops->hal_rx_msdu_start_nss_get =
+					hal_rx_msdu_start_nss_get_9000;
+	hal_soc->ops->hal_rx_mon_hw_desc_get_mpdu_status =
+		hal_rx_mon_hw_desc_get_mpdu_status_9000;
+	hal_soc->ops->hal_rx_get_tlv = hal_rx_get_tlv_9000;
+	hal_soc->ops->hal_rx_proc_phyrx_other_receive_info_tlv =
+		hal_rx_proc_phyrx_other_receive_info_tlv_9000;
+	hal_soc->ops->hal_rx_dump_msdu_start_tlv =
+					hal_rx_dump_msdu_start_tlv_9000;
+	hal_soc->ops->hal_rx_dump_msdu_end_tlv = hal_rx_dump_msdu_end_tlv_9000;
+	hal_soc->ops->hal_get_link_desc_size = hal_get_link_desc_size_9000;
+	hal_soc->ops->hal_rx_mpdu_start_tid_get =
+					hal_rx_mpdu_start_tid_get_9000;
+	hal_soc->ops->hal_rx_msdu_start_reception_type_get =
+		hal_rx_msdu_start_reception_type_get_9000;
+	hal_soc->ops->hal_rx_msdu_end_da_idx_get =
+					hal_rx_msdu_end_da_idx_get_9000;
+	hal_soc->ops->hal_rx_msdu_desc_info_get_ptr =
+					hal_rx_msdu_desc_info_get_ptr_9000;
+	hal_soc->ops->hal_rx_link_desc_msdu0_ptr =
+					hal_rx_link_desc_msdu0_ptr_9000;
+	hal_soc->ops->hal_reo_status_get_header =
+					hal_reo_status_get_header_9000;
+	hal_soc->ops->hal_rx_status_get_tlv_info =
+					hal_rx_status_get_tlv_info_generic_li;
+	hal_soc->ops->hal_rx_wbm_err_info_get =
+					hal_rx_wbm_err_info_get_generic_li;
+	hal_soc->ops->hal_rx_dump_mpdu_start_tlv =
+					hal_rx_dump_mpdu_start_tlv_generic_li;
 
-	hal_tx_set_pcp_tid_map_generic,
-	hal_tx_update_pcp_tid_generic,
-	hal_tx_update_tidmap_prty_generic,
-	hal_rx_get_rx_fragment_number_9000,
-	hal_rx_msdu_end_da_is_mcbc_get_9000,
-	hal_rx_msdu_end_sa_is_valid_get_9000,
-	hal_rx_msdu_end_sa_idx_get_9000,
-	hal_rx_desc_is_first_msdu_9000,
-	hal_rx_msdu_end_l3_hdr_padding_get_9000,
-	hal_rx_encryption_info_valid_9000,
-	hal_rx_print_pn_9000,
-	hal_rx_msdu_end_first_msdu_get_9000,
-	hal_rx_msdu_end_da_is_valid_get_9000,
-	hal_rx_msdu_end_last_msdu_get_9000,
-	hal_rx_get_mpdu_mac_ad4_valid_9000,
-	hal_rx_mpdu_start_sw_peer_id_get_9000,
-	hal_rx_mpdu_get_to_ds_9000,
-	hal_rx_mpdu_get_fr_ds_9000,
-	hal_rx_get_mpdu_frame_control_valid_9000,
-	hal_rx_mpdu_get_addr1_9000,
-	hal_rx_mpdu_get_addr2_9000,
-	hal_rx_mpdu_get_addr3_9000,
-	hal_rx_mpdu_get_addr4_9000,
-	hal_rx_get_mpdu_sequence_control_valid_9000,
-	hal_rx_is_unicast_9000,
-	hal_rx_tid_get_9000,
-	hal_rx_hw_desc_get_ppduid_get_9000,
-	hal_rx_mpdu_start_mpdu_qos_control_valid_get_9000,
-	hal_rx_msdu_end_sa_sw_peer_id_get_9000,
-	hal_rx_msdu0_buffer_addr_lsb_9000,
-	hal_rx_msdu_desc_info_ptr_get_9000,
-	hal_ent_mpdu_desc_info_9000,
-	hal_dst_mpdu_desc_info_9000,
-	hal_rx_get_fc_valid_9000,
-	hal_rx_get_to_ds_flag_9000,
-	hal_rx_get_mac_addr2_valid_9000,
-	hal_rx_get_filter_category_9000,
-	hal_rx_get_ppdu_id_9000,
-	hal_reo_config_9000,
-	hal_rx_msdu_flow_idx_get_9000,
-	hal_rx_msdu_flow_idx_invalid_9000,
-	hal_rx_msdu_flow_idx_timeout_9000,
-	hal_rx_msdu_fse_metadata_get_9000,
-	hal_rx_msdu_cce_metadata_get_9000,
-	hal_rx_msdu_get_flow_params_9000,
-	hal_rx_tlv_get_tcp_chksum_9000,
-	hal_rx_get_rx_sequence_9000,
+	hal_soc->ops->hal_tx_set_pcp_tid_map =
+					hal_tx_set_pcp_tid_map_generic_li;
+	hal_soc->ops->hal_tx_update_pcp_tid_map =
+					hal_tx_update_pcp_tid_generic_li;
+	hal_soc->ops->hal_tx_set_tidmap_prty =
+					hal_tx_update_tidmap_prty_generic_li;
+	hal_soc->ops->hal_rx_get_rx_fragment_number =
+					hal_rx_get_rx_fragment_number_9000;
+	hal_soc->ops->hal_rx_msdu_end_da_is_mcbc_get =
+					hal_rx_msdu_end_da_is_mcbc_get_9000;
+	hal_soc->ops->hal_rx_msdu_end_sa_is_valid_get =
+					hal_rx_msdu_end_sa_is_valid_get_9000;
+	hal_soc->ops->hal_rx_msdu_end_sa_idx_get =
+					hal_rx_msdu_end_sa_idx_get_9000;
+	hal_soc->ops->hal_rx_desc_is_first_msdu =
+					hal_rx_desc_is_first_msdu_9000;
+	hal_soc->ops->hal_rx_msdu_end_l3_hdr_padding_get =
+	hal_rx_msdu_end_l3_hdr_padding_get_9000;
+	hal_soc->ops->hal_rx_encryption_info_valid =
+					hal_rx_encryption_info_valid_9000;
+	hal_soc->ops->hal_rx_print_pn = hal_rx_print_pn_9000;
+	hal_soc->ops->hal_rx_msdu_end_first_msdu_get =
+					hal_rx_msdu_end_first_msdu_get_9000;
+	hal_soc->ops->hal_rx_msdu_end_da_is_valid_get =
+					hal_rx_msdu_end_da_is_valid_get_9000;
+	hal_soc->ops->hal_rx_msdu_end_last_msdu_get =
+					hal_rx_msdu_end_last_msdu_get_9000;
+	hal_soc->ops->hal_rx_get_mpdu_mac_ad4_valid =
+					hal_rx_get_mpdu_mac_ad4_valid_9000;
+	hal_soc->ops->hal_rx_mpdu_start_sw_peer_id_get =
+		hal_rx_mpdu_start_sw_peer_id_get_9000;
+	hal_soc->ops->hal_rx_tlv_peer_meta_data_get =
+		hal_rx_mpdu_peer_meta_data_get_li;
+	hal_soc->ops->hal_rx_mpdu_get_to_ds = hal_rx_mpdu_get_to_ds_9000;
+	hal_soc->ops->hal_rx_mpdu_get_fr_ds = hal_rx_mpdu_get_fr_ds_9000;
+	hal_soc->ops->hal_rx_get_mpdu_frame_control_valid =
+		hal_rx_get_mpdu_frame_control_valid_9000;
+	hal_soc->ops->hal_rx_get_frame_ctrl_field =
+		hal_rx_get_mpdu_frame_control_field_9000;
+	hal_soc->ops->hal_rx_mpdu_get_addr1 = hal_rx_mpdu_get_addr1_9000;
+	hal_soc->ops->hal_rx_mpdu_get_addr2 = hal_rx_mpdu_get_addr2_9000;
+	hal_soc->ops->hal_rx_mpdu_get_addr3 = hal_rx_mpdu_get_addr3_9000;
+	hal_soc->ops->hal_rx_mpdu_get_addr4 = hal_rx_mpdu_get_addr4_9000;
+	hal_soc->ops->hal_rx_get_mpdu_sequence_control_valid =
+		hal_rx_get_mpdu_sequence_control_valid_9000;
+	hal_soc->ops->hal_rx_is_unicast = hal_rx_is_unicast_9000;
+	hal_soc->ops->hal_rx_tid_get = hal_rx_tid_get_9000;
+	hal_soc->ops->hal_rx_hw_desc_get_ppduid_get =
+					hal_rx_hw_desc_get_ppduid_get_9000;
+	hal_soc->ops->hal_rx_mpdu_start_mpdu_qos_control_valid_get =
+		hal_rx_mpdu_start_mpdu_qos_control_valid_get_9000;
+	hal_soc->ops->hal_rx_msdu_end_sa_sw_peer_id_get =
+		hal_rx_msdu_end_sa_sw_peer_id_get_9000;
+	hal_soc->ops->hal_rx_msdu0_buffer_addr_lsb =
+					hal_rx_msdu0_buffer_addr_lsb_9000;
+	hal_soc->ops->hal_rx_msdu_desc_info_ptr_get =
+					hal_rx_msdu_desc_info_ptr_get_9000;
+	hal_soc->ops->hal_ent_mpdu_desc_info = hal_ent_mpdu_desc_info_9000;
+	hal_soc->ops->hal_dst_mpdu_desc_info = hal_dst_mpdu_desc_info_9000;
+	hal_soc->ops->hal_rx_get_fc_valid = hal_rx_get_fc_valid_9000;
+	hal_soc->ops->hal_rx_get_to_ds_flag = hal_rx_get_to_ds_flag_9000;
+	hal_soc->ops->hal_rx_get_mac_addr2_valid =
+					hal_rx_get_mac_addr2_valid_9000;
+	hal_soc->ops->hal_rx_get_filter_category =
+					hal_rx_get_filter_category_9000;
+	hal_soc->ops->hal_rx_get_ppdu_id = hal_rx_get_ppdu_id_9000;
+	hal_soc->ops->hal_reo_config = hal_reo_config_9000;
+	hal_soc->ops->hal_rx_msdu_flow_idx_get = hal_rx_msdu_flow_idx_get_9000;
+	hal_soc->ops->hal_rx_msdu_flow_idx_invalid =
+					hal_rx_msdu_flow_idx_invalid_9000;
+	hal_soc->ops->hal_rx_msdu_flow_idx_timeout =
+					hal_rx_msdu_flow_idx_timeout_9000;
+	hal_soc->ops->hal_rx_msdu_fse_metadata_get =
+					hal_rx_msdu_fse_metadata_get_9000;
+	hal_soc->ops->hal_rx_msdu_cce_match_get =
+					hal_rx_msdu_cce_match_get_li;
+	hal_soc->ops->hal_rx_msdu_cce_metadata_get =
+					hal_rx_msdu_cce_metadata_get_9000;
+	hal_soc->ops->hal_rx_msdu_get_flow_params =
+					hal_rx_msdu_get_flow_params_9000;
+	hal_soc->ops->hal_rx_tlv_get_tcp_chksum =
+					hal_rx_tlv_get_tcp_chksum_9000;
+	hal_soc->ops->hal_rx_get_rx_sequence = hal_rx_get_rx_sequence_9000;
 #if defined(WLAN_CFR_ENABLE) && defined(WLAN_ENH_CFR_ENABLE)
-	hal_rx_get_bb_info_9000,
-	hal_rx_get_rtt_info_9000,
-#else
-	NULL,
-	NULL,
+	hal_soc->ops->hal_rx_get_bb_info = hal_rx_get_bb_info_9000;
+	hal_soc->ops->hal_rx_get_rtt_info = hal_rx_get_rtt_info_9000;
 #endif
 	/* rx - msdu fast path info fields */
-	hal_rx_msdu_packet_metadata_get_9000,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	hal_rx_mpdu_start_tlv_tag_valid_9000,
-	hal_rx_sw_mon_desc_info_get_9000,
-	hal_rx_wbm_err_msdu_continuation_get_9000,
+	hal_soc->ops->hal_rx_msdu_packet_metadata_get =
+					hal_rx_msdu_packet_metadata_get_9000;
+	hal_soc->ops->hal_rx_mpdu_start_tlv_tag_valid =
+					hal_rx_mpdu_start_tlv_tag_valid_9000;
+	hal_soc->ops->hal_rx_sw_mon_desc_info_get =
+					hal_rx_sw_mon_desc_info_get_9000;
+	hal_soc->ops->hal_rx_wbm_err_msdu_continuation_get =
+		hal_rx_wbm_err_msdu_continuation_get_9000;
 
 	/* rx - TLV struct offsets */
-	hal_rx_msdu_end_offset_get_generic,
-	hal_rx_attn_offset_get_generic,
-	hal_rx_msdu_start_offset_get_generic,
-	hal_rx_mpdu_start_offset_get_generic,
-	hal_rx_mpdu_end_offset_get_generic,
-	hal_rx_flow_setup_fse_9000,
-	hal_compute_reo_remap_ix2_ix3_9000,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL
+	hal_soc->ops->hal_rx_msdu_end_offset_get =
+					hal_rx_msdu_end_offset_get_generic;
+	hal_soc->ops->hal_rx_attn_offset_get = hal_rx_attn_offset_get_generic;
+	hal_soc->ops->hal_rx_msdu_start_offset_get =
+					hal_rx_msdu_start_offset_get_generic;
+	hal_soc->ops->hal_rx_mpdu_start_offset_get =
+					hal_rx_mpdu_start_offset_get_generic;
+	hal_soc->ops->hal_rx_mpdu_end_offset_get =
+					hal_rx_mpdu_end_offset_get_generic;
+#ifndef NO_RX_PKT_HDR_TLV
+	hal_soc->ops->hal_rx_pkt_tlv_offset_get =
+					hal_rx_pkt_tlv_offset_get_generic;
+#endif
+	hal_soc->ops->hal_rx_flow_setup_fse = hal_rx_flow_setup_fse_9000;
+
+	hal_soc->ops->hal_rx_flow_get_tuple_info =
+					hal_rx_flow_get_tuple_info_li;
+	 hal_soc->ops->hal_rx_flow_delete_entry =
+					hal_rx_flow_delete_entry_li;
+	hal_soc->ops->hal_rx_fst_get_fse_size = hal_rx_fst_get_fse_size_li;
+	hal_soc->ops->hal_compute_reo_remap_ix2_ix3 =
+					hal_compute_reo_remap_ix2_ix3_9000;
+	hal_soc->ops->hal_setup_link_idle_list =
+				hal_setup_link_idle_list_generic_li;
+	hal_soc->ops->hal_compute_reo_remap_ix0 = NULL;
+	hal_soc->ops->hal_rx_tlv_msdu_len_get =
+				hal_rx_msdu_start_get_len_9000;
 };
 
 struct hal_hw_srng_config hw_srng_table_9000[] = {
@@ -2150,7 +2273,7 @@ struct hal_hw_srng_config hw_srng_table_9000[] = {
 	},
 	{ /* WBM2SW_RELEASE */
 		.start_ring_id = HAL_SRNG_WBM2SW0_RELEASE,
-		.max_rings = 4,
+		.max_rings = 5,
 		.entry_size = sizeof(struct wbm_release_ring) >> 2,
 		.lmac_ring = FALSE,
 		.ring_dir = HAL_SRNG_DST_RING,
@@ -2171,7 +2294,11 @@ struct hal_hw_srng_config hw_srng_table_9000[] = {
 	{ /* RXDMA_BUF */
 		.start_ring_id = HAL_SRNG_WMAC1_SW2RXDMA0_BUF0,
 #ifdef IPA_OFFLOAD
+#ifdef IPA_WDI3_VLAN_SUPPORT
+		.max_rings = 4,
+#else
 		.max_rings = 3,
+#endif
 #else
 		.max_rings = 2,
 #endif
@@ -2279,36 +2406,12 @@ struct hal_hw_srng_config hw_srng_table_9000[] = {
 		.max_size = HAL_RXDMA_MAX_RING_SIZE,
 	},
 #endif
-};
-
-int32_t hal_hw_reg_offset_qcn9000[] = {
-	/* dst */
-	REG_OFFSET(DST, HP),
-	REG_OFFSET(DST, TP),
-	REG_OFFSET(DST, ID),
-	REG_OFFSET(DST, MISC),
-	REG_OFFSET(DST, HP_ADDR_LSB),
-	REG_OFFSET(DST, HP_ADDR_MSB),
-	REG_OFFSET(DST, MSI1_BASE_LSB),
-	REG_OFFSET(DST, MSI1_BASE_MSB),
-	REG_OFFSET(DST, MSI1_DATA),
-	REG_OFFSET(DST, BASE_LSB),
-	REG_OFFSET(DST, BASE_MSB),
-	REG_OFFSET(DST, PRODUCER_INT_SETUP),
-	/* src */
-	REG_OFFSET(SRC, HP),
-	REG_OFFSET(SRC, TP),
-	REG_OFFSET(SRC, ID),
-	REG_OFFSET(SRC, MISC),
-	REG_OFFSET(SRC, TP_ADDR_LSB),
-	REG_OFFSET(SRC, TP_ADDR_MSB),
-	REG_OFFSET(SRC, MSI1_BASE_LSB),
-	REG_OFFSET(SRC, MSI1_BASE_MSB),
-	REG_OFFSET(SRC, MSI1_DATA),
-	REG_OFFSET(SRC, BASE_LSB),
-	REG_OFFSET(SRC, BASE_MSB),
-	REG_OFFSET(SRC, CONSUMER_INT_SETUP_IX0),
-	REG_OFFSET(SRC, CONSUMER_INT_SETUP_IX1),
+	{ /* REO2PPE */ 0},
+	{ /* PPE2TCL */ 0},
+	{ /* PPE_RELEASE */ 0},
+	{ /* TX_MONITOR_BUF */ 0},
+	{ /* TX_MONITOR_DST */ 0},
+	{ /* SW2RXDMA_NEW */ 0},
 };
 
 /**
@@ -2319,8 +2422,9 @@ int32_t hal_hw_reg_offset_qcn9000[] = {
 void hal_qcn9000_attach(struct hal_soc *hal_soc)
 {
 	hal_soc->hw_srng_table = hw_srng_table_9000;
-	hal_soc->hal_hw_reg_offset = hal_hw_reg_offset_qcn9000;
-	hal_soc->ops = &qcn9000_hal_hw_txrx_ops;
+	hal_srng_hw_reg_offset_init_generic(hal_soc);
+	hal_hw_txrx_default_ops_attach_li(hal_soc);
+	hal_hw_txrx_ops_attach_qcn9000(hal_soc);
 	if (hal_soc->static_window_map)
 		hal_write_window_register(hal_soc);
 }

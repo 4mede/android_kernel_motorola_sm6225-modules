@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2015-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
-
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -41,7 +41,8 @@
 #include "hif_debug.h"
 #include "mp_dev.h"
 #if defined(QCA_WIFI_QCA8074) || defined(QCA_WIFI_QCA6018) || \
-	defined(QCA_WIFI_QCA5018)
+	defined(QCA_WIFI_QCA5018) || defined(QCA_WIFI_QCA9574) || \
+	defined(QCA_WIFI_QCA5332)
 #include "hal_api.h"
 #endif
 #include "hif_napi.h"
@@ -53,9 +54,7 @@
 #endif
 #include <linux/cpumask.h>
 
-#if defined(HIF_IPCI) && defined(FEATURE_HAL_DELAYED_REG_WRITE)
 #include <pld_common.h>
-#endif
 
 void hif_dump(struct hif_opaque_softc *hif_ctx, uint8_t cmd_id, bool start)
 {
@@ -128,6 +127,10 @@ void hif_vote_link_down(struct hif_opaque_softc *hif_ctx)
 	struct hif_softc *scn = HIF_GET_SOFTC(hif_ctx);
 
 	QDF_BUG(scn);
+	if (scn->linkstate_vote == 0)
+		QDF_DEBUG_PANIC("linkstate_vote(%d) has already been 0",
+				scn->linkstate_vote);
+
 	scn->linkstate_vote--;
 	hif_info("Down_linkstate_vote %d", scn->linkstate_vote);
 	if (scn->linkstate_vote == 0)
@@ -138,7 +141,7 @@ void hif_vote_link_down(struct hif_opaque_softc *hif_ctx)
  * hif_vote_link_up(): vote to prevent bus from suspending
  *
  * Makes hif guarantee that fw can message the host normally
- * durring suspend.
+ * during suspend.
  *
  * SYNCHRONIZE WITH hif_vote_link_up by only calling in MC thread
  * and initialization deinitialization sequencences.
@@ -166,7 +169,7 @@ void hif_vote_link_up(struct hif_opaque_softc *hif_ctx)
  * we don't need extra locking to ensure votes dont change while
  * we are in the process of suspending or resuming.
  *
- * Return: false if hif will guarantee link up durring suspend.
+ * Return: false if hif will guarantee link up during suspend.
  */
 bool hif_can_suspend_link(struct hif_opaque_softc *hif_ctx)
 {
@@ -209,8 +212,6 @@ uint32_t hif_hia_item_address(uint32_t target_type, uint32_t item_offset)
 		return QCA9984_HOST_INTEREST_ADDRESS + item_offset;
 	case TARGET_TYPE_QCA9888:
 		return QCA9888_HOST_INTEREST_ADDRESS + item_offset;
-	case TARGET_TYPE_IPQ4019:
-		return IPQ4019_HOST_INTEREST_ADDRESS + item_offset;
 
 	default:
 		ASSERT(0);
@@ -355,6 +356,101 @@ static const struct qwlan_hw qwlan_hw_list[] = {
 		.id = QCA9379_REV1_VERSION,
 		.subid = 0xD,
 		.name = "QCA9379_REV1_1",
+	},
+	{
+		.id = MANGO_V1,
+		.subid = 0xF,
+		.name = "MANGO_V1",
+	},
+	{
+		.id = KIWI_V1,
+		.subid = 0,
+		.name = "KIWI_V1",
+	},
+	{
+		.id = KIWI_V2,
+		.subid = 0,
+		.name = "KIWI_V2",
+	},
+	{
+		.id = WCN6750_V1,
+		.subid = 0,
+		.name = "WCN6750_V1",
+	},
+	{
+		.id = WCN6750_V2,
+		.subid = 0,
+		.name = "WCN6750_V2",
+	},
+	{
+		.id = WCN6450_V1,
+		.subid = 0,
+		.name = "WCN6450_V1",
+	},
+	{
+		.id = QCA6490_v2_1,
+		.subid = 0,
+		.name = "QCA6490",
+	},
+	{
+		.id = QCA6490_v2,
+		.subid = 0,
+		.name = "QCA6490",
+	},
+	{
+		.id = WCN3990_v2_2,
+		.subid = 0,
+		.name = "WCN3990_v2_2",
+	},
+	{
+		.id = WCN3990_TALOS,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_MOOREA,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_SAIPAN,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_RENNELL,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_BITRA,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_DIVAR,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_ATHERTON,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_STRAIT,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_NETRANI,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_CLARENCE,
+		.subid = 0,
+		.name = "WCN3990",
 	}
 };
 
@@ -367,6 +463,10 @@ static const struct qwlan_hw qwlan_hw_list[] = {
 static const char *hif_get_hw_name(struct hif_target_info *info)
 {
 	int i;
+
+	hif_debug("target version = %d, target revision = %d",
+		  info->target_version,
+		  info->target_revision);
 
 	if (info->hw_name)
 		return info->hw_name;
@@ -443,17 +543,73 @@ void *hif_get_dev_ba_ce(struct hif_opaque_softc *hif_handle)
 
 qdf_export_symbol(hif_get_dev_ba_ce);
 
+uint32_t hif_get_soc_version(struct hif_opaque_softc *hif_handle)
+{
+	struct hif_softc *scn = (struct hif_softc *)hif_handle;
+
+	return scn->target_info.soc_version;
+}
+
+qdf_export_symbol(hif_get_soc_version);
+
+/**
+ * hif_get_dev_ba_cmem(): API to get device ce base address.
+ * @scn: scn
+ *
+ * Return: dev mem base address for CMEM
+ */
+void *hif_get_dev_ba_cmem(struct hif_opaque_softc *hif_handle)
+{
+	struct hif_softc *scn = (struct hif_softc *)hif_handle;
+
+	return scn->mem_cmem;
+}
+
+qdf_export_symbol(hif_get_dev_ba_cmem);
+
+#ifdef FEATURE_RUNTIME_PM
+void hif_runtime_prevent_linkdown(struct hif_softc *scn, bool is_get)
+{
+	if (is_get)
+		qdf_runtime_pm_prevent_suspend(&scn->prevent_linkdown_lock);
+	else
+		qdf_runtime_pm_allow_suspend(&scn->prevent_linkdown_lock);
+}
+
+static inline
+void hif_rtpm_lock_init(struct hif_softc *scn)
+{
+	qdf_runtime_lock_init(&scn->prevent_linkdown_lock);
+}
+
+static inline
+void hif_rtpm_lock_deinit(struct hif_softc *scn)
+{
+	qdf_runtime_lock_deinit(&scn->prevent_linkdown_lock);
+}
+#else
+static inline
+void hif_rtpm_lock_init(struct hif_softc *scn)
+{
+}
+
+static inline
+void hif_rtpm_lock_deinit(struct hif_softc *scn)
+{
+}
+#endif
+
 #ifdef WLAN_CE_INTERRUPT_THRESHOLD_CONFIG
 /**
- * hif_get_cfg_from_psoc() - Retrieve ini cfg from psoc
+ * hif_get_interrupt_threshold_cfg_from_psoc() - Retrieve ini cfg from psoc
  * @scn: hif context
  * @psoc: psoc objmgr handle
  *
  * Return: None
  */
 static inline
-void hif_get_cfg_from_psoc(struct hif_softc *scn,
-			   struct wlan_objmgr_psoc *psoc)
+void hif_get_interrupt_threshold_cfg_from_psoc(struct hif_softc *scn,
+					       struct wlan_objmgr_psoc *psoc)
 {
 	if (psoc) {
 		scn->ini_cfg.ce_status_ring_timer_threshold =
@@ -466,11 +622,41 @@ void hif_get_cfg_from_psoc(struct hif_softc *scn,
 }
 #else
 static inline
-void hif_get_cfg_from_psoc(struct hif_softc *scn,
-			   struct wlan_objmgr_psoc *psoc)
+void hif_get_interrupt_threshold_cfg_from_psoc(struct hif_softc *scn,
+					       struct wlan_objmgr_psoc *psoc)
 {
 }
 #endif /* WLAN_CE_INTERRUPT_THRESHOLD_CONFIG */
+
+/**
+ * hif_get_cfg_from_psoc() - Retrieve ini cfg from psoc
+ * @scn: hif context
+ * @psoc: psoc objmgr handle
+ *
+ * Return: None
+ */
+static inline
+void hif_get_cfg_from_psoc(struct hif_softc *scn,
+			   struct wlan_objmgr_psoc *psoc)
+{
+	if (psoc) {
+		scn->ini_cfg.disable_wake_irq =
+			cfg_get(psoc, CFG_DISABLE_WAKE_IRQ);
+		/**
+		 * Wake IRQ can't share the same IRQ with the copy engines
+		 * In one MSI mode, we don't know whether wake IRQ is triggered
+		 * or not in wake IRQ handler. known issue CR 2055359
+		 * If you want to support Wake IRQ. Please allocate at least
+		 * 2 MSI vector. The first is for wake IRQ while the others
+		 * share the second vector
+		 */
+		if (pld_is_one_msi(scn->qdf_dev->dev)) {
+			hif_debug("Disable wake IRQ once it is one MSI mode");
+			scn->ini_cfg.disable_wake_irq = true;
+		}
+		hif_get_interrupt_threshold_cfg_from_psoc(scn, psoc);
+	}
+}
 
 #if defined(HIF_CE_LOG_INFO) || defined(HIF_BUS_LOG_INFO)
 /**
@@ -489,6 +675,7 @@ int hif_recovery_notifier_cb(struct notifier_block *block, unsigned long state,
 	struct qdf_notifer_data *notif_data = data;
 	qdf_notif_block *notif_block;
 	struct hif_softc *hif_handle;
+	bool bus_id_invalid;
 
 	if (!data || !block)
 		return -EINVAL;
@@ -499,8 +686,11 @@ int hif_recovery_notifier_cb(struct notifier_block *block, unsigned long state,
 	if (!hif_handle)
 		return -EINVAL;
 
-	hif_log_bus_info(hif_handle, notif_data->hang_data,
-			 &notif_data->offset);
+	bus_id_invalid = hif_log_bus_info(hif_handle, notif_data->hang_data,
+					  &notif_data->offset);
+	if (bus_id_invalid)
+		return NOTIFY_STOP_MASK;
+
 	hif_log_ce_info(hif_handle, notif_data->hang_data,
 			&notif_data->offset);
 
@@ -643,6 +833,149 @@ static void hif_cpuhp_unregister(struct hif_softc *scn)
 #endif /* ifdef HIF_CPU_PERF_AFFINE_MASK */
 
 #ifdef HIF_DETECTION_LATENCY_ENABLE
+/*
+ * Bitmask to control enablement of latency detection for the tasklets,
+ * bit-X represents for tasklet of WLAN_CE_X.
+ */
+#ifndef DETECTION_LATENCY_TASKLET_MASK
+#define DETECTION_LATENCY_TASKLET_MASK (BIT(2) | BIT(7))
+#endif
+
+static inline int
+__hif_tasklet_latency(struct hif_softc *scn, bool from_timer, int idx)
+{
+	qdf_time_t sched_time =
+		scn->latency_detect.tasklet_info[idx].sched_time;
+	qdf_time_t exec_time =
+		scn->latency_detect.tasklet_info[idx].exec_time;
+	qdf_time_t curr_time = qdf_system_ticks();
+	uint32_t threshold = scn->latency_detect.threshold;
+	qdf_time_t expect_exec_time =
+		sched_time + qdf_system_msecs_to_ticks(threshold);
+
+	/* 2 kinds of check here.
+	 * from_timer==true:  check if tasklet stall
+	 * from_timer==false: check tasklet execute comes late
+	 */
+	if (from_timer ?
+	    (qdf_system_time_after(sched_time, exec_time) &&
+	     qdf_system_time_after(curr_time, expect_exec_time)) :
+	    qdf_system_time_after(exec_time, expect_exec_time)) {
+		hif_err("tasklet[%d] latency detected: from_timer %d, curr_time %lu, sched_time %lu, exec_time %lu, threshold %ums, timeout %ums, cpu_id %d, called: %ps",
+			idx, from_timer, curr_time, sched_time,
+			exec_time, threshold,
+			scn->latency_detect.timeout,
+			qdf_get_cpu(), (void *)_RET_IP_);
+		qdf_trigger_self_recovery(NULL,
+					  QDF_TASKLET_CREDIT_LATENCY_DETECT);
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+
+/**
+ * hif_tasklet_latency_detect_enabled() - check whether latency detect
+ * is enabled for the tasklet which is specified by idx
+ * @scn: HIF opaque context
+ * @idx: CE id
+ *
+ * Return: true if latency detect is enabled for the specified tasklet,
+ * false otherwise.
+ */
+static inline bool
+hif_tasklet_latency_detect_enabled(struct hif_softc *scn, int idx)
+{
+	if (QDF_GLOBAL_MISSION_MODE != hif_get_conparam(scn))
+		return false;
+
+	if (!scn->latency_detect.enable_detection)
+		return false;
+
+	if (idx < 0 || idx >= HIF_TASKLET_IN_MONITOR ||
+	    !qdf_test_bit(idx, scn->latency_detect.tasklet_bmap))
+		return false;
+
+	return true;
+}
+
+void hif_tasklet_latency_record_exec(struct hif_softc *scn, int idx)
+{
+	if (!hif_tasklet_latency_detect_enabled(scn, idx))
+		return;
+
+	/*
+	 * hif_set_enable_detection(true) might come between
+	 * hif_tasklet_latency_record_sched() and
+	 * hif_tasklet_latency_record_exec() during wlan startup, then the
+	 * sched_time is 0 but exec_time is not, and hit the timeout case in
+	 * __hif_tasklet_latency().
+	 * To avoid such issue, skip exec_time recording if sched_time has not
+	 * been recorded.
+	 */
+	if (!scn->latency_detect.tasklet_info[idx].sched_time)
+		return;
+
+	scn->latency_detect.tasklet_info[idx].exec_time = qdf_system_ticks();
+	__hif_tasklet_latency(scn, false, idx);
+}
+
+void hif_tasklet_latency_record_sched(struct hif_softc *scn, int idx)
+{
+	if (!hif_tasklet_latency_detect_enabled(scn, idx))
+		return;
+
+	scn->latency_detect.tasklet_info[idx].sched_cpuid = qdf_get_cpu();
+	scn->latency_detect.tasklet_info[idx].sched_time = qdf_system_ticks();
+}
+
+static inline void hif_credit_latency(struct hif_softc *scn, bool from_timer)
+{
+	qdf_time_t credit_request_time =
+		scn->latency_detect.credit_request_time;
+	qdf_time_t credit_report_time = scn->latency_detect.credit_report_time;
+	qdf_time_t curr_jiffies = qdf_system_ticks();
+	uint32_t threshold = scn->latency_detect.threshold;
+	int cpu_id = qdf_get_cpu();
+
+	/* 2 kinds of check here.
+	 * from_timer==true:  check if credit report stall
+	 * from_timer==false: check credit report comes late
+	 */
+
+	if ((from_timer ?
+	     qdf_system_time_after(credit_request_time, credit_report_time) :
+	     qdf_system_time_after(credit_report_time, credit_request_time)) &&
+	    qdf_system_time_after(curr_jiffies,
+				  credit_request_time +
+				  qdf_system_msecs_to_ticks(threshold))) {
+		hif_err("credit report latency: from timer %d, curr_jiffies %lu, credit_request_time %lu, credit_report_time %lu, threshold %ums, timeout %ums, cpu_id %d, called: %ps",
+			from_timer, curr_jiffies, credit_request_time,
+			credit_report_time, threshold,
+			scn->latency_detect.timeout,
+			cpu_id, (void *)_RET_IP_);
+		goto latency;
+	}
+	return;
+
+latency:
+	qdf_trigger_self_recovery(NULL, QDF_TASKLET_CREDIT_LATENCY_DETECT);
+}
+
+static inline void hif_tasklet_latency(struct hif_softc *scn, bool from_timer)
+{
+	int i, ret;
+
+	for (i = 0; i < HIF_TASKLET_IN_MONITOR; i++) {
+		if (!qdf_test_bit(i, scn->latency_detect.tasklet_bmap))
+			continue;
+
+		ret = __hif_tasklet_latency(scn, from_timer, i);
+		if (ret)
+			return;
+	}
+}
+
 /**
  * hif_check_detection_latency(): to check if latency for tasklet/credit
  *
@@ -656,130 +989,73 @@ void hif_check_detection_latency(struct hif_softc *scn,
 				 bool from_timer,
 				 uint32_t bitmap_type)
 {
-	qdf_time_t ce2_tasklet_sched_time =
-		scn->latency_detect.ce2_tasklet_sched_time;
-	qdf_time_t ce2_tasklet_exec_time =
-		scn->latency_detect.ce2_tasklet_exec_time;
-	qdf_time_t credit_request_time =
-		scn->latency_detect.credit_request_time;
-	qdf_time_t credit_report_time =
-		scn->latency_detect.credit_report_time;
-	qdf_time_t curr_jiffies = qdf_system_ticks();
-	uint32_t detect_latency_threshold =
-		scn->latency_detect.detect_latency_threshold;
-	int cpu_id = qdf_get_cpu();
-
 	if (QDF_GLOBAL_MISSION_MODE != hif_get_conparam(scn))
 		return;
 
 	if (!scn->latency_detect.enable_detection)
 		return;
 
-	/* 2 kinds of check here.
-	 * from_timer==true:  check if tasklet or credit report stall
-	 * from_timer==false: check tasklet execute or credit report comes late
-	 */
-	if (bitmap_type & BIT(HIF_DETECT_TASKLET) &&
-	    (from_timer ?
-	    qdf_system_time_after(ce2_tasklet_sched_time,
-				  ce2_tasklet_exec_time) :
-	    qdf_system_time_after(ce2_tasklet_exec_time,
-				  ce2_tasklet_sched_time)) &&
-	    qdf_system_time_after(
-		curr_jiffies,
-		ce2_tasklet_sched_time +
-		qdf_system_msecs_to_ticks(detect_latency_threshold))) {
-		hif_err("tasklet ce2 latency: from_timer %d, curr_jiffies %lu, ce2_tasklet_sched_time %lu,ce2_tasklet_exec_time %lu, detect_latency_threshold %ums detect_latency_timer_timeout %ums, cpu_id %d, called: %ps",
-			from_timer, curr_jiffies, ce2_tasklet_sched_time,
-			ce2_tasklet_exec_time, detect_latency_threshold,
-			scn->latency_detect.detect_latency_timer_timeout,
-			cpu_id, (void *)_RET_IP_);
-		goto latency;
-	}
+	if (bitmap_type & BIT(HIF_DETECT_TASKLET))
+		hif_tasklet_latency(scn, from_timer);
 
-	if (bitmap_type & BIT(HIF_DETECT_CREDIT) &&
-	    (from_timer ?
-	    qdf_system_time_after(credit_request_time,
-				  credit_report_time) :
-	    qdf_system_time_after(credit_report_time,
-				  credit_request_time)) &&
-	    qdf_system_time_after(
-		curr_jiffies,
-		credit_request_time +
-		qdf_system_msecs_to_ticks(detect_latency_threshold))) {
-		hif_err("credit report latency: from timer %d, curr_jiffies %lu, credit_request_time %lu,credit_report_time %lu, detect_latency_threshold %ums, detect_latency_timer_timeout %ums, cpu_id %d, called: %ps",
-			from_timer, curr_jiffies, credit_request_time,
-			credit_report_time, detect_latency_threshold,
-			scn->latency_detect.detect_latency_timer_timeout,
-			cpu_id, (void *)_RET_IP_);
-		goto latency;
-	}
-
-	return;
-
-latency:
-	qdf_trigger_self_recovery(NULL, QDF_TASKLET_CREDIT_LATENCY_DETECT);
+	if (bitmap_type & BIT(HIF_DETECT_CREDIT))
+		hif_credit_latency(scn, from_timer);
 }
 
 static void hif_latency_detect_timeout_handler(void *arg)
 {
 	struct hif_softc *scn = (struct hif_softc *)arg;
-	int next_cpu;
+	int next_cpu, i;
+	qdf_cpu_mask cpu_mask = {0};
+	struct hif_latency_detect *detect = &scn->latency_detect;
 
 	hif_check_detection_latency(scn, true,
 				    BIT(HIF_DETECT_TASKLET) |
 				    BIT(HIF_DETECT_CREDIT));
 
-	/* it need to make sure timer start on a differnt cpu,
+	/* it need to make sure timer start on a different cpu,
 	 * so it can detect the tasklet schedule stall, but there
 	 * is still chance that, after timer has been started, then
 	 * irq/tasklet happens on the same cpu, then tasklet will
 	 * execute before softirq timer, if this tasklet stall, the
-	 * timer can't detect it, we can accept this as a limition,
+	 * timer can't detect it, we can accept this as a limitation,
 	 * if tasklet stall, anyway other place will detect it, just
 	 * a little later.
 	 */
-	next_cpu = cpumask_any_but(
-			cpu_active_mask,
-			scn->latency_detect.ce2_tasklet_sched_cpuid);
+	qdf_cpumask_copy(&cpu_mask, (const qdf_cpu_mask *)cpu_active_mask);
+	for (i = 0; i < HIF_TASKLET_IN_MONITOR; i++) {
+		if (!qdf_test_bit(i, detect->tasklet_bmap))
+			continue;
 
+		qdf_cpumask_clear_cpu(detect->tasklet_info[i].sched_cpuid,
+				      &cpu_mask);
+	}
+
+	next_cpu = cpumask_first(&cpu_mask);
 	if (qdf_unlikely(next_cpu >= nr_cpu_ids)) {
 		hif_debug("start timer on local");
 		/* it doesn't found a available cpu, start on local cpu*/
-		qdf_timer_mod(
-			&scn->latency_detect.detect_latency_timer,
-			scn->latency_detect.detect_latency_timer_timeout);
+		qdf_timer_mod(&detect->timer, detect->timeout);
 	} else {
-		qdf_timer_start_on(
-			&scn->latency_detect.detect_latency_timer,
-			scn->latency_detect.detect_latency_timer_timeout,
-			next_cpu);
+		qdf_timer_start_on(&detect->timer, detect->timeout, next_cpu);
 	}
 }
 
 static void hif_latency_detect_timer_init(struct hif_softc *scn)
 {
-	if (!scn) {
-		hif_info_high("scn is null");
-		return;
-	}
-
-	if (QDF_GLOBAL_MISSION_MODE != hif_get_conparam(scn))
-		return;
-
-	scn->latency_detect.detect_latency_timer_timeout =
+	scn->latency_detect.timeout =
 		DETECTION_TIMER_TIMEOUT;
-	scn->latency_detect.detect_latency_threshold =
+	scn->latency_detect.threshold =
 		DETECTION_LATENCY_THRESHOLD;
 
 	hif_info("timer timeout %u, latency threshold %u",
-		 scn->latency_detect.detect_latency_timer_timeout,
-		 scn->latency_detect.detect_latency_threshold);
+		 scn->latency_detect.timeout,
+		 scn->latency_detect.threshold);
 
 	scn->latency_detect.is_timer_started = false;
 
 	qdf_timer_init(NULL,
-		       &scn->latency_detect.detect_latency_timer,
+		       &scn->latency_detect.timer,
 		       &hif_latency_detect_timeout_handler,
 		       scn,
 		       QDF_TIMER_TYPE_SW_SPIN);
@@ -787,11 +1063,38 @@ static void hif_latency_detect_timer_init(struct hif_softc *scn)
 
 static void hif_latency_detect_timer_deinit(struct hif_softc *scn)
 {
+	hif_info("deinit timer");
+	qdf_timer_free(&scn->latency_detect.timer);
+}
+
+static void hif_latency_detect_init(struct hif_softc *scn)
+{
+	uint32_t tasklet_mask;
+	int i;
+
 	if (QDF_GLOBAL_MISSION_MODE != hif_get_conparam(scn))
 		return;
 
-	hif_info("deinit timer");
-	qdf_timer_free(&scn->latency_detect.detect_latency_timer);
+	tasklet_mask = DETECTION_LATENCY_TASKLET_MASK;
+	hif_info("tasklet mask is 0x%x", tasklet_mask);
+	for (i = 0; i < HIF_TASKLET_IN_MONITOR; i++) {
+		if (BIT(i) & tasklet_mask)
+			qdf_set_bit(i, scn->latency_detect.tasklet_bmap);
+	}
+
+	hif_latency_detect_timer_init(scn);
+}
+
+static void hif_latency_detect_deinit(struct hif_softc *scn)
+{
+	int i;
+
+	if (QDF_GLOBAL_MISSION_MODE != hif_get_conparam(scn))
+		return;
+
+	hif_latency_detect_timer_deinit(scn);
+	for (i = 0; i < HIF_TASKLET_IN_MONITOR; i++)
+		qdf_clear_bit(i, scn->latency_detect.tasklet_bmap);
 }
 
 void hif_latency_detect_timer_start(struct hif_opaque_softc *hif_ctx)
@@ -807,8 +1110,8 @@ void hif_latency_detect_timer_start(struct hif_opaque_softc *hif_ctx)
 		return;
 	}
 
-	qdf_timer_start(&scn->latency_detect.detect_latency_timer,
-			scn->latency_detect.detect_latency_timer_timeout);
+	qdf_timer_start(&scn->latency_detect.timer,
+			scn->latency_detect.timeout);
 	scn->latency_detect.is_timer_started = true;
 }
 
@@ -821,7 +1124,7 @@ void hif_latency_detect_timer_stop(struct hif_opaque_softc *hif_ctx)
 
 	hif_debug_rl("stop timer");
 
-	qdf_timer_sync_cancel(&scn->latency_detect.detect_latency_timer);
+	qdf_timer_sync_cancel(&scn->latency_detect.timer);
 	scn->latency_detect.is_timer_started = false;
 }
 
@@ -862,12 +1165,33 @@ void hif_set_enable_detection(struct hif_opaque_softc *hif_ctx, bool value)
 	scn->latency_detect.enable_detection = value;
 }
 #else
-static void hif_latency_detect_timer_init(struct hif_softc *scn)
+static inline void hif_latency_detect_init(struct hif_softc *scn)
 {}
 
-static void hif_latency_detect_timer_deinit(struct hif_softc *scn)
+static inline void hif_latency_detect_deinit(struct hif_softc *scn)
 {}
 #endif
+
+#ifdef FEATURE_DIRECT_LINK
+/**
+ * hif_init_direct_link_rcv_pipe_num(): Initialize the direct link receive
+ *  pipe number
+ * @scn: hif context
+ *
+ * Return: None
+ */
+static inline
+void hif_init_direct_link_rcv_pipe_num(struct hif_softc *scn)
+{
+	scn->dl_recv_pipe_num = INVALID_PIPE_NO;
+}
+#else
+static inline
+void hif_init_direct_link_rcv_pipe_num(struct hif_softc *scn)
+{
+}
+#endif
+
 struct hif_opaque_softc *hif_open(qdf_device_t qdf_ctx,
 				  uint32_t mode,
 				  enum qdf_bus_type bus_type,
@@ -899,7 +1223,6 @@ struct hif_opaque_softc *hif_open(qdf_device_t qdf_ctx,
 		     sizeof(struct hif_driver_state_callbacks));
 	scn->bus_type  = bus_type;
 
-	hif_pm_set_link_state(GET_HIF_OPAQUE_HDL(scn), HIF_PM_LINK_STATE_DOWN);
 	hif_allow_ep_vote_access(GET_HIF_OPAQUE_HDL(scn));
 	hif_get_cfg_from_psoc(scn, psoc);
 
@@ -913,8 +1236,13 @@ struct hif_opaque_softc *hif_open(qdf_device_t qdf_ctx,
 		goto out;
 	}
 
+	hif_rtpm_lock_init(scn);
+
 	hif_cpuhp_register(scn);
-	hif_latency_detect_timer_init(scn);
+	hif_latency_detect_init(scn);
+	hif_init_direct_link_rcv_pipe_num(scn);
+	hif_ce_desc_history_log_register(scn);
+	hif_desc_history_log_register();
 
 out:
 	return GET_HIF_OPAQUE_HDL(scn);
@@ -953,7 +1281,9 @@ void hif_close(struct hif_opaque_softc *hif_ctx)
 		return;
 	}
 
-	hif_latency_detect_timer_deinit(scn);
+	hif_desc_history_log_unregister();
+	hif_ce_desc_history_log_unregister();
+	hif_latency_detect_deinit(scn);
 
 	if (scn->athdiag_procfs_inited) {
 		athdiag_procfs_remove();
@@ -970,6 +1300,7 @@ void hif_close(struct hif_opaque_softc *hif_ctx)
 	hif_uninit_rri_on_ddr(scn);
 	hif_cleanup_static_buf_to_target(scn);
 	hif_cpuhp_unregister(scn);
+	hif_rtpm_lock_deinit(scn);
 
 	hif_bus_close(scn);
 
@@ -991,7 +1322,9 @@ static inline int hif_get_num_active_grp_tasklets(struct hif_softc *scn)
 #if (defined(QCA_WIFI_QCA8074) || defined(QCA_WIFI_QCA6018) || \
 	defined(QCA_WIFI_QCA6290) || defined(QCA_WIFI_QCA6390) || \
 	defined(QCA_WIFI_QCN9000) || defined(QCA_WIFI_QCA6490) || \
-	defined(QCA_WIFI_QCA6750) || defined(QCA_WIFI_QCA5018))
+	defined(QCA_WIFI_QCA6750) || defined(QCA_WIFI_QCA5018) || \
+	defined(QCA_WIFI_KIWI) || defined(QCA_WIFI_QCN9224) || \
+	defined(QCA_WIFI_QCA9574)) || defined(QCA_WIFI_QCA5332)
 /**
  * hif_get_num_pending_work() - get the number of entries in
  *		the workqueue pending to be completed.
@@ -1058,7 +1391,7 @@ QDF_STATUS hif_try_prevent_ep_vote_access(struct hif_opaque_softc *hif_ctx)
 	}
 
 	if (pld_is_pci_ep_awake(scn->qdf_dev->dev) == -ENOTSUPP)
-		return QDF_STATUS_SUCCESS;
+	return QDF_STATUS_SUCCESS;
 
 	while (pld_is_pci_ep_awake(scn->qdf_dev->dev)) {
 		if (++wait_cnt > HIF_EP_WAKE_RESET_WAIT_CNT) {
@@ -1125,7 +1458,9 @@ uint8_t hif_get_ep_vote_access(struct hif_opaque_softc *hif_ctx,
 #if (defined(QCA_WIFI_QCA8074) || defined(QCA_WIFI_QCA6018) || \
 	defined(QCA_WIFI_QCA6290) || defined(QCA_WIFI_QCA6390) || \
 	defined(QCA_WIFI_QCN9000) || defined(QCA_WIFI_QCA6490) || \
-	defined(QCA_WIFI_QCA6750) || defined(QCA_WIFI_QCA5018))
+	defined(QCA_WIFI_QCA6750) || defined(QCA_WIFI_QCA5018) || \
+	defined(QCA_WIFI_KIWI) || defined(QCA_WIFI_QCN9224) || \
+	defined(QCA_WIFI_QCA9574)) || defined(QCA_WIFI_QCA5332)
 static QDF_STATUS hif_hal_attach(struct hif_softc *scn)
 {
 	if (ce_srng_based(scn)) {
@@ -1213,7 +1548,6 @@ QDF_STATUS hif_enable(struct hif_opaque_softc *hif_ctx, struct device *dev,
 		return status;
 	}
 
-	hif_pm_set_link_state(GET_HIF_OPAQUE_HDL(scn), HIF_PM_LINK_STATE_UP);
 	status = hif_hal_attach(scn);
 	if (status != QDF_STATUS_SUCCESS) {
 		hif_err("hal attach failed");
@@ -1271,7 +1605,6 @@ void hif_disable(struct hif_opaque_softc *hif_ctx, enum hif_disable_type type)
 
 	hif_hal_detach(scn);
 
-	hif_pm_set_link_state(hif_ctx, HIF_PM_LINK_STATE_DOWN);
 	hif_disable_bus(scn);
 
 	hif_wlan_disable(scn);
@@ -1474,12 +1807,6 @@ int hif_get_device_type(uint32_t device_id,
 		hif_info(" *********** AR900B *************");
 		break;
 
-	case IPQ4019_DEVICE_ID:
-		*hif_type = HIF_TYPE_IPQ4019;
-		*target_type = TARGET_TYPE_IPQ4019;
-		hif_info(" *********** IPQ4019  *************");
-		break;
-
 	case QCA8074_DEVICE_ID:
 		*hif_type = HIF_TYPE_QCA8074;
 		*target_type = TARGET_TYPE_QCA8074;
@@ -1499,10 +1826,22 @@ int hif_get_device_type(uint32_t device_id,
 		hif_info(" *********** QCN9000 *************");
 		break;
 
-	case QCN9100_DEVICE_ID:
-		*hif_type = HIF_TYPE_QCN9100;
-		*target_type = TARGET_TYPE_QCN9100;
-		hif_info(" *********** QCN9100 *************");
+	case QCN9224_DEVICE_ID:
+		*hif_type = HIF_TYPE_QCN9224;
+		*target_type = TARGET_TYPE_QCN9224;
+		hif_info(" *********** QCN9224 *************");
+		break;
+
+	case QCN6122_DEVICE_ID:
+		*hif_type = HIF_TYPE_QCN6122;
+		*target_type = TARGET_TYPE_QCN6122;
+		hif_info(" *********** QCN6122 *************");
+		break;
+
+	case QCN9160_DEVICE_ID:
+		*hif_type = HIF_TYPE_QCN9160;
+		*target_type = TARGET_TYPE_QCN9160;
+		hif_info(" *********** QCN9160 *************");
 		break;
 
 	case QCN7605_DEVICE_ID:
@@ -1536,6 +1875,18 @@ int hif_get_device_type(uint32_t device_id,
 		hif_info(" *********** QCA6750 *************");
 		break;
 
+	case KIWI_DEVICE_ID:
+		*hif_type = HIF_TYPE_KIWI;
+		*target_type = TARGET_TYPE_KIWI;
+		hif_info(" *********** KIWI *************");
+		break;
+
+	case MANGO_DEVICE_ID:
+		*hif_type = HIF_TYPE_MANGO;
+		*target_type = TARGET_TYPE_MANGO;
+		hif_info(" *********** MANGO *************");
+		break;
+
 	case QCA8074V2_DEVICE_ID:
 		*hif_type = HIF_TYPE_QCA8074V2;
 		*target_type = TARGET_TYPE_QCA8074V2;
@@ -1558,6 +1909,18 @@ int hif_get_device_type(uint32_t device_id,
 		*hif_type = HIF_TYPE_QCA5018;
 		*target_type = TARGET_TYPE_QCA5018;
 		hif_info(" *********** qca5018 *************");
+		break;
+
+	case QCA5332_DEVICE_ID:
+		*hif_type = HIF_TYPE_QCA5332;
+		*target_type = TARGET_TYPE_QCA5332;
+		hif_info(" *********** QCA5332 *************");
+		break;
+
+	case QCA9574_DEVICE_ID:
+		*hif_type = HIF_TYPE_QCA9574;
+		*target_type = TARGET_TYPE_QCA9574;
+		hif_info(" *********** QCA9574 *************");
 		break;
 
 	default:
@@ -1922,6 +2285,39 @@ void hif_mem_free_consistent_unaligned(struct hif_softc *scn,
 					size, vaddr, paddr, memctx);
 	}
 }
+
+void hif_prealloc_get_multi_pages(struct hif_softc *scn, uint32_t desc_type,
+				  qdf_size_t elem_size, uint16_t elem_num,
+				  struct qdf_mem_multi_page_t *pages,
+				  bool cacheable)
+{
+	struct hif_driver_state_callbacks *cbk =
+			hif_get_callbacks_handle(scn);
+
+	if (cbk && cbk->prealloc_get_multi_pages)
+		cbk->prealloc_get_multi_pages(desc_type, elem_size, elem_num,
+					      pages, cacheable);
+
+	if (!pages->num_pages)
+		qdf_mem_multi_pages_alloc(scn->qdf_dev, pages,
+					  elem_size, elem_num, 0, cacheable);
+}
+
+void hif_prealloc_put_multi_pages(struct hif_softc *scn, uint32_t desc_type,
+				  struct qdf_mem_multi_page_t *pages,
+				  bool cacheable)
+{
+	struct hif_driver_state_callbacks *cbk =
+			hif_get_callbacks_handle(scn);
+
+	if (cbk && cbk->prealloc_put_multi_pages &&
+	    pages->is_mem_prealloc)
+		cbk->prealloc_put_multi_pages(desc_type, pages);
+
+	if (!pages->is_mem_prealloc)
+		qdf_mem_multi_pages_free(scn->qdf_dev, pages, 0,
+					 cacheable);
+}
 #endif
 
 /**
@@ -1930,7 +2326,7 @@ void hif_mem_free_consistent_unaligned(struct hif_softc *scn,
  * @osc: HIF Context
  * @msdu : list of msdus to be sent
  * @transfer_id : transfer id
- * @len : donwloaded length
+ * @len : downloaded length
  *
  * Return: list of msds not sent
  */
@@ -1938,6 +2334,9 @@ qdf_nbuf_t hif_batch_send(struct hif_opaque_softc *osc, qdf_nbuf_t msdu,
 		uint32_t transfer_id, u_int32_t len, uint32_t sendhead)
 {
 	void *ce_tx_hdl = hif_get_ce_handle(osc, CE_HTT_TX_CE);
+
+	if (!ce_tx_hdl)
+		return NULL;
 
 	return ce_batch_send((struct CE_handle *)ce_tx_hdl, msdu, transfer_id,
 			len, sendhead);
@@ -2043,12 +2442,11 @@ hif_pm_wake_irq_type hif_pm_get_wake_irq_type(struct hif_opaque_softc *hif_ctx)
 irqreturn_t hif_wake_interrupt_handler(int irq, void *context)
 {
 	struct hif_softc *scn = context;
-	struct hif_opaque_softc *hif_ctx = GET_HIF_OPAQUE_HDL(scn);
 
 	hif_info("wake interrupt received on irq %d", irq);
 
-	hif_pm_runtime_set_monitor_wake_intr(hif_ctx, 0);
-	hif_pm_runtime_request_resume(hif_ctx);
+	hif_rtpm_set_monitor_wake_intr(0);
+	hif_rtpm_request_resume();
 
 	if (scn->initial_wakeup_cb)
 		scn->initial_wakeup_cb(scn->initial_wakeup_priv);

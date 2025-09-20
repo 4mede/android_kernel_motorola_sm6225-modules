@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2013-2016,2018-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2016,2018-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -37,14 +38,17 @@ extern struct hostdef_s *QCA6290_HOSTdef;
 extern struct hostdef_s *QCA6390_HOSTdef;
 extern struct hostdef_s *QCA6490_HOSTdef;
 extern struct hostdef_s *QCA6750_HOSTdef;
+extern struct hostdef_s *KIWI_HOSTdef;
 
-#ifdef ATH_AHB
-extern struct hostdef_s *IPQ4019_HOSTdef;
-#endif
 extern struct hostdef_s *QCA8074_HOSTdef;
 extern struct hostdef_s *QCA8074V2_HOSTDEF;
 extern struct hostdef_s *QCA6018_HOSTDEF;
 extern struct hostdef_s *QCA5018_HOSTDEF;
 extern struct hostdef_s *QCN9000_HOSTDEF;
-extern struct hostdef_s *QCN9100_HOSTDEF;
+extern struct hostdef_s *QCN6122_HOSTDEF;
+extern struct hostdef_s *QCN9224v1_HOSTDEF;
+extern struct hostdef_s *QCN9224_HOSTDEF;
+extern struct hostdef_s *QCA9574_HOSTDEF;
+extern struct hostdef_s *QCA5332_HOSTDEF;
+extern struct hostdef_s *QCN9160_HOSTDEF;
 #endif

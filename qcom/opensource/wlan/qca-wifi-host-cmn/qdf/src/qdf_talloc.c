@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018, 2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -64,7 +65,7 @@ __qdf_zalloc_auto(const size_t size, const char *func, const uint16_t line)
 		return NULL;
 	}
 
-	qdf_mem_kmalloc_inc(__alloc_size(ptr));
+	qdf_mem_kmalloc_inc(__qdf_alloc_size(ptr));
 
 	return ptr;
 }
@@ -80,16 +81,16 @@ __qdf_zalloc_atomic(const size_t size, const char *func, const uint16_t line)
 		return NULL;
 	}
 
-	qdf_mem_kmalloc_inc(__alloc_size(ptr));
+	qdf_mem_kmalloc_inc(__qdf_alloc_size(ptr));
 
 	return ptr;
 }
 
 static void __qdf_free(const void *ptr)
 {
-	qdf_mem_kmalloc_dec(__alloc_size(ptr));
+	qdf_mem_kmalloc_dec(__qdf_alloc_size(ptr));
 
-	__free(ptr);
+	__k_free(ptr);
 }
 
 static qdf_ht_declare(__qdf_talloc_meta_ht, QDF_TALLOC_HT_BITS);
@@ -112,8 +113,6 @@ qdf_talloc_parent_meta_alloc(const void *parent,
 {
 	struct qdf_talloc_parent_meta *pmeta;
 
-	QDF_BUG(qdf_spin_is_locked(&__qdf_talloc_meta_lock));
-
 	pmeta = __qdf_zalloc_atomic(sizeof(*pmeta), func, line);
 	if (!pmeta)
 		return NULL;
@@ -127,11 +126,9 @@ qdf_talloc_parent_meta_alloc(const void *parent,
 
 static void qdf_talloc_parent_meta_free(struct qdf_talloc_parent_meta *pmeta)
 {
-	QDF_BUG(qdf_spin_is_locked(&__qdf_talloc_meta_lock));
-
 	qdf_ht_remove(&pmeta->entry);
 	qdf_list_destroy(&pmeta->children);
-	__free(pmeta);
+	__k_free(pmeta);
 }
 
 static struct qdf_talloc_parent_meta *
@@ -139,8 +136,6 @@ qdf_talloc_parent_meta_lookup(const void *parent)
 {
 	struct qdf_talloc_parent_meta *pmeta;
 	uintptr_t key = (uintptr_t)parent;
-
-	QDF_BUG(qdf_spin_is_locked(&__qdf_talloc_meta_lock));
 
 	qdf_ht_get(__qdf_talloc_meta_ht, pmeta, entry, key, key);
 
@@ -323,8 +318,6 @@ static QDF_STATUS qdf_talloc_meta_insert(struct qdf_talloc_header *header,
 	struct qdf_talloc_child_meta *cmeta = &header->meta;
 	struct qdf_talloc_parent_meta *pmeta;
 
-	QDF_BUG(qdf_spin_is_locked(&__qdf_talloc_meta_lock));
-
 	pmeta = qdf_talloc_parent_meta_lookup(cmeta->parent);
 	if (!pmeta)
 		pmeta = qdf_talloc_parent_meta_alloc(cmeta->parent, func, line);
@@ -376,8 +369,6 @@ __qdf_talloc_assert_no_children(const void *parent,
 	struct qdf_talloc_parent_meta *pmeta;
 	uint32_t count;
 
-	QDF_BUG(qdf_spin_is_locked(&__qdf_talloc_meta_lock));
-
 	pmeta = qdf_talloc_parent_meta_lookup(parent);
 	if (!pmeta)
 		return;
@@ -392,8 +383,6 @@ static void qdf_talloc_meta_remove(struct qdf_talloc_header *header,
 {
 	struct qdf_talloc_child_meta *cmeta = &header->meta;
 	struct qdf_talloc_parent_meta *pmeta;
-
-	QDF_BUG(qdf_spin_is_locked(&__qdf_talloc_meta_lock));
 
 	__qdf_talloc_assert_no_children(qdf_talloc_ptr(header), func, line);
 

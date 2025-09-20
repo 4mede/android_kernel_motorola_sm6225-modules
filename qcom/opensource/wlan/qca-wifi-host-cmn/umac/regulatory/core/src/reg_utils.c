@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
  * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -38,38 +38,15 @@
 #include "reg_services_common.h"
 #include "reg_build_chan_list.h"
 #include "wlan_cm_bss_score_param.h"
+#include "qdf_str.h"
 #include "wmi_unified_param.h"
 
 #define DEFAULT_WORLD_REGDMN 0x60
+#define FCC3_FCCA 0x3A
+#define FCC6_FCCA 0x14
 
 #define IS_VALID_PSOC_REG_OBJ(psoc_priv_obj) (psoc_priv_obj)
 #define IS_VALID_PDEV_REG_OBJ(pdev_priv_obj) (pdev_priv_obj)
-
-#ifdef CONFIG_CHAN_NUM_API
-bool reg_chan_has_dfs_attribute(struct wlan_objmgr_pdev *pdev, uint8_t ch)
-{
-	enum channel_enum ch_idx;
-	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
-
-	ch_idx = reg_get_chan_enum(ch);
-
-	if (ch_idx == INVALID_CHANNEL)
-		return false;
-
-	pdev_priv_obj = reg_get_pdev_obj(pdev);
-
-	if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
-		reg_err("pdev reg obj is NULL");
-		return false;
-	}
-
-	if (pdev_priv_obj->cur_chan_list[ch_idx].chan_flags &
-	    REGULATORY_CHAN_RADAR)
-		return true;
-
-	return false;
-}
-#endif /* CONFIG_CHAN_NUM_API */
 
 #ifdef CONFIG_CHAN_FREQ_API
 bool reg_chan_has_dfs_attribute_for_freq(struct wlan_objmgr_pdev *pdev,
@@ -80,7 +57,7 @@ bool reg_chan_has_dfs_attribute_for_freq(struct wlan_objmgr_pdev *pdev,
 
 	ch_idx = reg_get_chan_enum_for_freq(freq);
 
-	if (ch_idx == INVALID_CHANNEL)
+	if (reg_is_chan_enum_invalid(ch_idx))
 		return false;
 
 	pdev_priv_obj = reg_get_pdev_obj(pdev);
@@ -180,15 +157,138 @@ bool reg_is_etsi_alpha2(uint8_t *alpha2)
 	return false;
 }
 
+static
+const char *reg_get_power_mode_string(uint16_t reg_dmn_pair_id)
+{
+	switch (reg_dmn_pair_id) {
+	case FCC3_FCCA:
+	case FCC6_FCCA:
+		return "NON_VLP";
+	default:
+		return "VLP";
+	}
+}
+
+static bool reg_ctry_domain_supports_vlp(uint8_t *alpha2)
+{
+	uint16_t i;
+	int no_of_countries;
+
+	reg_get_num_countries(&no_of_countries);
+	for (i = 0; i < no_of_countries; i++) {
+		if (g_all_countries[i].alpha2[0] == alpha2[0] &&
+		    g_all_countries[i].alpha2[1] == alpha2[1]) {
+			if (!qdf_str_cmp(reg_get_power_mode_string(
+			    g_all_countries[i].reg_dmn_pair_id), "NON_VLP"))
+				return false;
+			else
+				return true;
+		}
+	}
+	return true;
+}
+
+bool reg_ctry_support_vlp(uint8_t *alpha2)
+{
+	if (((alpha2[0] == 'A') && (alpha2[1] == 'E')) ||
+	    ((alpha2[0] == 'P') && (alpha2[1] == 'E')) ||
+	    ((alpha2[0] == 'U') && (alpha2[1] == 'S')) ||
+	   !reg_ctry_domain_supports_vlp(alpha2))
+		return false;
+	else
+		return true;
+}
+
+static QDF_STATUS reg_set_non_offload_country(struct wlan_objmgr_pdev *pdev,
+					      struct set_country *cc)
+{
+	struct wlan_objmgr_psoc *psoc;
+	struct wlan_lmac_if_reg_tx_ops *tx_ops;
+	struct wlan_regulatory_psoc_priv_obj *psoc_reg;
+	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
+	struct cc_regdmn_s rd;
+	uint8_t pdev_id;
+	uint8_t phy_id;
+
+	if (!pdev) {
+		reg_err("pdev is NULL");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	pdev_id = wlan_objmgr_pdev_get_pdev_id(pdev);
+	psoc = wlan_pdev_get_psoc(pdev);
+	tx_ops = reg_get_psoc_tx_ops(psoc);
+	if (tx_ops->get_phy_id_from_pdev_id)
+		tx_ops->get_phy_id_from_pdev_id(psoc, pdev_id, &phy_id);
+	else
+		phy_id = pdev_id;
+
+	psoc_reg = reg_get_psoc_obj(psoc);
+	if (!IS_VALID_PSOC_REG_OBJ(psoc_reg)) {
+		reg_err("psoc reg component is NULL");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	if (reg_is_world_alpha2(cc->country)) {
+		pdev_priv_obj = reg_get_pdev_obj(pdev);
+		if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
+			reg_err("reg component pdev priv is NULL");
+			psoc_reg->world_country_pending[phy_id] = false;
+			return QDF_STATUS_E_INVAL;
+		}
+		if (reg_is_world_ctry_code(pdev_priv_obj->def_region_domain))
+			rd.cc.regdmn.reg_2g_5g_pair_id =
+				pdev_priv_obj->def_region_domain;
+		else
+			rd.cc.regdmn.reg_2g_5g_pair_id = DEFAULT_WORLD_REGDMN;
+		rd.flags = REGDMN_IS_SET;
+	} else {
+		qdf_mem_copy(rd.cc.alpha, cc->country, REG_ALPHA2_LEN + 1);
+		rd.flags = ALPHA_IS_SET;
+	}
+
+	reg_program_chan_list(pdev, &rd);
+	return QDF_STATUS_SUCCESS;
+}
+
+#ifdef WLAN_REG_PARTIAL_OFFLOAD
+/**
+ * reg_restore_def_country_for_po() - API to restore country code to default
+ * value if given country is invalid for Partial Offload
+ * @offload_enabled: Is offload enabled
+ * @country: Country code
+ * @cc_country: Country code array
+ * Return- void
+ */
+static void reg_restore_def_country_for_po(bool offload_enabled,
+					   uint8_t *country,
+					   uint8_t cc_country[]){
+	if (!offload_enabled && !reg_is_world_alpha2(country)) {
+		QDF_STATUS status;
+
+		status = reg_is_country_code_valid(country);
+		if (!QDF_IS_STATUS_SUCCESS(status)) {
+			reg_err("Unable to set country code: %s\n", country);
+			reg_err("Restoring to world domain");
+			qdf_mem_copy(cc_country, REG_WORLD_ALPHA2,
+				     REG_ALPHA2_LEN + 1);
+		}
+	}
+}
+#else
+static void reg_restore_def_country_for_po(bool offload_enabled,
+					   uint8_t *country,
+					   uint8_t cc_country[]){
+}
+#endif
+
 QDF_STATUS reg_set_country(struct wlan_objmgr_pdev *pdev,
 			   uint8_t *country)
 {
 	struct wlan_regulatory_psoc_priv_obj *psoc_reg;
-	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
 	struct wlan_lmac_if_reg_tx_ops *tx_ops;
 	struct set_country cc;
 	struct wlan_objmgr_psoc *psoc;
-	struct cc_regdmn_s rd;
 	uint8_t pdev_id;
 	uint8_t phy_id;
 
@@ -235,18 +335,9 @@ QDF_STATUS reg_set_country(struct wlan_objmgr_pdev *pdev,
 	 */
 	cc.pdev_id = WMI_HOST_PDEV_ID_SOC;
 
-	if (!psoc_reg->offload_enabled && !reg_is_world_alpha2(country)) {
-		QDF_STATUS status;
-
-		status = reg_is_country_code_valid(country);
-		if (!QDF_IS_STATUS_SUCCESS(status)) {
-			reg_err("Unable to set country code: %s\n", country);
-			reg_err("Restoring to world domain");
-			qdf_mem_copy(cc.country, REG_WORLD_ALPHA2,
-				     REG_ALPHA2_LEN + 1);
-		}
-	}
-
+	reg_restore_def_country_for_po(psoc_reg->offload_enabled,
+				       country,
+				       cc.country);
 
 	if (reg_is_world_alpha2(cc.country))
 		psoc_reg->world_country_pending[phy_id] = true;
@@ -263,29 +354,7 @@ QDF_STATUS reg_set_country(struct wlan_objmgr_pdev *pdev,
 			return QDF_STATUS_E_FAULT;
 		}
 	} else {
-		if (reg_is_world_alpha2(cc.country)) {
-			pdev_priv_obj = reg_get_pdev_obj(pdev);
-			if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
-				reg_err("reg component pdev priv is NULL");
-				psoc_reg->world_country_pending[phy_id] =
-									false;
-				return QDF_STATUS_E_INVAL;
-			}
-			if (reg_is_world_ctry_code(
-				    pdev_priv_obj->def_region_domain))
-				rd.cc.regdmn.reg_2g_5g_pair_id =
-					pdev_priv_obj->def_region_domain;
-			else
-				rd.cc.regdmn.reg_2g_5g_pair_id =
-							DEFAULT_WORLD_REGDMN;
-			rd.flags = REGDMN_IS_SET;
-		} else {
-			qdf_mem_copy(rd.cc.alpha, cc.country,
-				     REG_ALPHA2_LEN + 1);
-			rd.flags = ALPHA_IS_SET;
-		}
-
-		reg_program_chan_list(pdev, &rd);
+		return reg_set_non_offload_country(pdev, &cc);
 	}
 
 	return QDF_STATUS_SUCCESS;
@@ -328,76 +397,214 @@ QDF_STATUS reg_get_domain_from_country_code(v_REGDOMAIN_t *reg_domain_ptr,
 	return QDF_STATUS_SUCCESS;
 }
 
-#ifdef CONFIG_REG_CLIENT
+#if defined(CONFIG_REG_CLIENT) && defined(CONFIG_BAND_6GHZ)
 QDF_STATUS
-reg_get_6g_power_type_for_ctry(struct wlan_objmgr_psoc *psoc,
-			       uint8_t *ap_ctry, uint8_t *sta_ctry,
-			       enum reg_6g_ap_type *pwr_type_6g,
-			       bool *ctry_code_match,
-			       enum reg_6g_ap_type ap_pwr_type)
+reg_get_6ghz_cli_pwr_type_per_ap_pwr_type(
+				struct wlan_objmgr_pdev *pdev,
+				enum reg_6g_ap_type ap_pwr_type,
+				enum supported_6g_pwr_types *cli_pwr_type)
 {
-	*pwr_type_6g = REG_INDOOR_AP;
+	enum reg_6g_client_type client_type;
 
-	if (qdf_mem_cmp(ap_ctry, sta_ctry, REG_ALPHA2_LEN)) {
-		reg_debug("Country IE:%c%c, STA country:%c%c", ap_ctry[0],
-			  ap_ctry[1], sta_ctry[0], sta_ctry[1]);
-		*ctry_code_match = false;
+	reg_get_cur_6g_client_type(pdev, &client_type);
 
-		/**
-		 * Do not return if Wi-Fi safe mode or RF test mode is
-		 * enabled, rather STA should operate in LPI mode.
-		 * wlan_cm_get_check_6ghz_security API returns true if
-		 * neither Safe mode nor RF test mode are enabled.
-		 */
-		if (wlan_reg_is_us(sta_ctry) &&
-		    wlan_cm_get_check_6ghz_security(psoc)) {
-			reg_err("US VLP not in place yet, connection not allowed");
-			return QDF_STATUS_E_NOSUPPORT;
-		}
-
-		if (wlan_reg_is_etsi(sta_ctry) &&
-		    ap_pwr_type != REG_MAX_AP_TYPE) {
-			if (!(wlan_reg_is_us(ap_ctry) &&
-			      ap_pwr_type == REG_INDOOR_AP)) {
-				reg_debug("STA ctry:%c%c, doesn't match with AP ctry, switch to VLP",
-					  sta_ctry[0], sta_ctry[1]);
-				*pwr_type_6g = REG_VERY_LOW_POWER_AP;
-			}
-		}
-
-		if (wlan_reg_is_us(ap_ctry) && ap_pwr_type == REG_INDOOR_AP) {
-			reg_debug("AP ctry:%c%c, AP power type:%d, allow STA IN LPI",
-				  ap_ctry[0], ap_ctry[1], ap_pwr_type);
-			*pwr_type_6g = REG_INDOOR_AP;
-		}
+	if (client_type == REG_DEFAULT_CLIENT) {
+		if (ap_pwr_type == REG_INDOOR_AP)
+			*cli_pwr_type = REG_CLI_DEF_LPI;
+		else if (ap_pwr_type == REG_VERY_LOW_POWER_AP)
+			*cli_pwr_type = REG_CLI_DEF_VLP;
+		else if (ap_pwr_type == REG_STANDARD_POWER_AP)
+			*cli_pwr_type = REG_CLI_DEF_SP;
+		else
+			return QDF_STATUS_E_FAILURE;
+	} else if (client_type == REG_SUBORDINATE_CLIENT) {
+		if (ap_pwr_type == REG_INDOOR_AP)
+			*cli_pwr_type = REG_CLI_SUB_LPI;
+		else if (ap_pwr_type == REG_VERY_LOW_POWER_AP)
+			*cli_pwr_type = REG_CLI_SUB_VLP;
+		else if (ap_pwr_type == REG_STANDARD_POWER_AP)
+			*cli_pwr_type = REG_CLI_SUB_SP;
+		else
+			return QDF_STATUS_E_FAILURE;
 	} else {
-		*ctry_code_match = true;
+		return QDF_STATUS_E_FAILURE;
 	}
 
 	return QDF_STATUS_SUCCESS;
 }
 #endif
 
-#ifdef CONFIG_CHAN_NUM_API
-bool reg_is_passive_or_disable_ch(struct wlan_objmgr_pdev *pdev,
-				  uint8_t chan)
+#ifdef CONFIG_REG_CLIENT
+#ifdef CONFIG_BAND_6GHZ
+/**
+ * reg_check_if_6g_pwr_type_supp_for_chan() - Check if 6 GHz power type is
+ *                                            supported for the channel
+ * @pdev: Pointer to pdev
+ * @pwr_type: 6 GHz power type
+ * @chan_idx: Connection channel index
+ *
+ * Return: Return QDF_STATUS_SUCCESS if 6 GHz power type supported for
+ *         the given channel, else return QDF_STATUS_E_FAILURE.
+ */
+static
+QDF_STATUS reg_check_if_6g_pwr_type_supp_for_chan(
+			struct wlan_objmgr_pdev *pdev,
+			enum reg_6g_ap_type pwr_type,
+			enum channel_enum chan_idx)
 {
-	enum channel_state ch_state;
+	struct super_chan_info *super_chan_list;
+	enum channel_state *chan_state_arr;
+	uint32_t *chan_flags_arr;
+	enum supported_6g_pwr_types cli_pwr_type;
+	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
+	uint16_t sup_idx;
 
-	ch_state = reg_get_channel_state(pdev, chan);
+	pdev_priv_obj = reg_get_pdev_obj(pdev);
+	if (!pdev_priv_obj) {
+		reg_err("pdev priv obj null");
+		return QDF_STATUS_E_FAILURE;
+	}
 
-	return (ch_state == CHANNEL_STATE_DFS) ||
-		(ch_state == CHANNEL_STATE_DISABLE);
+	sup_idx = reg_convert_enum_to_6g_idx(chan_idx);
+
+	if (QDF_IS_STATUS_ERROR(reg_get_6ghz_cli_pwr_type_per_ap_pwr_type(
+					pdev, pwr_type, &cli_pwr_type)))
+		goto no_support;
+
+	super_chan_list = pdev_priv_obj->super_chan_list;
+	chan_state_arr = super_chan_list[sup_idx].state_arr;
+	chan_flags_arr = super_chan_list[sup_idx].chan_flags_arr;
+	if (reg_is_state_allowed(chan_state_arr[cli_pwr_type]) &&
+	    !(chan_flags_arr[cli_pwr_type] & REGULATORY_CHAN_DISABLED))
+		return QDF_STATUS_SUCCESS;
+
+no_support:
+	reg_err("6 GHz power type = %d not supported for 6 GHz channel idx = %d",
+		cli_pwr_type, sup_idx);
+	return QDF_STATUS_E_NOSUPPORT;
 }
-#endif /* CONFIG_CHAN_NUM_API */
+
+QDF_STATUS
+reg_get_best_6g_power_type(struct wlan_objmgr_psoc *psoc,
+			   struct wlan_objmgr_pdev *pdev,
+			   enum reg_6g_ap_type *pwr_type_6g,
+			   enum reg_6g_ap_type ap_pwr_type,
+			   uint32_t chan_freq)
+{
+	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
+	enum channel_enum chan_idx = reg_get_chan_enum_for_freq(chan_freq);
+
+	*pwr_type_6g = ap_pwr_type;
+	pdev_priv_obj = reg_get_pdev_obj(pdev);
+	if (!pdev_priv_obj) {
+		reg_err("pdev priv obj null");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	if (pdev_priv_obj->reg_rules.num_of_6g_client_reg_rules[ap_pwr_type] &&
+	    QDF_IS_STATUS_SUCCESS(reg_check_if_6g_pwr_type_supp_for_chan(
+						pdev,
+						ap_pwr_type, chan_idx))) {
+		reg_debug("AP power type: %d , is supported by client",
+			  ap_pwr_type);
+		return QDF_STATUS_SUCCESS;
+	}
+
+	if (ap_pwr_type == REG_INDOOR_AP) {
+		if (pdev_priv_obj->reg_rules.num_of_6g_client_reg_rules[REG_VERY_LOW_POWER_AP] &&
+		    QDF_IS_STATUS_SUCCESS(
+			reg_check_if_6g_pwr_type_supp_for_chan(pdev,
+							REG_VERY_LOW_POWER_AP,
+							chan_idx))) {
+			*pwr_type_6g = REG_VERY_LOW_POWER_AP;
+			reg_debug("AP power type = %d, selected power type = %d",
+				  ap_pwr_type, *pwr_type_6g);
+			return QDF_STATUS_SUCCESS;
+		} else {
+			goto no_support;
+		}
+	} else if (ap_pwr_type == REG_STANDARD_POWER_AP) {
+		if (pdev_priv_obj->reg_rules.num_of_6g_client_reg_rules[REG_VERY_LOW_POWER_AP] &&
+		    QDF_IS_STATUS_SUCCESS(
+			reg_check_if_6g_pwr_type_supp_for_chan(pdev,
+							REG_VERY_LOW_POWER_AP,
+							chan_idx))) {
+			if (wlan_cm_get_disable_vlp_sta_conn_to_sp_ap(psoc)) {
+				reg_debug("AP SP and STA VLP connection disabled");
+				return QDF_STATUS_E_NOSUPPORT;
+			}
+			*pwr_type_6g = REG_VERY_LOW_POWER_AP;
+			reg_debug("AP power type = %d, selected power type = %d",
+				  ap_pwr_type, *pwr_type_6g);
+			return QDF_STATUS_SUCCESS;
+		} else {
+			goto no_support;
+		}
+	}
+
+no_support:
+	reg_err("AP power type = %d, not supported", ap_pwr_type);
+	return QDF_STATUS_E_NOSUPPORT;
+}
+#else
+QDF_STATUS
+reg_get_best_6g_power_type(struct wlan_objmgr_psoc *psoc,
+			   struct wlan_objmgr_pdev *pdev,
+			   enum reg_6g_ap_type *pwr_type_6g,
+			   enum reg_6g_ap_type ap_pwr_type,
+			   uint32_t chan_freq)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
+#endif
+
+#ifdef FEATURE_WLAN_CH_AVOID_EXT
+static inline
+void reg_get_coex_unsafe_chan_nb_user_prefer(
+		struct wlan_regulatory_psoc_priv_obj
+		*psoc_priv_obj,
+		 struct reg_config_vars config_vars)
+{
+	psoc_priv_obj->coex_unsafe_chan_nb_user_prefer =
+		config_vars.coex_unsafe_chan_nb_user_prefer;
+}
+
+static inline
+void reg_get_coex_unsafe_chan_reg_disable(
+		struct wlan_regulatory_psoc_priv_obj *psoc_priv_obj,
+		struct reg_config_vars config_vars)
+{
+	psoc_priv_obj->coex_unsafe_chan_reg_disable =
+		config_vars.coex_unsafe_chan_reg_disable;
+}
+#else
+static inline
+void reg_get_coex_unsafe_chan_nb_user_prefer(
+		struct wlan_regulatory_psoc_priv_obj
+		*psoc_priv_obj,
+		struct reg_config_vars config_vars)
+{
+}
+
+static inline
+void reg_get_coex_unsafe_chan_reg_disable(
+		struct wlan_regulatory_psoc_priv_obj *psoc_priv_obj,
+		struct reg_config_vars config_vars)
+{
+}
+#endif
 
 #ifdef CONFIG_CHAN_FREQ_API
-bool reg_is_passive_or_disable_for_freq(struct wlan_objmgr_pdev *pdev,
-					qdf_freq_t freq)
+bool reg_is_passive_or_disable_for_pwrmode(
+				struct wlan_objmgr_pdev *pdev,
+				qdf_freq_t freq,
+				enum supported_6g_pwr_types in_6g_pwr_mode)
 {
 	enum channel_state chan_state;
 
-	chan_state = reg_get_channel_state_for_freq(pdev, freq);
+	chan_state = reg_get_channel_state_for_pwrmode(pdev, freq,
+						       in_6g_pwr_mode);
 
 	return (chan_state == CHANNEL_STATE_DFS) ||
 		(chan_state == CHANNEL_STATE_DISABLE);
@@ -417,34 +624,7 @@ bool reg_is_dsrc_freq(qdf_freq_t freq)
 	return true;
 }
 #endif  /*CONFIG_CHAN_FREQ_API*/
-
-#ifdef CONFIG_CHAN_NUM_API
-bool reg_is_dsrc_chan(struct wlan_objmgr_pdev *pdev, uint8_t chan)
-{
-	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
-	qdf_freq_t freq = 0;
-
-	pdev_priv_obj = reg_get_pdev_obj(pdev);
-
-	if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
-		reg_err("reg pdev priv obj is NULL");
-		return false;
-	}
-
-	if (!REG_IS_5GHZ_CH(chan))
-		return false;
-
-	freq = reg_chan_to_freq(pdev, chan);
-
-	if (!(freq >= REG_DSRC_START_FREQ && freq <= REG_DSRC_END_FREQ))
-		return false;
-
-	return true;
-}
-#endif /* CONFIG_CHAN_NUM_API */
-
 #else
-
 bool reg_is_etsi13_regdmn(struct wlan_objmgr_pdev *pdev)
 {
 	struct cur_regdmn_info cur_reg_dmn;
@@ -473,32 +653,6 @@ bool reg_is_etsi13_srd_chan_for_freq(struct wlan_objmgr_pdev *pdev,
 	return reg_is_etsi13_regdmn(pdev);
 }
 #endif /* CONFIG_CHAN_FREQ_API */
-
-#ifdef CONFIG_CHAN_NUM_API
-bool reg_is_etsi13_srd_chan(struct wlan_objmgr_pdev *pdev, uint8_t chan)
-{
-	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
-	qdf_freq_t freq = 0;
-
-	pdev_priv_obj = reg_get_pdev_obj(pdev);
-
-	if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
-		reg_err("reg pdev priv obj is NULL");
-		return false;
-	}
-
-	if (!REG_IS_5GHZ_CH(chan))
-		return false;
-
-	freq = reg_chan_to_freq(pdev, chan);
-
-	if (!(freq >= REG_ETSI13_SRD_START_FREQ &&
-	      freq <= REG_ETSI13_SRD_END_FREQ))
-		return false;
-
-	return reg_is_etsi13_regdmn(pdev);
-}
-#endif /* CONFIG_CHAN_NUM_API */
 
 bool reg_is_etsi13_srd_chan_allowed_master_mode(struct wlan_objmgr_pdev *pdev)
 {
@@ -536,9 +690,28 @@ QDF_STATUS reg_set_band(struct wlan_objmgr_pdev *pdev, uint32_t band_bitmap)
 		return QDF_STATUS_E_INVAL;
 	}
 
-	if (pdev_priv_obj->band_capability == band_bitmap) {
+	/*
+	 * If SET_FCC_CHANNEL 0 command is received first then 6 GHz band would
+	 * be disabled and band_capability would be set to 3 but existing 6 GHz
+	 * STA and P2P client connections won't be disconnected.
+	 * If set band comes again for 6 GHz band disabled and band_bitmap is
+	 * equal to band_capability, proceed to disable 6 GHz band completely.
+	 */
+	if (pdev_priv_obj->band_capability == band_bitmap &&
+	    !reg_get_keep_6ghz_sta_cli_connection(pdev)) {
 		reg_info("same band %d", band_bitmap);
 		return QDF_STATUS_SUCCESS;
+	}
+
+	/*
+	 * If in current band_capability 6 GHz bit is not set, in current
+	 * request 6 GHz band might be enabled/disabled. Hence reset
+	 * reg_set_keep_6ghz_sta_cli_connection flag.
+	 */
+	if (!wlan_reg_is_6ghz_band_set(pdev)) {
+		status = reg_set_keep_6ghz_sta_cli_connection(pdev, false);
+		if (QDF_IS_STATUS_ERROR(status))
+			return status;
 	}
 
 	psoc = wlan_pdev_get_psoc(pdev);
@@ -686,66 +859,40 @@ QDF_STATUS reg_cache_channel_freq_state(struct wlan_objmgr_pdev *pdev,
 	return QDF_STATUS_SUCCESS;
 }
 #endif /* CONFIG_CHAN_FREQ_API */
+#endif
 
-#ifdef CONFIG_CHAN_NUM_API
-QDF_STATUS reg_cache_channel_state(struct wlan_objmgr_pdev *pdev,
-				   uint32_t *channel_list,
-				   uint32_t num_channels)
+#ifdef CONFIG_REG_CLIENT
+bool reg_get_keep_6ghz_sta_cli_connection(struct wlan_objmgr_pdev *pdev)
 {
-	struct wlan_regulatory_psoc_priv_obj *psoc_priv_obj;
 	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
-	struct wlan_objmgr_psoc *psoc;
-	uint8_t i, j;
 
 	pdev_priv_obj = reg_get_pdev_obj(pdev);
+	if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
+		reg_err("pdev reg component is NULL");
+		return false;
+	}
 
+	return pdev_priv_obj->keep_6ghz_sta_cli_connection;
+}
+
+QDF_STATUS reg_set_keep_6ghz_sta_cli_connection(struct wlan_objmgr_pdev *pdev,
+					bool keep_6ghz_sta_cli_connection)
+{
+	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
+
+	pdev_priv_obj = reg_get_pdev_obj(pdev);
 	if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
 		reg_err("pdev reg component is NULL");
 		return QDF_STATUS_E_INVAL;
 	}
 
-	psoc = wlan_pdev_get_psoc(pdev);
-	if (!psoc) {
-		reg_err("psoc is NULL");
-		return QDF_STATUS_E_INVAL;
-	}
+	pdev_priv_obj->keep_6ghz_sta_cli_connection =
+			keep_6ghz_sta_cli_connection;
 
-	psoc_priv_obj = reg_get_psoc_obj(psoc);
-	if (!IS_VALID_PSOC_REG_OBJ(psoc_priv_obj)) {
-		reg_err("psoc reg component is NULL");
-		return QDF_STATUS_E_INVAL;
-	}
-	if (pdev_priv_obj->num_cache_channels > 0) {
-		pdev_priv_obj->num_cache_channels = 0;
-		qdf_mem_zero(&pdev_priv_obj->cache_disable_chan_list,
-			     sizeof(pdev_priv_obj->cache_disable_chan_list));
-	}
-
-	for (i = 0; i < num_channels; i++) {
-		for (j = 0; j < NUM_CHANNELS; j++) {
-			if (channel_list[i] == pdev_priv_obj->
-						cur_chan_list[j].chan_num) {
-				pdev_priv_obj->
-					cache_disable_chan_list[i].chan_num =
-							channel_list[i];
-				pdev_priv_obj->
-					cache_disable_chan_list[i].state =
-					pdev_priv_obj->cur_chan_list[j].state;
-				pdev_priv_obj->
-					cache_disable_chan_list[i].chan_flags =
-					pdev_priv_obj->
-						cur_chan_list[j].chan_flags;
-			}
-		}
-	}
-	pdev_priv_obj->num_cache_channels = num_channels;
-
+	reg_debug("set keep_6ghz_sta_cli_connection = %d",
+		  keep_6ghz_sta_cli_connection);
 	return QDF_STATUS_SUCCESS;
 }
-#endif /* CONFIG_CHAN_NUM_API */
-#endif
-
-#ifdef CONFIG_REG_CLIENT
 
 QDF_STATUS reg_set_fcc_constraint(struct wlan_objmgr_pdev *pdev,
 				  bool fcc_constraint)
@@ -762,12 +909,11 @@ QDF_STATUS reg_set_fcc_constraint(struct wlan_objmgr_pdev *pdev,
 	}
 
 	if (pdev_priv_obj->set_fcc_channel == fcc_constraint) {
-		reg_info("same fcc_constraint %d", fcc_constraint);
+		reg_debug("same fcc_constraint %d", fcc_constraint);
 		return QDF_STATUS_SUCCESS;
 	}
 
-	reg_info("set fcc_constraint: %d", fcc_constraint);
-	pdev_priv_obj->set_fcc_channel = fcc_constraint;
+	reg_debug("set fcc_constraint: %d", fcc_constraint);
 
 	psoc = wlan_pdev_get_psoc(pdev);
 	if (!psoc) {
@@ -781,11 +927,30 @@ QDF_STATUS reg_set_fcc_constraint(struct wlan_objmgr_pdev *pdev,
 		return QDF_STATUS_E_INVAL;
 	}
 
+	psoc_priv_obj->set_fcc_channel = fcc_constraint;
+	pdev_priv_obj->set_fcc_channel = fcc_constraint;
+
 	reg_compute_pdev_current_chan_list(pdev_priv_obj);
 
 	status = reg_send_scheduler_msg_sb(psoc, pdev);
 
 	return status;
+}
+
+bool reg_is_6ghz_band_set(struct wlan_objmgr_pdev *pdev)
+{
+	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
+
+	pdev_priv_obj = reg_get_pdev_obj(pdev);
+	if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
+		reg_err("pdev reg component is NULL");
+		return false;
+	}
+
+	if (!(pdev_priv_obj->band_capability & BIT(REG_BAND_6G)))
+		return false;
+
+	return true;
 }
 
 bool reg_get_fcc_constraint(struct wlan_objmgr_pdev *pdev, uint32_t freq)
@@ -848,29 +1013,6 @@ enum reg_6g_ap_type reg_decide_6g_ap_pwr_type(struct wlan_objmgr_pdev *pdev)
 
 	return ap_pwr_type;
 }
-
-QDF_STATUS reg_set_ap_pwr_and_update_chan_list(struct wlan_objmgr_pdev *pdev,
-					       enum reg_6g_ap_type ap_pwr_type)
-{
-	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
-	QDF_STATUS status;
-
-	pdev_priv_obj = reg_get_pdev_obj(pdev);
-	if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
-		reg_err("pdev reg component is NULL");
-		return QDF_STATUS_E_INVAL;
-	}
-
-	status = reg_set_cur_6g_ap_pwr_type(pdev, ap_pwr_type);
-	if (QDF_IS_STATUS_ERROR(status)) {
-		reg_debug("failed to set AP power type to %d", ap_pwr_type);
-		return status;
-	}
-
-	reg_compute_pdev_current_chan_list(pdev_priv_obj);
-
-	return QDF_STATUS_SUCCESS;
-}
 #endif /* CONFIG_BAND_6GHZ */
 
 #endif /* CONFIG_REG_CLIENT */
@@ -906,11 +1048,37 @@ static void reg_change_pdev_for_config(struct wlan_objmgr_psoc *psoc,
 	pdev_priv_obj->force_ssc_disable_indoor_channel =
 		psoc_priv_obj->force_ssc_disable_indoor_channel;
 	pdev_priv_obj->band_capability = psoc_priv_obj->band_capability;
+	pdev_priv_obj->sta_sap_scc_on_indoor_channel =
+		psoc_priv_obj->sta_sap_scc_on_indoor_channel;
+	pdev_priv_obj->p2p_indoor_ch_support =
+		psoc_priv_obj->p2p_indoor_ch_support;
 
 	reg_compute_pdev_current_chan_list(pdev_priv_obj);
 
 	reg_send_scheduler_msg_sb(psoc, pdev);
 }
+
+#if defined(CONFIG_BAND_6GHZ) && defined(CONFIG_AFC_SUPPORT)
+static inline void
+reg_set_afc_vars(struct wlan_regulatory_psoc_priv_obj *psoc_priv_obj,
+		 struct reg_config_vars *config_vars)
+{
+	psoc_priv_obj->enable_6ghz_sp_pwrmode_supp =
+		config_vars->enable_6ghz_sp_pwrmode_supp;
+	psoc_priv_obj->afc_disable_timer_check =
+		config_vars->afc_disable_timer_check;
+	psoc_priv_obj->afc_disable_request_id_check =
+		config_vars->afc_disable_request_id_check;
+	psoc_priv_obj->is_afc_reg_noaction =
+		config_vars->is_afc_reg_noaction;
+}
+#else
+static inline void
+reg_set_afc_vars(struct wlan_regulatory_psoc_priv_obj *psoc_priv_obj,
+		 struct reg_config_vars *config_vars)
+{
+}
+#endif
 
 QDF_STATUS reg_set_config_vars(struct wlan_objmgr_psoc *psoc,
 			       struct reg_config_vars config_vars)
@@ -942,6 +1110,14 @@ QDF_STATUS reg_set_config_vars(struct wlan_objmgr_psoc *psoc,
 		config_vars.enable_5dot9_ghz_chan_in_master_mode;
 	psoc_priv_obj->retain_nol_across_regdmn_update =
 		config_vars.retain_nol_across_regdmn_update;
+	reg_get_coex_unsafe_chan_nb_user_prefer(psoc_priv_obj, config_vars);
+	reg_get_coex_unsafe_chan_reg_disable(psoc_priv_obj, config_vars);
+	psoc_priv_obj->sta_sap_scc_on_indoor_channel =
+		config_vars.sta_sap_scc_on_indoor_channel;
+	psoc_priv_obj->p2p_indoor_ch_support =
+		config_vars.p2p_indoor_ch_support;
+
+	reg_set_afc_vars(psoc_priv_obj, &config_vars);
 
 	status = wlan_objmgr_psoc_try_get_ref(psoc, WLAN_REGULATORY_SB_ID);
 	if (QDF_IS_STATUS_ERROR(status)) {
@@ -954,19 +1130,6 @@ QDF_STATUS reg_set_config_vars(struct wlan_objmgr_psoc *psoc,
 	wlan_objmgr_psoc_release_ref(psoc, WLAN_REGULATORY_SB_ID);
 
 	return status;
-}
-
-bool reg_is_regdb_offloaded(struct wlan_objmgr_psoc *psoc)
-{
-	struct wlan_regulatory_psoc_priv_obj *psoc_priv_obj;
-
-	psoc_priv_obj = reg_get_psoc_obj(psoc);
-	if (!psoc_priv_obj) {
-		reg_err("reg psoc private obj is NULL");
-		return false;
-	}
-
-	return psoc_priv_obj->offload_enabled;
 }
 
 void reg_program_mas_chan_list(struct wlan_objmgr_psoc *psoc,
@@ -1033,30 +1196,6 @@ enum country_src reg_get_cc_and_src(struct wlan_objmgr_psoc *psoc,
 	return psoc_priv_obj->cc_src;
 }
 
-QDF_STATUS reg_get_regd_rules(struct wlan_objmgr_pdev *pdev,
-			      struct reg_rule_info *reg_rules)
-{
-	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
-
-	if (!pdev) {
-		reg_err("pdev is NULL");
-		return QDF_STATUS_E_FAILURE;
-	}
-
-	pdev_priv_obj = reg_get_pdev_obj(pdev);
-	if (!pdev_priv_obj) {
-		reg_err("pdev priv obj is NULL");
-		return QDF_STATUS_E_FAILURE;
-	}
-
-	qdf_spin_lock_bh(&pdev_priv_obj->reg_rules_lock);
-	qdf_mem_copy(reg_rules, &pdev_priv_obj->reg_rules,
-		     sizeof(struct reg_rule_info));
-	qdf_spin_unlock_bh(&pdev_priv_obj->reg_rules_lock);
-
-	return QDF_STATUS_SUCCESS;
-}
-
 void reg_reset_ctry_pending_hints(struct wlan_regulatory_psoc_priv_obj
 				  *soc_reg)
 {
@@ -1078,7 +1217,9 @@ QDF_STATUS reg_set_curr_country(struct wlan_regulatory_psoc_priv_obj *soc_reg,
 				struct wlan_lmac_if_reg_tx_ops *tx_ops)
 {
 	struct wlan_objmgr_psoc *psoc = regulat_info->psoc;
+	struct wlan_objmgr_pdev *pdev;
 	uint8_t pdev_id;
+	uint8_t phy_id;
 	uint8_t phy_num;
 	struct set_country country_code;
 	QDF_STATUS status;
@@ -1113,16 +1254,32 @@ QDF_STATUS reg_set_curr_country(struct wlan_regulatory_psoc_priv_obj *soc_reg,
 		     sizeof(soc_reg->cur_country));
 	country_code.pdev_id = pdev_id;
 
-	if (!tx_ops || !tx_ops->set_country_code) {
-		reg_err("No regulatory tx_ops");
-		status = QDF_STATUS_E_FAULT;
-		goto error;
-	}
+	if (soc_reg->offload_enabled) {
+		if (!tx_ops || !tx_ops->set_country_code) {
+			reg_err("No regulatory tx_ops");
+			status = QDF_STATUS_E_FAULT;
+			goto error;
+		}
+		status = tx_ops->set_country_code(psoc, &country_code);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			reg_err("Failed to send country code to fw");
+			goto error;
+		}
+	} else {
+		phy_id = regulat_info->phy_id;
+		if (tx_ops->get_pdev_id_from_phy_id)
+			tx_ops->get_pdev_id_from_phy_id(psoc, phy_id, &pdev_id);
+		else
+			pdev_id = phy_id;
 
-	status = tx_ops->set_country_code(psoc, &country_code);
-	if (QDF_IS_STATUS_ERROR(status)) {
-		reg_err("Failed to send country code to fw");
-		goto error;
+		pdev = wlan_objmgr_get_pdev_by_id(psoc, pdev_id,
+						  WLAN_REGULATORY_NB_ID);
+		status = reg_set_non_offload_country(pdev, &country_code);
+		wlan_objmgr_pdev_release_ref(pdev, WLAN_REGULATORY_NB_ID);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			reg_err("Failed to set country code");
+			goto error;
+		}
 	}
 
 	reg_debug("Target CC: %.2s, Restore to Previous CC: %.2s",
@@ -1140,9 +1297,6 @@ bool reg_ignore_default_country(struct wlan_regulatory_psoc_priv_obj *soc_reg,
 				struct cur_regulatory_info *regulat_info)
 {
 	uint8_t phy_num;
-
-	if (!soc_reg->offload_enabled)
-		return false;
 
 	if (soc_reg->cc_src == SOURCE_UNKNOWN)
 		return false;

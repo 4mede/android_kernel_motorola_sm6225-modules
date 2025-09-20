@@ -68,8 +68,6 @@ static uint32_t qdf_tracker_leaks_print(struct qdf_tracker *tracker,
 	bool print_header = true;
 	uint32_t count = 0;
 
-	QDF_BUG(qdf_spin_is_locked(&tracker->lock));
-
 	qdf_ptr_hash_for_each(tracker->ht, bucket, node, entry) {
 		if (node->domain != domain)
 			continue;

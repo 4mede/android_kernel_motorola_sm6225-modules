@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013, 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2002-2010, Atheros Communications Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
@@ -52,9 +53,8 @@ int dfs_bin5_check_pulse(struct wlan_dfs *dfs, struct dfs_event *re,
 		return 0;
 	}
 
-#define CHANNEL_TURBO 0x00010
 	/* Adjust the filter threshold for rssi in non TURBO mode. */
-	if (!(dfs->dfs_curchan->dfs_ch_flags & CHANNEL_TURBO))
+	if (!WLAN_IS_CHAN_TURBO(dfs->dfs_curchan))
 		b5_rssithresh += br->br_pulse.b5_rssimargin;
 
 	/* Check if the pulse is within duration and rssi thresholds. */
@@ -212,7 +212,7 @@ void bin5_rules_check_internal(struct wlan_dfs *dfs,
 		(uint64_t)br->br_elems[prev].be_ts);
 
 	if (((pri >= DFS_BIN5_PRI_LOWER_LIMIT) &&
-		    /*pri: pulse repitition interval in us. */
+		    /*pri: pulse repetition interval in us. */
 		    (pri <= DFS_BIN5_PRI_HIGHER_LIMIT))) {
 		/*
 		 * Rule 2: pulse width of the pulses in the

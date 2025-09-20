@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -67,6 +68,7 @@ typedef __in6_addr_t in6_addr_t;
 #define QDF_IEEE80211_FC0_SUBTYPE_QOS   0x80
 #define QDF_IEEE80211_FC1_TODS          0x01
 #define QDF_IEEE80211_FC1_FROMDS        0x02
+#define QDF_IEEE80211_FC1_PM            0x10
 
 #define QDF_IEEE80211_FC0_TYPE_MASK     0x0c
 #define QDF_IEEE80211_FC0_SUBTYPE_MASK  0xf0
@@ -527,12 +529,32 @@ typedef struct {
 } qdf_net_nd_msg_t;
 
 
+static inline
+__sum16 qdf_csum_tcpudp_magic(uint32_t ip_saddr, uint32_t ip_daddr,
+			      uint16_t adj_ip_len, uint8_t ip_proto,
+			      uint32_t sum)
+{
+	return __qdf_csum_tcpudp_magic(ip_saddr, ip_daddr,
+				       adj_ip_len, ip_proto, sum);
+}
+
+static inline
+uint16_t qdf_ip_fast_csum(qdf_net_iphdr_t *iph_head, uint8_t ip_hl)
+{
+	return __qdf_ip_fast_csum(iph_head, ip_hl);
+}
+
 static inline int32_t qdf_csum_ipv6(const in6_addr_t *saddr,
 				    const in6_addr_t *daddr,
 				    __u32 len, unsigned short proto,
 				    wsum_t sum)
 {
 	return (int32_t)__qdf_csum_ipv6(saddr, daddr, len, proto, sum);
+}
+
+static inline char *qdf_netdev_get_devname(qdf_netdev_t dev)
+{
+	return __qdf_netdev_get_devname(dev);
 }
 
 typedef struct {

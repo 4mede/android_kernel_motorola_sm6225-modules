@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -20,11 +21,11 @@
 
 #include "wlan_dcs_init_deinit_api.h"
 #include "../../core/src/wlan_dcs.h"
-#include "wlan_dcs_cfg.h"
+#include "cfg_dcs.h"
 #include "cfg_ucfg_api.h"
 
 /**
- * wlan_dcs_psoc_obj_create_notification() - dcs psoc cretae handler
+ * wlan_dcs_psoc_obj_create_notification() - dcs psoc create handler
  * @psoc: psoc object
  * @arg_list: Argument list
  *
@@ -36,11 +37,15 @@ wlan_dcs_psoc_obj_create_notification(struct wlan_objmgr_psoc *psoc,
 {
 	QDF_STATUS status;
 	struct dcs_psoc_priv_obj *dcs_psoc_obj;
+	uint8_t loop;
 
 	dcs_psoc_obj = qdf_mem_malloc(sizeof(*dcs_psoc_obj));
 
 	if (!dcs_psoc_obj)
 		return QDF_STATUS_E_NOMEM;
+
+	for (loop = 0; loop < WLAN_DCS_MAX_PDEVS; loop++)
+		qdf_spinlock_create(&dcs_psoc_obj->dcs_pdev_priv[loop].lock);
 
 	status = wlan_objmgr_psoc_component_obj_attach(psoc,
 						       WLAN_UMAC_COMP_DCS,
@@ -82,9 +87,11 @@ wlan_dcs_psoc_obj_destroy_notification(struct wlan_objmgr_psoc *psoc,
 	status = wlan_objmgr_psoc_component_obj_detach(psoc,
 						       WLAN_UMAC_COMP_DCS,
 						       dcs_psoc_obj);
-	for (loop = 0; loop < WLAN_DCS_MAX_PDEVS; loop++)
+	for (loop = 0; loop < WLAN_DCS_MAX_PDEVS; loop++) {
 		qdf_timer_free(&dcs_psoc_obj->dcs_pdev_priv[loop].
 							dcs_disable_timer);
+		qdf_spinlock_destroy(&dcs_psoc_obj->dcs_pdev_priv[loop].lock);
+	}
 	qdf_mem_free(dcs_psoc_obj);
 
 	return status;
@@ -176,6 +183,7 @@ QDF_STATUS wlan_dcs_psoc_open(struct wlan_objmgr_psoc *psoc)
 		dcs_pdev_priv = &dcs_psoc_obj->dcs_pdev_priv[loop];
 		dcs_pdev_priv->dcs_host_params.dcs_enable_cfg =
 					cfg_get(psoc, CFG_DCS_ENABLE);
+		dcs_pdev_priv->dcs_host_params.dcs_algorithm_process = false;
 		dcs_pdev_priv->dcs_host_params.dcs_debug =
 					cfg_get(psoc, CFG_DCS_DEBUG);
 		dcs_pdev_priv->dcs_host_params.phy_err_penalty =
@@ -194,6 +202,8 @@ QDF_STATUS wlan_dcs_psoc_open(struct wlan_objmgr_psoc *psoc)
 				cfg_get(psoc, CFG_DCS_INTFR_DETECTION_WINDOW);
 		dcs_pdev_priv->dcs_host_params.tx_err_threshold =
 				cfg_get(psoc, CFG_DCS_TX_ERR_THRESHOLD);
+		dcs_pdev_priv->dcs_host_params.force_disable_algorithm =
+				cfg_get(psoc, CFG_DCS_DISABLE_ALGORITHM);
 		dcs_pdev_priv->dcs_freq_ctrl_params.
 					disable_threshold_per_5mins =
 			cfg_get(psoc, CFG_DCS_DISABLE_THRESHOLD_PER_5MINS);

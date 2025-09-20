@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -53,14 +54,14 @@
  *
  * ------------------------------32 bits arg----------------------------
  *
- * ------------19 bits-------|--2 bits-|-------8 bits------|1 bit|2 bits|
+ * -------18 bits------|1 bit|--2 bits-|-------8 bits------|1 bit|2 bits|
  * ______________________________________________________________________
- *|                          |   | |   | | | | | | | | | | |     |   |   |
- *|------19 Unused bits------| x | | x |x|x|x| |x|x|x|x| |x|  x  | x | x |
- *|__________________________|___|_|___|_|_|_|_|_|_|_|_|_|_|_____|___|___|
+ *|                    |     |   | |   | | | | | | | | | | |     |   |   |
+ *|---18 Unused bits---|  x  | x | | x |x|x|x| |x|x|x|x| |x|  x  | x | x |
+ *|____________________|_____|___|_|___|_|_|_|_|_|_|_|_|_|_|_____|___|___|
  *
- *                           |_________|___________________|_____|_______|
- *                              det.ID     freq.offset      Chirp  seg.ID
+ *                     |_____|_________|___________________|_____|_______|
+ *                      sign   det.ID     freq.offset       Chirp  seg.ID
  *
  * @DFS_UNIT_TEST_NUM_ARGS:     Number of arguments for bangradar unit test
  *                              command.
@@ -75,14 +76,16 @@ enum {
 	DFS_MAX_NUM_UNIT_TEST_ARGS = DFS_UNIT_TEST_NUM_ARGS
 };
 
-#define SEG_ID_SHIFT         0
-#define IS_CHIRP_SHIFT       2
-#define FREQ_OFF_SHIFT       3
-#define DET_ID_SHIFT        11
-#define SEG_ID_MASK       0x03
-#define IS_CHIRP_MASK     0x01
-#define FREQ_OFFSET_MASK  0xFF
-#define DET_ID_MASK       0x03
+#define SEG_ID_SHIFT               0
+#define IS_CHIRP_SHIFT             2
+#define FREQ_OFF_SHIFT             3
+#define DET_ID_SHIFT              11
+#define FREQ_OFFSET_SIGNBIT_SHIFT 13
+#define SEG_ID_MASK              0x03
+#define IS_CHIRP_MASK            0x01
+#define FREQ_OFFSET_MASK         0xFF
+#define DET_ID_MASK              0x03
+#define FREQ_OFFSET_SIGNBIT_MASK 0x01
 
 /**
  * struct dfs_emulate_bang_radar_test_cmd - Unit test command structure to send
@@ -120,28 +123,7 @@ struct vdev_adfs_complete_status {
 
 extern struct dfs_to_mlme global_dfs_to_mlme;
 
-/**
- * tgt_dfs_set_current_channel() - Fill dfs channel structure from
- *                                 dfs_channel structure.
- * @pdev: Pointer to DFS pdev object.
- * @dfs_ch_freq: Frequency in Mhz.
- * @dfs_ch_flags: Channel flags.
- * @dfs_ch_flagext: Extended channel flags.
- * @dfs_ch_ieee: IEEE channel number.
- * @dfs_ch_vhtop_ch_freq_seg1: Channel Center frequency1.
- * @dfs_ch_vhtop_ch_freq_seg2: Channel Center frequency2.
- */
 #ifdef DFS_COMPONENT_ENABLE
-#ifdef CONFIG_CHAN_NUM_API
-QDF_STATUS tgt_dfs_set_current_channel(struct wlan_objmgr_pdev *pdev,
-		uint16_t dfs_ch_freq,
-		uint64_t dfs_ch_flags,
-		uint16_t dfs_ch_flagext,
-		uint8_t dfs_ch_ieee,
-		uint8_t dfs_ch_vhtop_ch_freq_seg1,
-		uint8_t dfs_ch_vhtop_ch_freq_seg2);
-#endif
-
 /**
  * tgt_dfs_set_current_channel_for_freq() - Fill dfs channel structure from
  *                                          dfs_channel structure.
@@ -155,6 +137,8 @@ QDF_STATUS tgt_dfs_set_current_channel(struct wlan_objmgr_pdev *pdev,
  * @dfs_ch_mhz_freq_seg1:  Channel center frequency of primary segment in MHZ.
  * @dfs_ch_mhz_freq_seg2:  Channel center frequency of secondary segment in MHZ
  *                         applicable only for 80+80MHZ mode of operation.
+ * @dfs_ch_op_puncturing:  Puncturing pattern followed in current operating
+ *                         channel.
  * @is_channel_updated: Boolean to represent channel update.
  */
 #ifdef CONFIG_CHAN_FREQ_API
@@ -168,6 +152,7 @@ tgt_dfs_set_current_channel_for_freq(struct wlan_objmgr_pdev *pdev,
 				     uint8_t dfs_ch_vhtop_ch_freq_seg2,
 				     uint16_t dfs_ch_mhz_freq_seg1,
 				     uint16_t dfs_ch_mhz_freq_seg2,
+				     uint16_t dfs_ch_op_puncturing,
 				     bool *is_channel_updated);
 #endif
 
@@ -222,17 +207,6 @@ QDF_STATUS tgt_dfs_get_radars(struct wlan_objmgr_pdev *pdev);
 QDF_STATUS tgt_dfs_process_radar_ind(struct wlan_objmgr_pdev *pdev,
 		struct radar_found_info *radar_found);
 #else
-static inline QDF_STATUS tgt_dfs_set_current_channel(
-		struct wlan_objmgr_pdev *pdev,
-		uint16_t dfs_ch_freq,
-		uint64_t dfs_ch_flags,
-		uint16_t dfs_ch_flagext,
-		uint8_t dfs_ch_ieee,
-		uint8_t dfs_ch_vhtop_ch_freq_seg1,
-		uint8_t dfs_ch_vhtop_ch_freq_seg2)
-{
-	return QDF_STATUS_SUCCESS;
-}
 
 static inline QDF_STATUS tgt_dfs_radar_enable(
 	struct wlan_objmgr_pdev *pdev,
@@ -265,6 +239,7 @@ static inline QDF_STATUS tgt_dfs_process_radar_ind(
 }
 #endif
 
+#ifdef WLAN_DFS_PARTIAL_OFFLOAD
 /**
  * tgt_dfs_process_phyerr() - Process phyerr.
  * @pdev: Pointer to DFS pdev object.
@@ -285,6 +260,18 @@ QDF_STATUS tgt_dfs_process_phyerr(struct wlan_objmgr_pdev *pdev,
 	uint8_t r_ext_rssi,
 	uint32_t r_rs_tstamp,
 	uint64_t r_fulltsf);
+#else
+static inline QDF_STATUS tgt_dfs_process_phyerr(struct wlan_objmgr_pdev *pdev,
+						void *buf,
+						uint16_t datalen,
+						uint8_t r_rssi,
+						uint8_t r_ext_rssi,
+						uint32_t r_rs_tstamp,
+						uint64_t r_fulltsf)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
 
 /**
  * tgt_dfs_process_phyerr_filter_offload() - Process radar event.
@@ -317,7 +304,7 @@ QDF_STATUS tgt_dfs_is_phyerr_filter_offload(struct wlan_objmgr_psoc *psoc,
  */
 QDF_STATUS tgt_dfs_destroy_object(struct wlan_objmgr_pdev *pdev);
 
-#ifdef QCA_MCL_DFS_SUPPORT
+#ifdef MOBILE_DFS_SUPPORT
 /**
  * tgt_dfs_set_tx_leakage_threshold() - set tx_leakage_threshold.
  * @pdev: Pointer to DFS pdev object.
@@ -378,56 +365,6 @@ QDF_STATUS tgt_dfs_ocac_complete(struct wlan_objmgr_pdev *pdev,
 				 struct vdev_adfs_complete_status *ocac_status);
 
 /**
- * utils_dfs_find_vht80_chan_for_precac() - Find VHT80 channel for precac.
- * @pdev: Pointer to DFS pdev object.
- * @chan_mode: Channel mode.
- * @ch_freq_seg1: Segment1 channel freq.
- * @cfreq1: cfreq1.
- * @cfreq2: cfreq2.
- * @phy_mode: Precac phymode.
- * @dfs_set_cfreq2: Precac cfreq2
- * @set_agile: Agile mode flag.
- *
- * wrapper function for  dfs_find_vht80_chan_for_precacdfs_cancel_cac_timer().
- * This function called from outside of dfs component.
- */
-#ifdef CONFIG_CHAN_NUM_API
-QDF_STATUS tgt_dfs_find_vht80_chan_for_precac(struct wlan_objmgr_pdev *pdev,
-		uint32_t chan_mode,
-		uint8_t ch_freq_seg1,
-		uint32_t *cfreq1,
-		uint32_t *cfreq2,
-		uint32_t *phy_mode,
-		bool *dfs_set_cfreq2,
-		bool *set_agile);
-#endif
-
-/**
- * tgt_dfs_find_vht80_precac_chan_freq() - Find VHT80 channel for precac
- * @pdev: Pointer to DFS pdev object.
- * @chan_mode: Channel mode.
- * @ch_freq_seg1_mhz: Segment1 channel freq in MHZ.
- * @cfreq1: cfreq1.
- * @cfreq2: cfreq2.
- * @phy_mode: Precac phymode.
- * @dfs_set_cfreq2: Precac cfreq2
- * @set_agile: Agile mode flag.
- *
- * wrapper function for  dfs_find_vht80_chan_for_precac_for_freq().
- */
-#ifdef CONFIG_CHAN_FREQ_API
-QDF_STATUS
-tgt_dfs_find_vht80_precac_chan_freq(struct wlan_objmgr_pdev *pdev,
-				    uint32_t chan_mode,
-				    uint16_t ch_freq_mhz_seg1,
-				    uint32_t *cfreq1,
-				    uint32_t *cfreq2,
-				    uint32_t *phy_mode,
-				    bool *dfs_set_cfreq2,
-				    bool *set_agile);
-#endif
-
-/**
  * tgt_dfs_cac_complete() - Process cac complete indication.
  * @pdev: Pointer to DFS pdev object.
  * @vdev_id: vdev id.
@@ -467,7 +404,7 @@ QDF_STATUS tgt_dfs_stop(struct wlan_objmgr_pdev *pdev);
 QDF_STATUS tgt_dfs_process_emulate_bang_radar_cmd(struct wlan_objmgr_pdev *pdev,
 		struct dfs_emulate_bang_radar_test_cmd *dfs_unit_test);
 
-#ifdef QCA_MCL_DFS_SUPPORT
+#ifdef MOBILE_DFS_SUPPORT
 /**
  * tgt_dfs_set_phyerr_filter_offload() - config phyerr filter offload
  * @pdev: Pointer to DFS pdev object.
@@ -544,7 +481,14 @@ QDF_STATUS tgt_dfs_reset_spoof_test(struct wlan_objmgr_pdev *pdev)
  * @pdev: Pointer to DFS pdev object.
  * @val: input value.
  */
+#ifdef QCA_SUPPORT_STA_DFS
 void tgt_dfs_enable_stadfs(struct wlan_objmgr_pdev *pdev, bool val);
+#else
+static inline
+void tgt_dfs_enable_stadfs(struct wlan_objmgr_pdev *pdev, bool val)
+{
+}
+#endif
 
 /**
  * tgt_dfs_is_stadfs_enabled() - Get STADFS capability
@@ -552,15 +496,23 @@ void tgt_dfs_enable_stadfs(struct wlan_objmgr_pdev *pdev, bool val);
  *
  * Return: true if STADFS is enabled, else false.
  */
+#ifdef QCA_SUPPORT_STA_DFS
 bool tgt_dfs_is_stadfs_enabled(struct wlan_objmgr_pdev *pdev);
+#else
+static inline
+bool tgt_dfs_is_stadfs_enabled(struct wlan_objmgr_pdev *pdev)
+{
+	return false;
+}
+#endif
 
 /**
- * tgt_dfs_is_pdev_5ghz() - Check if the input pdev is 5GHZ.
+ * tgt_dfs_is_5ghz_supported_in_pdev() - Check if the input pdev supports 5GHZ.
  * @pdev: Pointer to DFS pdev object.
  *
  * Return: true if the pdev supports 5GHz, else false.
  */
-bool tgt_dfs_is_pdev_5ghz(struct wlan_objmgr_pdev *pdev);
+bool tgt_dfs_is_5ghz_supported_in_pdev(struct wlan_objmgr_pdev *pdev);
 
 #if defined(WLAN_DFS_FULL_OFFLOAD) && defined(QCA_DFS_NOL_OFFLOAD)
 /**
@@ -602,21 +554,25 @@ tgt_dfs_send_subchan_marking(struct wlan_objmgr_pdev *pdev, bool subchanmark)
  * @pdev: Pointer to pdev object.
  * @fw_adfs_support_160: aDFS enabled when pdev is on 160/80P80MHz.
  * @fw_adfs_support_non_160: aDFS enabled when pdev is on 20/40/80MHz.
+ * @fw_adfs_support_320: aDFS enabled when pdev is on 320 MHz.
  *
  * Return: void.
  */
 void tgt_dfs_set_fw_adfs_support(struct wlan_objmgr_pdev *pdev,
 				 bool fw_adfs_support_160,
-				 bool fw_adfs_support_non_160);
+				 bool fw_adfs_support_non_160,
+				 bool fw_adfs_support_320);
 #else
 static inline
 void tgt_dfs_set_fw_adfs_support(struct wlan_objmgr_pdev *pdev,
 				 bool fw_adfs_support_160,
-				 bool fw_adfs_support_non_160)
+				 bool fw_adfs_support_non_160,
+				 bool fw_adfs_support_320)
 {
 }
 #endif
 
+#ifdef QCA_HW_MODE_SWITCH
 /**
  * tgt_dfs_init_tmp_psoc_nol() - Init temporary psoc NOL structure.
  * @pdev: Pointer to pdev object.
@@ -689,4 +645,43 @@ void tgt_dfs_reinit_precac_lists(struct wlan_objmgr_pdev *src_pdev,
  * Return: void.
  */
 void tgt_dfs_complete_deferred_tasks(struct wlan_objmgr_pdev *pdev);
+#else
+static inline
+void tgt_dfs_init_tmp_psoc_nol(struct wlan_objmgr_pdev *pdev,
+			       uint8_t num_radios)
+{
+}
+
+static inline
+void tgt_dfs_deinit_tmp_psoc_nol(struct wlan_objmgr_pdev *pdev)
+{
+}
+
+static inline
+void tgt_dfs_save_dfs_nol_in_psoc(struct wlan_objmgr_pdev *pdev,
+				  uint8_t pdev_id)
+{
+}
+
+static inline
+void tgt_dfs_reinit_nol_from_psoc_copy(struct wlan_objmgr_pdev *pdev,
+				       uint8_t pdev_id,
+				       uint16_t low_5ghz_freq,
+				       uint16_t high_5ghz_freq)
+{
+}
+
+static inline
+void tgt_dfs_reinit_precac_lists(struct wlan_objmgr_pdev *src_pdev,
+				 struct wlan_objmgr_pdev *dest_pdev,
+				 uint16_t low_5g_freq,
+				 uint16_t high_5g_freq)
+{
+}
+
+static inline
+void tgt_dfs_complete_deferred_tasks(struct wlan_objmgr_pdev *pdev)
+{
+}
+#endif
 #endif /* _WLAN_DFS_TGT_API_H_ */

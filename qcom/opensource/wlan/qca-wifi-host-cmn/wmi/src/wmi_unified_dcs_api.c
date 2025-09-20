@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -49,7 +50,16 @@ QDF_STATUS wmi_extract_dcs_im_tgt_stats(
 	return QDF_STATUS_E_FAILURE;
 }
 
-#ifdef ENABLE_HOST_TO_TARGET_CONVERSION
+QDF_STATUS wmi_extract_dcs_awgn_info(wmi_unified_t wmi_hdl, void *evt_buf,
+				     struct wlan_host_dcs_awgn_info *awgn_info)
+{
+	if (wmi_hdl && wmi_hdl->ops->extract_dcs_awgn_info)
+		return wmi_hdl->ops->extract_dcs_awgn_info(wmi_hdl, evt_buf,
+							   awgn_info);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
 QDF_STATUS wmi_send_dcs_pdev_param(wmi_unified_t wmi_handle,
 				   uint32_t pdev_idx,
 				   bool is_host_pdev_id,
@@ -64,19 +74,3 @@ QDF_STATUS wmi_send_dcs_pdev_param(wmi_unified_t wmi_handle,
 
 	return wmi_unified_pdev_param_send(wmi_handle, &pparam, pdev_idx);
 }
-#else
-QDF_STATUS wmi_send_dcs_pdev_param(wmi_unified_t wmi_handle,
-				   uint32_t pdev_idx,
-				   bool is_host_pdev_id,
-				   uint32_t dcs_enable)
-{
-	struct pdev_params pparam;
-
-	qdf_mem_zero(&pparam, sizeof(pparam));
-	pparam.is_host_pdev_id = is_host_pdev_id;
-	pparam.param_id = WMI_PDEV_PARAM_DCS;
-	pparam.param_value = dcs_enable;
-
-	return wmi_unified_pdev_param_send(wmi_handle, &pparam, pdev_idx);
-}
-#endif

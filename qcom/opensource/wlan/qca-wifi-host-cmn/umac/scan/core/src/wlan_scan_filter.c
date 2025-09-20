@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -25,6 +26,7 @@
 #include <wlan_dfs_utils_api.h>
 #include "wlan_crypto_global_def.h"
 #include "wlan_crypto_global_api.h"
+#include "wlan_reg_services_api.h"
 
 /**
  * scm_check_open() - Check if scan entry support open authmode
@@ -212,6 +214,73 @@ static bool scm_chk_crypto_params(struct scan_filter *filter,
 	return true;
 }
 
+#ifdef WLAN_ADAPTIVE_11R
+/**
+ * scm_check_and_update_adaptive_11r_key_mgmt_support() -  check and update
+ * first rsn security which is present in RSN IE of Beacon/Probe response to
+ * corresponding FT AKM.
+ * @ap_crypto: crypto param structure
+ *
+ * Return: none
+ */
+static void scm_check_and_update_adaptive_11r_key_mgmt_support(
+					struct wlan_crypto_params *ap_crypto)
+{
+	uint32_t i, first_key_mgmt = WLAN_CRYPTO_KEY_MGMT_MAX;
+
+	/*
+	 * Supplicant compares AKM(s) in RSN IE of Beacon/Probe response and
+	 * AKM on EAPOL M3 frame received by AP.  In the case of multi AKM,
+	 * previously Host converts all adaptive 11r AKM(s), if any, present
+	 * in RSN IE of Beacon/Probe response to corresponding FT AKM but the
+	 * AP(s) which support adaptive 11r (ADAPTIVE_11R_OUI: 0x964000) only
+	 * converts first AKM to corresponding FT AKM and sends EAPOL M3 frame
+	 * to DUT. This results in failure in a 4-way handshake in supplicant
+	 * due to RSN IE miss-match between RSNIE sent by host and RSNIE
+	 * present in EAPOL M3 frame. Now like AP, the host is converting only
+	 * the first AKM to corresponding FT AKM to avoid RSNIE mismatch in
+	 * supplicant.
+	 */
+	for (i = 0; i < WLAN_CRYPTO_KEY_MGMT_MAX; i++) {
+		if (ap_crypto->akm_list[i].key_mgmt ==
+		    WLAN_CRYPTO_KEY_MGMT_IEEE8021X ||
+		    ap_crypto->akm_list[i].key_mgmt ==
+		    WLAN_CRYPTO_KEY_MGMT_IEEE8021X_SHA256) {
+			first_key_mgmt = WLAN_CRYPTO_KEY_MGMT_IEEE8021X;
+			break;
+		}
+
+		if (ap_crypto->akm_list[i].key_mgmt ==
+		    WLAN_CRYPTO_KEY_MGMT_PSK ||
+		    ap_crypto->akm_list[i].key_mgmt ==
+		    WLAN_CRYPTO_KEY_MGMT_PSK_SHA256) {
+			first_key_mgmt = WLAN_CRYPTO_KEY_MGMT_PSK;
+			break;
+		}
+	}
+
+	if (first_key_mgmt == WLAN_CRYPTO_KEY_MGMT_MAX) {
+		scm_debug("No adaptive 11r's AKM present in RSN IE");
+		return;
+	}
+
+	scm_debug("First AKM:%d present in RSN IE of bcn/Probe rsp at index:%d",
+		  first_key_mgmt, i);
+
+	if (first_key_mgmt == WLAN_CRYPTO_KEY_MGMT_IEEE8021X)
+		QDF_SET_PARAM(ap_crypto->key_mgmt,
+			      WLAN_CRYPTO_KEY_MGMT_FT_IEEE8021X);
+
+	if (first_key_mgmt == WLAN_CRYPTO_KEY_MGMT_PSK)
+		QDF_SET_PARAM(ap_crypto->key_mgmt, WLAN_CRYPTO_KEY_MGMT_FT_PSK);
+}
+#else
+static inline void scm_check_and_update_adaptive_11r_key_mgmt_support(
+					struct wlan_crypto_params *ap_crypto)
+{
+}
+#endif
+
 /**
  * scm_check_rsn() - Check if scan entry support RSN security
  * @filter: scan filter
@@ -251,29 +320,11 @@ static bool scm_check_rsn(struct scan_filter *filter,
 				filter->enable_adaptive_11r;
 
 	/* If adaptive 11r is enabled set the FT AKM for AP */
-	if (is_adaptive_11r) {
-		if (QDF_HAS_PARAM(ap_crypto->key_mgmt,
-				  WLAN_CRYPTO_KEY_MGMT_IEEE8021X)) {
-			QDF_SET_PARAM(ap_crypto->key_mgmt,
-				      WLAN_CRYPTO_KEY_MGMT_FT_IEEE8021X);
-		}
-		if (QDF_HAS_PARAM(ap_crypto->key_mgmt,
-				  WLAN_CRYPTO_KEY_MGMT_PSK)) {
-			QDF_SET_PARAM(ap_crypto->key_mgmt,
-				      WLAN_CRYPTO_KEY_MGMT_FT_PSK);
-		}
-		if (QDF_HAS_PARAM(ap_crypto->key_mgmt,
-				  WLAN_CRYPTO_KEY_MGMT_PSK_SHA256)) {
-			QDF_SET_PARAM(ap_crypto->key_mgmt,
-				      WLAN_CRYPTO_KEY_MGMT_FT_PSK);
-		}
-		if (QDF_HAS_PARAM(ap_crypto->key_mgmt,
-				  WLAN_CRYPTO_KEY_MGMT_IEEE8021X_SHA256)) {
-			QDF_SET_PARAM(ap_crypto->key_mgmt,
-				      WLAN_CRYPTO_KEY_MGMT_FT_IEEE8021X);
-		}
-	}
+	if (is_adaptive_11r)
+		scm_check_and_update_adaptive_11r_key_mgmt_support(ap_crypto);
 
+	scm_debug("ap_crypto->key_mgmt:%d, filter->key_mgmt:%d",
+		  ap_crypto->key_mgmt, filter->key_mgmt);
 	match = scm_chk_crypto_params(filter, ap_crypto, is_adaptive_11r,
 				      db_entry, security);
 	qdf_mem_free(ap_crypto);
@@ -490,7 +541,7 @@ static bool scm_is_security_match(struct scan_filter *filter,
 	if (!filter->authmodeset)
 		return scm_match_any_security(filter, db_entry, security);
 
-	for (i = 0; i <= WLAN_CRYPTO_AUTH_MAX && !match; i++) {
+	for (i = 0; i < WLAN_CRYPTO_AUTH_MAX && !match; i++) {
 		if (!QDF_HAS_PARAM(filter->authmodeset, i))
 			continue;
 
@@ -504,7 +555,8 @@ static bool scm_is_security_match(struct scan_filter *filter,
 			match = scm_check_open(filter, db_entry, security);
 			if (match)
 				break;
-		/* If not OPEN, then check WEP match so fall through */
+		/* If not OPEN, then check WEP match */
+			fallthrough;
 		case WLAN_CRYPTO_AUTH_SHARED:
 			match = scm_check_wep(filter, db_entry, security);
 			break;
@@ -530,14 +582,24 @@ static bool scm_is_security_match(struct scan_filter *filter,
 	return match;
 }
 
-static bool scm_ignore_ssid_check_for_owe(struct scan_filter *filter,
-					  struct scan_cache_entry *db_entry)
+static bool
+scm_ignore_ssid_check_for_hidden_bss(struct scan_filter *filter,
+				     struct scan_cache_entry *db_entry)
 {
-	if (util_scan_entry_is_hidden_ap(db_entry) &&
-	    QDF_HAS_PARAM(filter->key_mgmt, WLAN_CRYPTO_KEY_MGMT_OWE) &&
+	bool is_hidden;
+
+	is_hidden = util_scan_entry_is_hidden_ap(db_entry);
+	if (is_hidden &&
 	    util_is_bssid_match(&filter->bssid_hint, &db_entry->bssid))
 		return true;
 
+	/* Dump only for hidden SSID as non-hidden are anyway rejected */
+	if (is_hidden && !qdf_is_macaddr_zero(&filter->bssid_hint))
+		scm_debug(QDF_MAC_ADDR_FMT ": Ignore hidden AP as key_mgmt 0x%x is not OWE or bssid hint: "
+			  QDF_MAC_ADDR_FMT " does not match",
+			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes),
+			  filter->key_mgmt,
+			  QDF_MAC_ADDR_REF(filter->bssid_hint.bytes));
 	return false;
 }
 
@@ -566,6 +628,13 @@ static bool scm_is_fils_config_match(struct scan_filter *filter,
 	indication_ie =
 		(struct fils_indication_ie *)db_entry->ie_list.fils_indication;
 
+	/*
+	 * Don't validate the realm, if AP advertises realm count as 0
+	 * in the FILS indication element
+	 */
+	if (!indication_ie->realm_identifiers_cnt)
+		return true;
+
 	end_ptr = (uint8_t *)indication_ie + indication_ie->len + 2;
 	data = indication_ie->variable_data;
 
@@ -578,15 +647,15 @@ static bool scm_is_fils_config_match(struct scan_filter *filter,
 		data += HESSID_LEN;
 
 	for (i = 1; i <= indication_ie->realm_identifiers_cnt &&
-	     (data + REAM_HASH_LEN) <= end_ptr; i++) {
+	     (data + REALM_HASH_LEN) <= end_ptr; i++) {
 		if (!qdf_mem_cmp(filter->fils_scan_filter.fils_realm,
-				 data, REAM_HASH_LEN))
+				 data, REALM_HASH_LEN))
 			return true;
 		/* Max realm count reached */
 		if (indication_ie->realm_identifiers_cnt == i)
 			break;
 
-		data = data + REAM_HASH_LEN;
+		data = data + REALM_HASH_LEN;
 	}
 
 	return false;
@@ -608,25 +677,20 @@ static bool scm_check_dot11mode(struct scan_cache_entry *db_entry,
 	case ALLOW_ALL:
 		break;
 	case ALLOW_11N_ONLY:
-		if (!util_scan_entry_htcap(db_entry)) {
-			scm_debug(QDF_MAC_ADDR_FMT ": Ignore as dot11mode(HT only) didn't match",
-				  QDF_MAC_ADDR_REF(db_entry->bssid.bytes));
+		if (!util_scan_entry_htcap(db_entry))
 			return false;
-		}
 		break;
 	case ALLOW_11AC_ONLY:
-		if (!util_scan_entry_vhtcap(db_entry)) {
-			scm_debug(QDF_MAC_ADDR_FMT ": Ignore as dot11mode(VHT only) didn't match",
-				  QDF_MAC_ADDR_REF(db_entry->bssid.bytes));
+		if (!util_scan_entry_vhtcap(db_entry))
 			return false;
-		}
 		break;
 	case ALLOW_11AX_ONLY:
-		if (!util_scan_entry_hecap(db_entry)) {
-			scm_debug(QDF_MAC_ADDR_FMT ": Ignore as dot11mode(HE only) didn't match",
-				  QDF_MAC_ADDR_REF(db_entry->bssid.bytes));
+		if (!util_scan_entry_hecap(db_entry))
 			return false;
-		}
+		break;
+	case ALLOW_11BE_ONLY:
+		if (!util_scan_entry_ehtcap(db_entry))
+			return false;
 		break;
 	default:
 		scm_debug("Invalid dot11mode filter passed %d",
@@ -635,6 +699,150 @@ static bool scm_check_dot11mode(struct scan_cache_entry *db_entry,
 
 	return true;
 }
+
+#ifdef WLAN_FEATURE_11BE_MLO
+static bool util_mlo_filter_match(struct wlan_objmgr_pdev *pdev,
+				  struct scan_filter *filter,
+				  struct scan_cache_entry *db_entry)
+{
+	uint8_t i, band_bitmap, assoc_band_bitmap;
+	enum reg_wifi_band band;
+	struct partner_link_info *partner_link;
+	bool is_disabled;
+	struct qdf_mac_addr *mld_addr;
+
+	/* If MLD address of scan entry doesn't match the MLD address in scan
+	 * filter, then drop the scan entry even if the BSSID matches.
+	 * This is to filter out entries from APs with similar BSSID
+	 * but different MLD address.
+	 */
+	if (filter->match_mld_addr) {
+		mld_addr = util_scan_entry_mldaddr(db_entry);
+		if (!mld_addr ||
+		    !qdf_is_macaddr_equal(&filter->mld_addr, mld_addr)) {
+			scm_debug("Scan filter MLD mismatch " QDF_MAC_ADDR_FMT,
+				  QDF_MAC_ADDR_REF(filter->mld_addr.bytes));
+			return false;
+		}
+	}
+
+	if (filter->match_link_id && filter->link_id != WLAN_INVALID_LINK_ID &&
+	    filter->link_id != util_scan_entry_self_linkid(db_entry)) {
+		scm_debug(QDF_MAC_ADDR_FMT " link id %d mismatch filter link id %d",
+			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes),
+			  util_scan_entry_self_linkid(db_entry),
+			  filter->link_id);
+		return false;
+	}
+
+	if (!db_entry->ie_list.multi_link_bv)
+		return true;
+	if (!filter->band_bitmap)
+		return true;
+
+	/* Apply assoc band filter only for assoc link */
+	band_bitmap = filter->band_bitmap & 0xf;
+	assoc_band_bitmap = (filter->band_bitmap & 0xf0) >> 4;
+	band = wlan_reg_freq_to_band(db_entry->channel.chan_freq);
+	if ((assoc_band_bitmap && !(band_bitmap & BIT(band) & assoc_band_bitmap)) ||
+	    (!assoc_band_bitmap && !(band_bitmap & BIT(band)))) {
+		scm_debug("bss freq %d not match band bitmap: 0x%x",
+			  db_entry->channel.chan_freq,
+			  filter->band_bitmap);
+		return false;
+	}
+	for (i = 0; i < db_entry->ml_info.num_links; i++) {
+		partner_link = &db_entry->ml_info.link_info[i];
+		band = wlan_reg_freq_to_band(partner_link->freq);
+
+		is_disabled = wlan_reg_is_disable_for_pwrmode(
+				    pdev,
+				    partner_link->freq,
+				    REG_BEST_PWR_MODE);
+		if (is_disabled) {
+			scm_debug("partner link id %d freq %d disabled : "QDF_MAC_ADDR_FMT,
+				  partner_link->link_id,
+				  partner_link->freq,
+				  QDF_MAC_ADDR_REF(
+				  partner_link->link_addr.bytes));
+			continue;
+		}
+		if (band_bitmap & BIT(band)) {
+			scm_debug("partner link id %d freq %d match band bitmap: 0x%x "QDF_MAC_ADDR_FMT,
+				  partner_link->link_id,
+				  partner_link->freq,
+				  filter->band_bitmap,
+				  QDF_MAC_ADDR_REF(
+				  partner_link->link_addr.bytes));
+			partner_link->is_valid_link = true;
+		}
+	}
+
+	return true;
+}
+#else
+static bool util_mlo_filter_match(struct wlan_objmgr_pdev *pdev,
+				  struct scan_filter *filter,
+				  struct scan_cache_entry *db_entry)
+{
+	return true;
+}
+#endif
+
+#ifdef WLAN_FEATURE_11BE
+static bool util_eht_puncture_valid(struct scan_cache_entry *db_entry)
+{
+	struct wlan_ie_ehtops *eht_ops;
+	int8_t orig_width;
+	enum phy_ch_width width;
+	qdf_freq_t center_freq_320m;
+	uint16_t orig_puncture_bitmap;
+	uint16_t new_puncture_bitmap = 0;
+	QDF_STATUS status;
+
+	eht_ops = (struct wlan_ie_ehtops *)util_scan_entry_ehtop(db_entry);
+	if (!eht_ops)
+		return true;
+	if (!QDF_GET_BITS(eht_ops->ehtop_param,
+			  EHTOP_INFO_PRESENT_IDX, EHTOP_INFO_PRESENT_BITS))
+		return true;
+	orig_puncture_bitmap = db_entry->channel.puncture_bitmap;
+	if (!orig_puncture_bitmap)
+		return true;
+
+	orig_width = QDF_GET_BITS(eht_ops->control,
+				  EHTOP_INFO_CHAN_WIDTH_IDX,
+				  EHTOP_INFO_CHAN_WIDTH_BITS);
+	if (orig_width == WLAN_EHT_CHWIDTH_320) {
+		width = CH_WIDTH_320MHZ;
+		center_freq_320m = db_entry->channel.cfreq1;
+	} else {
+		width = orig_width;
+		center_freq_320m = 0;
+	}
+
+	status = wlan_reg_extract_puncture_by_bw(width,
+						 orig_puncture_bitmap,
+						 db_entry->channel.chan_freq,
+						 center_freq_320m,
+						 CH_WIDTH_20MHZ,
+						 &new_puncture_bitmap);
+	if (QDF_IS_STATUS_ERROR(status) || new_puncture_bitmap) {
+		scm_debug(QDF_MAC_ADDR_FMT "freq %d width %d 320m center %d puncture: orig %d new %d status %d",
+			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes),
+			  db_entry->channel.chan_freq, width, center_freq_320m,
+			  orig_puncture_bitmap, new_puncture_bitmap, status);
+		return false;
+	} else {
+		return true;
+	}
+}
+#else
+static bool util_eht_puncture_valid(struct scan_cache_entry *db_entry)
+{
+	return true;
+}
+#endif
 
 bool scm_filter_match(struct wlan_objmgr_psoc *psoc,
 		      struct scan_cache_entry *db_entry,
@@ -650,13 +858,6 @@ bool scm_filter_match(struct wlan_objmgr_psoc *psoc,
 	if (!def_param)
 		return false;
 
-	if (filter->dot11mode && !scm_check_dot11mode(db_entry, filter))
-		return false;
-
-	if (filter->age_threshold && filter->age_threshold <
-					util_scan_entry_age(db_entry))
-		return false;
-
 	if (db_entry->ssid.length) {
 		for (i = 0; i < filter->num_of_ssid; i++) {
 			if (util_is_ssid_match(&filter->ssid_list[i],
@@ -669,38 +870,83 @@ bool scm_filter_match(struct wlan_objmgr_psoc *psoc,
 	/*
 	 * In OWE transition mode, ssid is hidden. And supplicant does not issue
 	 * scan with specific ssid prior to connect as in other hidden ssid
-	 * cases. Add explicit check to allow OWE when ssid is hidden.
+	 * cases. Also for partner link connect, the scan entry of partner link
+	 * might not have SSID known so allow scan entry match with bssid hint.
 	 */
 	if (!match)
-		match = scm_ignore_ssid_check_for_owe(filter, db_entry);
+		match = scm_ignore_ssid_check_for_hidden_bss(filter, db_entry);
 
 	if (!match && filter->num_of_ssid)
 		return false;
 
 	match = false;
-	/* TO do Fill p2p MAC*/
 	for (i = 0; i < filter->num_of_bssid; i++) {
 		if (util_is_bssid_match(&filter->bssid_list[i],
 		   &db_entry->bssid)) {
 			match = true;
 			break;
 		}
-		/* TODO match p2p mac */
 	}
-	if (!match && filter->num_of_bssid)
+
+	if (!match && filter->num_of_bssid) {
+		/*
+		 * Do not print if ssid is not present in filter to avoid
+		 * excessive prints
+		 */
+		if (filter->num_of_ssid)
+			scm_debug(QDF_MAC_ADDR_FMT ": Ignore as BSSID not in list (no. of BSSID in list %d)",
+				  QDF_MAC_ADDR_REF(db_entry->bssid.bytes),
+				  filter->num_of_bssid);
 		return false;
+	}
+
+	if (filter->age_threshold &&
+	    filter->age_threshold < util_scan_entry_age(db_entry)) {
+		/*
+		 * Do not print if bssid/ssid is not present in filter to avoid
+		 * excessive prints
+		 */
+		if (filter->num_of_bssid || filter->num_of_ssid)
+			scm_debug(QDF_MAC_ADDR_FMT ": Ignore as age %lu ms is greater than threshold %lu ms",
+				  QDF_MAC_ADDR_REF(db_entry->bssid.bytes),
+				  util_scan_entry_age(db_entry),
+				  filter->age_threshold);
+		return false;
+	}
+
+	if (filter->dot11mode && !scm_check_dot11mode(db_entry, filter)) {
+		scm_debug(QDF_MAC_ADDR_FMT ": Ignore as dot11mode %d didn't match phymode %d",
+			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes),
+			  filter->dot11mode, db_entry->phy_mode);
+		return false;
+	}
+
+	if (filter->ignore_6ghz_channel &&
+	    WLAN_REG_IS_6GHZ_CHAN_FREQ(db_entry->channel.chan_freq)) {
+		/*
+		 * Do not print if bssid/ssid is not present in filter to avoid
+		 * excessive prints
+		 */
+		if (filter->num_of_bssid || filter->num_of_ssid)
+			scm_debug(QDF_MAC_ADDR_FMT ": Ignore as its on 6Ghz freq %d",
+				  QDF_MAC_ADDR_REF(db_entry->bssid.bytes),
+				  db_entry->channel.chan_freq);
+
+		return false;
+	}
 
 	pdev = wlan_objmgr_get_pdev_by_id(psoc, db_entry->pdev_id,
 					  WLAN_SCAN_ID);
 	if (!pdev) {
-		scm_err("Invalid pdev");
+		scm_err(QDF_MAC_ADDR_FMT ": Ignore as pdev not found",
+			QDF_MAC_ADDR_REF(db_entry->bssid.bytes));
 		return false;
 	}
 
 	if (filter->ignore_nol_chan &&
 	    utils_dfs_is_freq_in_nol(pdev, db_entry->channel.chan_freq)) {
 		wlan_objmgr_pdev_release_ref(pdev, WLAN_SCAN_ID);
-		scm_debug(QDF_MAC_ADDR_FMT" : Ignore as chan in NOL list",
+		scm_debug(QDF_MAC_ADDR_FMT ": Ignore as chan in NOL list",
 			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes));
 		return false;
 	}
@@ -723,7 +969,7 @@ bool scm_filter_match(struct wlan_objmgr_psoc *psoc,
 		 * provided to get AP's in specific frequencies)
 		 */
 		if (filter->num_of_bssid || filter->num_of_ssid)
-			scm_debug(QDF_MAC_ADDR_FMT" : Ignore as AP's freq %d is not in freq list",
+			scm_debug(QDF_MAC_ADDR_FMT ": Ignore as AP's freq %d is not in freq list",
 				  QDF_MAC_ADDR_REF(db_entry->bssid.bytes),
 				  db_entry->channel.chan_freq);
 		return false;
@@ -734,7 +980,7 @@ bool scm_filter_match(struct wlan_objmgr_psoc *psoc,
 
 	if (!filter->ignore_auth_enc_type && !filter->match_security_func &&
 	    !scm_is_security_match(filter, db_entry, security)) {
-		scm_debug(QDF_MAC_ADDR_FMT" : Ignore as security profile didn't match",
+		scm_debug(QDF_MAC_ADDR_FMT ": Ignore as security profile didn't match",
 			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes));
 		return false;
 	}
@@ -742,7 +988,7 @@ bool scm_filter_match(struct wlan_objmgr_psoc *psoc,
 	if (filter->match_security_func &&
 	    !filter->match_security_func(filter->match_security_func_arg,
 					 db_entry)) {
-		scm_debug(QDF_MAC_ADDR_FMT" : Ignore as custom security match failed",
+		scm_debug(QDF_MAC_ADDR_FMT ": Ignore as custom security match failed",
 			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes));
 		return false;
 	}
@@ -750,23 +996,40 @@ bool scm_filter_match(struct wlan_objmgr_psoc *psoc,
 	if (filter->ccx_validate_bss &&
 	    !filter->ccx_validate_bss(filter->ccx_validate_bss_arg,
 				      db_entry, 0)) {
-		scm_debug(QDF_MAC_ADDR_FMT" : Ignore as CCX validateion failed",
+		scm_debug(QDF_MAC_ADDR_FMT ": Ignore as CCX validateion failed",
 			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes));
+		return false;
+	}
+
+	if (!util_is_bss_type_match(filter->bss_type, db_entry->cap_info)) {
+		scm_debug(QDF_MAC_ADDR_FMT ": Ignore as bss type didn't match cap_info %x bss_type %d",
+			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes),
+			  db_entry->cap_info.value, filter->bss_type);
 		return false;
 	}
 
 	/* Match realm */
 	if (!scm_is_fils_config_match(filter, db_entry)) {
-		scm_debug(QDF_MAC_ADDR_FMT" :Ignore as fils config didn't match",
+		scm_debug(QDF_MAC_ADDR_FMT ":Ignore as fils config didn't match",
 			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes));
 		return false;
 	}
 
 	if (!util_mdie_match(filter->mobility_domain,
 	   (struct rsn_mdie *)db_entry->ie_list.mdie)) {
-		scm_debug(QDF_MAC_ADDR_FMT" : Ignore as mdie didn't match",
+		scm_debug(QDF_MAC_ADDR_FMT ": Ignore as mdie didn't match",
 			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes));
 		return false;
 	}
+
+	if (!util_mlo_filter_match(pdev, filter, db_entry)) {
+		scm_debug(QDF_MAC_ADDR_FMT ": Ignore as mlo filter didn't match",
+			  QDF_MAC_ADDR_REF(db_entry->bssid.bytes));
+		return false;
+	}
+
+	if (!util_eht_puncture_valid(db_entry))
+		return false;
+
 	return true;
 }

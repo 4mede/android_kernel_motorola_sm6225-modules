@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -22,6 +22,7 @@
 #include <qdf_types.h>
 #include <qdf_lock.h>
 #include "dp_types.h"
+#include "dp_internal.h"
 
 #ifdef DUMP_REO_QUEUE_INFO_IN_DDR
 #include "hal_reo.h"
@@ -29,7 +30,23 @@
 
 #define DP_INVALID_PEER_ID 0xffff
 
+#define DP_PEER_MAX_MEC_IDX 1024	/* maximum index for MEC table */
+#define DP_PEER_MAX_MEC_ENTRY 4096	/* maximum MEC entries in MEC table */
+
 #define DP_FW_PEER_STATS_CMP_TIMEOUT_MSEC 5000
+
+#define DP_PEER_HASH_LOAD_MULT  2
+#define DP_PEER_HASH_LOAD_SHIFT 0
+
+/* Threshold for peer's cached buf queue beyond which frames are dropped */
+#define DP_RX_CACHED_BUFQ_THRESH 64
+
+#define dp_peer_alert(params...) QDF_TRACE_FATAL(QDF_MODULE_ID_DP_PEER, params)
+#define dp_peer_err(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_DP_PEER, params)
+#define dp_peer_warn(params...) QDF_TRACE_WARN(QDF_MODULE_ID_DP_PEER, params)
+#define dp_peer_info(params...) \
+	__QDF_TRACE_FL(QDF_TRACE_LEVEL_INFO_HIGH, QDF_MODULE_ID_DP_PEER, ## params)
+#define dp_peer_debug(params...) QDF_TRACE_DEBUG(QDF_MODULE_ID_DP_PEER, params)
 
 #ifdef REO_QDESC_HISTORY
 enum reo_qdesc_event_type {
@@ -45,10 +62,25 @@ struct reo_qdesc_event {
 };
 #endif
 
+struct ast_del_ctxt {
+	bool age;
+	int del_count;
+};
+
 typedef void dp_peer_iter_func(struct dp_soc *soc, struct dp_peer *peer,
 			       void *arg);
 void dp_peer_unref_delete(struct dp_peer *peer, enum dp_mod_id id);
+void dp_txrx_peer_unref_delete(dp_txrx_ref_handle handle, enum dp_mod_id id);
+struct dp_peer *dp_peer_find_hash_find(struct dp_soc *soc,
+				       uint8_t *peer_mac_addr,
+				       int mac_addr_is_aligned,
+				       uint8_t vdev_id,
+				       enum dp_mod_id id);
+bool dp_peer_find_by_id_valid(struct dp_soc *soc, uint16_t peer_id);
 
+#ifdef DP_UMAC_HW_RESET_SUPPORT
+void dp_reset_tid_q_setup(struct dp_soc *soc);
+#endif
 /**
  * dp_peer_get_ref() - Returns peer object given the peer id
  *
@@ -91,7 +123,7 @@ __dp_peer_get_ref_by_id(struct dp_soc *soc,
 	struct dp_peer *peer;
 
 	qdf_spin_lock_bh(&soc->peer_map_lock);
-	peer = (peer_id >= soc->max_peers) ? NULL :
+	peer = (peer_id >= soc->max_peer_id) ? NULL :
 				soc->peer_id_to_obj_map[peer_id];
 	if (!peer ||
 	    (dp_peer_get_ref(soc, peer, mod_id) != QDF_STATUS_SUCCESS)) {
@@ -109,7 +141,7 @@ __dp_peer_get_ref_by_id(struct dp_soc *soc,
  *
  * @soc		: core DP soc context
  * @peer_id	: peer id from peer object can be retrieved
- * @mod_id      : ID ot module requesting reference
+ * @mod_id      : ID of module requesting reference
  *
  * Return: struct dp_peer*: Pointer to DP peer object
  */
@@ -121,7 +153,7 @@ struct dp_peer *dp_peer_get_ref_by_id(struct dp_soc *soc,
 	struct dp_peer *peer;
 
 	qdf_spin_lock_bh(&soc->peer_map_lock);
-	peer = (peer_id >= soc->max_peers) ? NULL :
+	peer = (peer_id >= soc->max_peer_id) ? NULL :
 				soc->peer_id_to_obj_map[peer_id];
 
 	if (!peer || peer->peer_state >= DP_PEER_STATE_LOGICAL_DELETE ||
@@ -133,6 +165,38 @@ struct dp_peer *dp_peer_get_ref_by_id(struct dp_soc *soc,
 	qdf_spin_unlock_bh(&soc->peer_map_lock);
 
 	return peer;
+}
+
+/**
+ * dp_txrx_peer_get_ref_by_id() - Returns txrx peer object given the peer id
+ *
+ * @soc		: core DP soc context
+ * @peer_id	: peer id from peer object can be retrieved
+ * @handle	: reference handle
+ * @mod_id      : ID of module requesting reference
+ *
+ * Return: struct dp_txrx_peer*: Pointer to txrx DP peer object
+ */
+static inline struct dp_txrx_peer *
+dp_txrx_peer_get_ref_by_id(struct dp_soc *soc,
+			   uint16_t peer_id,
+			   dp_txrx_ref_handle *handle,
+			   enum dp_mod_id mod_id)
+
+{
+	struct dp_peer *peer;
+
+	peer = dp_peer_get_ref_by_id(soc, peer_id, mod_id);
+	if (!peer)
+		return NULL;
+
+	if (!peer->txrx_peer) {
+		dp_peer_unref_delete(peer, mod_id);
+		return NULL;
+	}
+
+	*handle = (dp_txrx_ref_handle)peer;
+	return peer->txrx_peer;
 }
 
 #ifdef PEER_CACHE_RX_PKTS
@@ -475,74 +539,14 @@ dp_peer_state_cmp(struct dp_peer *peer,
 	return is_status_equal;
 }
 
-/**
- * dp_peer_update_state() - update dp peer state
- *
- * @soc		: core DP soc context
- * @peer	: DP peer
- * @state	: new state
- *
- * Return: None
- */
-static inline void
-dp_peer_update_state(struct dp_soc *soc,
-		     struct dp_peer *peer,
-		     enum dp_peer_state state)
-{
-	uint8_t peer_state;
-
-	qdf_spin_lock_bh(&peer->peer_state_lock);
-	peer_state = peer->peer_state;
-
-	switch (state) {
-	case DP_PEER_STATE_INIT:
-		DP_PEER_STATE_ASSERT
-			(peer, state, (peer_state != DP_PEER_STATE_ACTIVE) ||
-			 (peer_state != DP_PEER_STATE_LOGICAL_DELETE));
-		break;
-
-	case DP_PEER_STATE_ACTIVE:
-		DP_PEER_STATE_ASSERT(peer, state,
-				     (peer_state == DP_PEER_STATE_INIT));
-		break;
-
-	case DP_PEER_STATE_LOGICAL_DELETE:
-		DP_PEER_STATE_ASSERT(peer, state,
-				     (peer_state == DP_PEER_STATE_ACTIVE) ||
-				     (peer_state == DP_PEER_STATE_INIT));
-		break;
-
-	case DP_PEER_STATE_INACTIVE:
-		DP_PEER_STATE_ASSERT
-			(peer, state,
-			 (peer_state == DP_PEER_STATE_LOGICAL_DELETE));
-		break;
-
-	case DP_PEER_STATE_FREED:
-		if (peer->sta_self_peer)
-			DP_PEER_STATE_ASSERT
-			(peer, state, (peer_state == DP_PEER_STATE_INIT));
-		else
-			DP_PEER_STATE_ASSERT
-				(peer, state,
-				 (peer_state == DP_PEER_STATE_INACTIVE) ||
-				 (peer_state == DP_PEER_STATE_LOGICAL_DELETE));
-		break;
-
-	default:
-		qdf_spin_unlock_bh(&peer->peer_state_lock);
-		dp_alert("Invalid peer state %u for peer "QDF_MAC_ADDR_FMT,
-			 state, QDF_MAC_ADDR_REF(peer->mac_addr.raw));
-		return;
-	}
-	peer->peer_state = state;
-	qdf_spin_unlock_bh(&peer->peer_state_lock);
-	dp_info("Updating peer state from %u to %u mac "QDF_MAC_ADDR_FMT"\n",
-		peer_state, state,
-		QDF_MAC_ADDR_REF(peer->mac_addr.raw));
-}
-
 void dp_print_ast_stats(struct dp_soc *soc);
+QDF_STATUS dp_rx_peer_map_handler(struct dp_soc *soc, uint16_t peer_id,
+				  uint16_t hw_peer_id, uint8_t vdev_id,
+				  uint8_t *peer_mac_addr, uint16_t ast_hash,
+				  uint8_t is_wds);
+void dp_rx_peer_unmap_handler(struct dp_soc *soc, uint16_t peer_id,
+			      uint8_t vdev_id, uint8_t *peer_mac_addr,
+			      uint8_t is_wds, uint32_t free_wds_count);
 
 #ifdef DP_RX_UDP_OVER_PEER_ROAM
 /**
@@ -565,13 +569,36 @@ static inline void dp_rx_reset_roaming_peer(struct dp_soc *soc, uint8_t vdev_id,
 }
 #endif
 
-QDF_STATUS dp_rx_peer_map_handler(struct dp_soc *soc, uint16_t peer_id,
-				  uint16_t hw_peer_id, uint8_t vdev_id,
-				  uint8_t *peer_mac_addr, uint16_t ast_hash,
-				  uint8_t is_wds);
-void dp_rx_peer_unmap_handler(struct dp_soc *soc, uint16_t peer_id,
-			      uint8_t vdev_id, uint8_t *peer_mac_addr,
-			      uint8_t is_wds, uint32_t free_wds_count);
+#ifdef WLAN_FEATURE_11BE_MLO
+/**
+ * dp_rx_mlo_peer_map_handler() - handle MLO peer map event from firmware
+ * @soc_handle - generic soc handle
+ * @peer_id - ML peer_id from firmware
+ * @peer_mac_addr - mac address of the peer
+ * @mlo_ast_flow_info: MLO AST flow info
+ * @mlo_link_info - MLO link info
+ *
+ * associate the ML peer_id that firmware provided with peer entry
+ * and update the ast table in the host with the hw_peer_id.
+ *
+ * Return: QDF_STATUS code
+ */
+QDF_STATUS
+dp_rx_mlo_peer_map_handler(struct dp_soc *soc, uint16_t peer_id,
+			   uint8_t *peer_mac_addr,
+			   struct dp_mlo_flow_override_info *mlo_flow_info,
+			   struct dp_mlo_link_info *mlo_link_info);
+
+/**
+ * dp_rx_mlo_peer_unmap_handler() - handle MLO peer unmap event from firmware
+ * @soc_handle - generic soc handle
+ * @peeri_id - peer_id from firmware
+ *
+ * Return: none
+ */
+void dp_rx_mlo_peer_unmap_handler(struct dp_soc *soc, uint16_t peer_id);
+#endif
+
 void dp_rx_sec_ind_handler(struct dp_soc *soc, uint16_t peer_id,
 			   enum cdp_sec_type sec_type, int is_unicast,
 			   u_int32_t *michael_key, u_int32_t *rx_pn);
@@ -620,6 +647,12 @@ void dp_peer_ast_send_wds_del(struct dp_soc *soc,
 			      struct dp_ast_entry *ast_entry,
 			      struct dp_peer *peer);
 
+#ifdef WLAN_FEATURE_MULTI_AST_DEL
+void dp_peer_ast_send_multi_wds_del(
+		struct dp_soc *soc, uint8_t vdev_id,
+		struct peer_del_multi_wds_entries *wds_list);
+#endif
+
 void dp_peer_free_hmwds_cb(struct cdp_ctrl_objmgr_psoc *ctrl_psoc,
 			   struct cdp_soc *dp_soc,
 			   void *cookie,
@@ -634,6 +667,59 @@ void dp_peer_free_ast_entry(struct dp_soc *soc,
 void dp_peer_unlink_ast_entry(struct dp_soc *soc,
 			      struct dp_ast_entry *ast_entry,
 			      struct dp_peer *peer);
+
+/**
+ * dp_peer_mec_detach_entry() - Detach the MEC entry
+ * @soc: SoC handle
+ * @mecentry: MEC entry of the node
+ * @ptr: pointer to free list
+ *
+ * The MEC entry is detached from MEC table and added to free_list
+ * to free the object outside lock
+ *
+ * Return: None
+ */
+void dp_peer_mec_detach_entry(struct dp_soc *soc, struct dp_mec_entry *mecentry,
+			      void *ptr);
+
+/**
+ * dp_peer_mec_free_list() - free the MEC entry from free_list
+ * @soc: SoC handle
+ * @ptr: pointer to free list
+ *
+ * Return: None
+ */
+void dp_peer_mec_free_list(struct dp_soc *soc, void *ptr);
+
+/**
+ * dp_peer_mec_add_entry()
+ * @soc: SoC handle
+ * @vdev: vdev to which mec node belongs
+ * @mac_addr: MAC address of mec node
+ *
+ * This function allocates and adds MEC entry to MEC table.
+ * It assumes caller has taken the mec lock to protect the access to these
+ * tables
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS dp_peer_mec_add_entry(struct dp_soc *soc,
+				 struct dp_vdev *vdev,
+				 uint8_t *mac_addr);
+
+/**
+ * dp_peer_mec_hash_find_by_pdevid() - Find MEC entry by MAC address
+ * within pdev
+ * @soc: SoC handle
+ *
+ * It assumes caller has taken the mec_lock to protect the access to
+ * MEC hash table
+ *
+ * Return: MEC entry
+ */
+struct dp_mec_entry *dp_peer_mec_hash_find_by_pdevid(struct dp_soc *soc,
+						     uint8_t pdev_id,
+						     uint8_t *mec_mac_addr);
 
 #define DP_AST_ASSERT(_condition) \
 	do { \
@@ -732,7 +818,7 @@ void dp_peer_reset_flowq_map(struct dp_peer *peer)
 
 /**
  * dp_peer_ast_index_flow_queue_map_create() - create ast index flow queue map
- * @soc - genereic soc handle
+ * @soc - generic soc handle
  * @is_wds - flag to indicate if peer is wds
  * @peer_id - peer_id from htt peer map message
  * @peer_mac_addr - mac address of the peer
@@ -753,25 +839,6 @@ void dp_peer_ast_index_flow_queue_map_create(void *soc_hdl,
 		    struct dp_ast_flow_override_info *ast_info);
 #endif
 
-/**
- * dp_peer_update_pkt_capture_params: Set Rx & Tx Capture flags for a peer
- * @soc: DP SOC handle
- * @pdev_id: id of DP pdev handle
- * @is_rx_pkt_cap_enable: enable/disable Rx packet capture in monitor mode
- * @is_tx_pkt_cap_enable: enable/disable/delete/print
- * Tx packet capture in monitor mode
- * Tx packet capture in monitor mode
- * @peer_mac: MAC address for which the above need to be enabled/disabled
- *
- * Return: Success if Rx & Tx capture is enabled for peer, false otherwise
- */
-QDF_STATUS
-dp_peer_update_pkt_capture_params(ol_txrx_soc_handle soc,
-				  uint8_t pdev_id,
-				  bool is_rx_pkt_cap_enable,
-				  uint8_t is_tx_pkt_cap_enable,
-				  uint8_t *peer_mac);
-
 /*
  * dp_rx_tid_delete_cb() - Callback to flush reo descriptor HW cache
  * after deleting the entries (ie., setting valid=0)
@@ -784,63 +851,88 @@ void dp_rx_tid_delete_cb(struct dp_soc *soc,
 			 void *cb_ctxt,
 			 union hal_reo_status *reo_status);
 
-#ifndef WLAN_TX_PKT_CAPTURE_ENH
-/**
- * dp_peer_tid_queue_init() – Initialize ppdu stats queue per TID
- * @peer: Datapath peer
- *
- */
-static inline void dp_peer_tid_queue_init(struct dp_peer *peer)
-{
-}
-
-/**
- * dp_peer_tid_peer_id_update() – update peer_id to tid structure
- * @peer: Datapath peer
- * @peer_id: peer_id
- *
- */
-static inline
-void dp_peer_tid_peer_id_update(struct dp_peer *peer, uint16_t peer_id)
-{
-}
-
-/**
- * dp_peer_tid_queue_cleanup() – remove ppdu stats queue per TID
- * @peer: Datapath peer
- *
- */
-static inline void dp_peer_tid_queue_cleanup(struct dp_peer *peer)
-{
-}
-
-/**
- * dp_peer_update_80211_hdr() – dp peer update 80211 hdr
- * @vdev: Datapath vdev
- * @peer: Datapath peer
- *
- */
-static inline void
-dp_peer_update_80211_hdr(struct dp_vdev *vdev, struct dp_peer *peer)
-{
-}
-#endif
-
 #ifdef QCA_PEER_EXT_STATS
-QDF_STATUS dp_peer_ext_stats_ctx_alloc(struct dp_soc *soc,
-				       struct dp_peer *peer);
-void dp_peer_ext_stats_ctx_dealloc(struct dp_soc *soc,
-				   struct dp_peer *peer);
+QDF_STATUS dp_peer_delay_stats_ctx_alloc(struct dp_soc *soc,
+					 struct dp_txrx_peer *txrx_peer);
+void dp_peer_delay_stats_ctx_dealloc(struct dp_soc *soc,
+				     struct dp_txrx_peer *txrx_peer);
+void dp_peer_delay_stats_ctx_clr(struct dp_txrx_peer *txrx_peer);
 #else
-static inline QDF_STATUS dp_peer_ext_stats_ctx_alloc(struct dp_soc *soc,
-						     struct dp_peer *peer)
+static inline
+QDF_STATUS dp_peer_delay_stats_ctx_alloc(struct dp_soc *soc,
+					 struct dp_txrx_peer *txrx_peer)
 {
 	return QDF_STATUS_SUCCESS;
 }
 
-static inline void dp_peer_ext_stats_ctx_dealloc(struct dp_soc *soc,
-						 struct dp_peer *peer)
+static inline
+void dp_peer_delay_stats_ctx_dealloc(struct dp_soc *soc,
+				     struct dp_txrx_peer *txrx_peer)
 {
+}
+
+static inline
+void dp_peer_delay_stats_ctx_clr(struct dp_txrx_peer *txrx_peer)
+{
+}
+#endif
+
+#ifdef WLAN_PEER_JITTER
+QDF_STATUS dp_peer_jitter_stats_ctx_alloc(struct dp_pdev *pdev,
+					  struct dp_txrx_peer *txrx_peer);
+
+void dp_peer_jitter_stats_ctx_dealloc(struct dp_pdev *pdev,
+				      struct dp_txrx_peer *txrx_peer);
+
+void dp_peer_jitter_stats_ctx_clr(struct dp_txrx_peer *txrx_peer);
+#else
+static inline
+QDF_STATUS dp_peer_jitter_stats_ctx_alloc(struct dp_pdev *pdev,
+					  struct dp_txrx_peer *txrx_peer)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline
+void dp_peer_jitter_stats_ctx_dealloc(struct dp_pdev *pdev,
+				      struct dp_txrx_peer *txrx_peer)
+{
+}
+
+static inline
+void dp_peer_jitter_stats_ctx_clr(struct dp_txrx_peer *txrx_peer)
+{
+}
+#endif
+
+#ifndef CONFIG_SAWF_DEF_QUEUES
+static inline QDF_STATUS dp_peer_sawf_ctx_alloc(struct dp_soc *soc,
+						struct dp_peer *peer)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS dp_peer_sawf_ctx_free(struct dp_soc *soc,
+					       struct dp_peer *peer)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+#endif
+
+#ifndef CONFIG_SAWF
+static inline
+QDF_STATUS dp_peer_sawf_stats_ctx_alloc(struct dp_soc *soc,
+					struct dp_txrx_peer *txrx_peer)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline
+QDF_STATUS dp_peer_sawf_stats_ctx_free(struct dp_soc *soc,
+				       struct dp_txrx_peer *txrx_peer)
+{
+	return QDF_STATUS_SUCCESS;
 }
 #endif
 
@@ -850,6 +942,16 @@ struct dp_peer *dp_vdev_bss_peer_ref_n_get(struct dp_soc *soc,
 struct dp_peer *dp_sta_vdev_self_peer_ref_n_get(struct dp_soc *soc,
 						struct dp_vdev *vdev,
 						enum dp_mod_id mod_id);
+
+void dp_peer_ast_table_detach(struct dp_soc *soc);
+void dp_peer_find_map_detach(struct dp_soc *soc);
+void dp_soc_wds_detach(struct dp_soc *soc);
+QDF_STATUS dp_peer_ast_table_attach(struct dp_soc *soc);
+QDF_STATUS dp_peer_ast_hash_attach(struct dp_soc *soc);
+QDF_STATUS dp_peer_mec_hash_attach(struct dp_soc *soc);
+void dp_soc_wds_attach(struct dp_soc *soc);
+void dp_peer_mec_hash_detach(struct dp_soc *soc);
+void dp_peer_ast_hash_detach(struct dp_soc *soc);
 
 #ifdef FEATURE_AST
 /*
@@ -864,7 +966,7 @@ static inline void dp_peer_delete_ast_entries(struct dp_soc *soc,
 {
 	struct dp_ast_entry *ast_entry, *temp_ast_entry;
 
-	dp_debug("peer: %pK, self_ast: %pK", peer, peer->self_ast_entry);
+	dp_peer_debug("peer: %pK, self_ast: %pK", peer, peer->self_ast_entry);
 	/*
 	 * Delete peer self ast entry. This is done to handle scenarios
 	 * where peer is freed before peer map is received(for ex in case
@@ -879,7 +981,15 @@ static inline void dp_peer_delete_ast_entries(struct dp_soc *soc,
 	DP_PEER_ITERATE_ASE_LIST(peer, ast_entry, temp_ast_entry)
 		dp_peer_del_ast(soc, ast_entry);
 }
+
+void dp_print_peer_ast_entries(struct dp_soc *soc, struct dp_peer *peer,
+			       void *arg);
 #else
+static inline void dp_print_peer_ast_entries(struct dp_soc *soc,
+					     struct dp_peer *peer, void *arg)
+{
+}
+
 static inline void dp_peer_delete_ast_entries(struct dp_soc *soc,
 					      struct dp_peer *peer)
 {
@@ -974,4 +1084,1034 @@ static inline void dp_get_rx_reo_queue_info(
 {
 }
 #endif /* DUMP_REO_QUEUE_INFO_IN_DDR */
+
+static inline int dp_peer_find_mac_addr_cmp(
+	union dp_align_mac_addr *mac_addr1,
+	union dp_align_mac_addr *mac_addr2)
+{
+		/*
+		 * Intentionally use & rather than &&.
+		 * because the operands are binary rather than generic boolean,
+		 * the functionality is equivalent.
+		 * Using && has the advantage of short-circuited evaluation,
+		 * but using & has the advantage of no conditional branching,
+		 * which is a more significant benefit.
+		 */
+	return !((mac_addr1->align4.bytes_abcd == mac_addr2->align4.bytes_abcd)
+		 & (mac_addr1->align4.bytes_ef == mac_addr2->align4.bytes_ef));
+}
+
+/**
+ * dp_peer_delete() - delete DP peer
+ *
+ * @soc: Datatpath soc
+ * @peer: Datapath peer
+ * @arg: argument to iter function
+ *
+ * Return: void
+ */
+void dp_peer_delete(struct dp_soc *soc,
+		    struct dp_peer *peer,
+		    void *arg);
+
+/**
+ * dp_mlo_peer_delete() - delete MLO DP peer
+ *
+ * @soc: Datapath soc
+ * @peer: Datapath peer
+ * @arg: argument to iter function
+ *
+ * Return: void
+ */
+void dp_mlo_peer_delete(struct dp_soc *soc, struct dp_peer *peer, void *arg);
+
+#ifdef WLAN_FEATURE_11BE_MLO
+
+/* is MLO connection mld peer */
+#define IS_MLO_DP_MLD_TXRX_PEER(_peer) ((_peer)->mld_peer)
+
+/* set peer type */
+#define DP_PEER_SET_TYPE(_peer, _type_val) \
+	((_peer)->peer_type = (_type_val))
+
+/* is legacy peer */
+#define IS_DP_LEGACY_PEER(_peer) \
+	((_peer)->peer_type == CDP_LINK_PEER_TYPE && !((_peer)->mld_peer))
+/* is MLO connection link peer */
+#define IS_MLO_DP_LINK_PEER(_peer) \
+	((_peer)->peer_type == CDP_LINK_PEER_TYPE && (_peer)->mld_peer)
+/* is MLO connection mld peer */
+#define IS_MLO_DP_MLD_PEER(_peer) \
+	((_peer)->peer_type == CDP_MLD_PEER_TYPE)
+/* Get Mld peer from link peer */
+#define DP_GET_MLD_PEER_FROM_PEER(link_peer) \
+	((link_peer)->mld_peer)
+
+#ifdef WLAN_MLO_MULTI_CHIP
+uint8_t dp_mlo_get_chip_id(struct dp_soc *soc);
+
+struct dp_peer *
+dp_link_peer_hash_find_by_chip_id(struct dp_soc *soc,
+				  uint8_t *peer_mac_addr,
+				  int mac_addr_is_aligned,
+				  uint8_t vdev_id,
+				  uint8_t chip_id,
+				  enum dp_mod_id mod_id);
+#else
+static inline uint8_t dp_mlo_get_chip_id(struct dp_soc *soc)
+{
+	return 0;
+}
+
+static inline struct dp_peer *
+dp_link_peer_hash_find_by_chip_id(struct dp_soc *soc,
+				  uint8_t *peer_mac_addr,
+				  int mac_addr_is_aligned,
+				  uint8_t vdev_id,
+				  uint8_t chip_id,
+				  enum dp_mod_id mod_id)
+{
+	return dp_peer_find_hash_find(soc, peer_mac_addr,
+				      mac_addr_is_aligned,
+				      vdev_id, mod_id);
+}
+#endif
+
+/*
+ * dp_mld_peer_find_hash_find() - returns mld peer from mld peer_hash_table
+ *				  matching mac_address
+ * @soc: soc handle
+ * @peer_mac_addr: mld peer mac address
+ * @mac_addr_is_aligned: is mac addr aligned
+ * @vdev_id: vdev_id
+ * @mod_id: id of module requesting reference
+ *
+ * return: peer in sucsess
+ *         NULL in failure
+ */
+static inline
+struct dp_peer *dp_mld_peer_find_hash_find(struct dp_soc *soc,
+					   uint8_t *peer_mac_addr,
+					   int mac_addr_is_aligned,
+					   uint8_t vdev_id,
+					   enum dp_mod_id mod_id)
+{
+	if (soc->arch_ops.mlo_peer_find_hash_find)
+		return soc->arch_ops.mlo_peer_find_hash_find(soc,
+					      peer_mac_addr,
+					      mac_addr_is_aligned,
+					      mod_id, vdev_id);
+	return NULL;
+}
+
+/**
+ * dp_peer_hash_find_wrapper() - find link peer or mld per according to
+				 peer_type
+ * @soc: DP SOC handle
+ * @peer_info: peer information for hash find
+ * @mod_id: ID of module requesting reference
+ *
+ * Return: peer handle
+ */
+static inline
+struct dp_peer *dp_peer_hash_find_wrapper(struct dp_soc *soc,
+					  struct cdp_peer_info *peer_info,
+					  enum dp_mod_id mod_id)
+{
+	struct dp_peer *peer = NULL;
+
+	if (peer_info->peer_type == CDP_LINK_PEER_TYPE ||
+	    peer_info->peer_type == CDP_WILD_PEER_TYPE) {
+		peer = dp_peer_find_hash_find(soc, peer_info->mac_addr,
+					      peer_info->mac_addr_is_aligned,
+					      peer_info->vdev_id,
+					      mod_id);
+		if (peer)
+			return peer;
+	}
+	if (peer_info->peer_type == CDP_MLD_PEER_TYPE ||
+	    peer_info->peer_type == CDP_WILD_PEER_TYPE)
+		peer = dp_mld_peer_find_hash_find(
+					soc, peer_info->mac_addr,
+					peer_info->mac_addr_is_aligned,
+					peer_info->vdev_id,
+					mod_id);
+	return peer;
+}
+
+/**
+ * dp_link_peer_add_mld_peer() - add mld peer pointer to link peer,
+				 increase mld peer ref_cnt
+ * @link_peer: link peer pointer
+ * @mld_peer: mld peer pointer
+ *
+ * Return: none
+ */
+static inline
+void dp_link_peer_add_mld_peer(struct dp_peer *link_peer,
+			       struct dp_peer *mld_peer)
+{
+	/* increase mld_peer ref_cnt */
+	dp_peer_get_ref(NULL, mld_peer, DP_MOD_ID_CDP);
+	link_peer->mld_peer = mld_peer;
+}
+
+/**
+ * dp_link_peer_del_mld_peer() - delete mld peer pointer from link peer,
+				 decrease mld peer ref_cnt
+ * @link_peer: link peer pointer
+ *
+ * Return: None
+ */
+static inline
+void dp_link_peer_del_mld_peer(struct dp_peer *link_peer)
+{
+	dp_peer_unref_delete(link_peer->mld_peer, DP_MOD_ID_CDP);
+	link_peer->mld_peer = NULL;
+}
+
+/**
+ * dp_mld_peer_init_link_peers_info() - init link peers info in mld peer
+ * @mld_peer: mld peer pointer
+ *
+ * Return: None
+ */
+static inline
+void dp_mld_peer_init_link_peers_info(struct dp_peer *mld_peer)
+{
+	int i;
+
+	qdf_spinlock_create(&mld_peer->link_peers_info_lock);
+	mld_peer->num_links = 0;
+	for (i = 0; i < DP_MAX_MLO_LINKS; i++)
+		mld_peer->link_peers[i].is_valid = false;
+}
+
+/**
+ * dp_mld_peer_deinit_link_peers_info() - Deinit link peers info in mld peer
+ * @mld_peer: mld peer pointer
+ *
+ * Return: None
+ */
+static inline
+void dp_mld_peer_deinit_link_peers_info(struct dp_peer *mld_peer)
+{
+	qdf_spinlock_destroy(&mld_peer->link_peers_info_lock);
+}
+
+/**
+ * dp_mld_peer_add_link_peer() - add link peer info to mld peer
+ * @mld_peer: mld dp peer pointer
+ * @link_peer: link dp peer pointer
+ *
+ * Return: None
+ */
+static inline
+void dp_mld_peer_add_link_peer(struct dp_peer *mld_peer,
+			       struct dp_peer *link_peer)
+{
+	int i;
+	struct dp_peer_link_info *link_peer_info;
+	struct dp_soc *soc = mld_peer->vdev->pdev->soc;
+
+	qdf_spin_lock_bh(&mld_peer->link_peers_info_lock);
+	for (i = 0; i < DP_MAX_MLO_LINKS; i++) {
+		link_peer_info = &mld_peer->link_peers[i];
+		if (!link_peer_info->is_valid) {
+			qdf_mem_copy(link_peer_info->mac_addr.raw,
+				     link_peer->mac_addr.raw,
+				     QDF_MAC_ADDR_SIZE);
+			link_peer_info->is_valid = true;
+			link_peer_info->vdev_id = link_peer->vdev->vdev_id;
+			link_peer_info->chip_id =
+				dp_mlo_get_chip_id(link_peer->vdev->pdev->soc);
+			mld_peer->num_links++;
+			break;
+		}
+	}
+	qdf_spin_unlock_bh(&mld_peer->link_peers_info_lock);
+
+	dp_peer_info("%s addition of link peer %pK (" QDF_MAC_ADDR_FMT ") "
+		     "to MLD peer %pK (" QDF_MAC_ADDR_FMT "), "
+		     "idx %u num_links %u",
+		     (i != DP_MAX_MLO_LINKS) ? "Successful" : "Failed",
+		     link_peer, QDF_MAC_ADDR_REF(link_peer->mac_addr.raw),
+		     mld_peer, QDF_MAC_ADDR_REF(mld_peer->mac_addr.raw),
+		     i, mld_peer->num_links);
+
+	dp_cfg_event_record_mlo_link_delink_evt(soc, DP_CFG_EVENT_MLO_ADD_LINK,
+						mld_peer, link_peer, i,
+						(i != DP_MAX_MLO_LINKS) ? 1 : 0);
+}
+
+/**
+ * dp_mld_peer_del_link_peer() - Delete link peer info from MLD peer
+ * @mld_peer: MLD dp peer pointer
+ * @link_peer: link dp peer pointer
+ *
+ * Return: number of links left after deletion
+ */
+static inline
+uint8_t dp_mld_peer_del_link_peer(struct dp_peer *mld_peer,
+				  struct dp_peer *link_peer)
+{
+	int i;
+	struct dp_peer_link_info *link_peer_info;
+	uint8_t num_links;
+	struct dp_soc *soc = mld_peer->vdev->pdev->soc;
+
+	qdf_spin_lock_bh(&mld_peer->link_peers_info_lock);
+	for (i = 0; i < DP_MAX_MLO_LINKS; i++) {
+		link_peer_info = &mld_peer->link_peers[i];
+		if (link_peer_info->is_valid &&
+		    !dp_peer_find_mac_addr_cmp(&link_peer->mac_addr,
+					&link_peer_info->mac_addr)) {
+			link_peer_info->is_valid = false;
+			mld_peer->num_links--;
+			break;
+		}
+	}
+	num_links = mld_peer->num_links;
+	qdf_spin_unlock_bh(&mld_peer->link_peers_info_lock);
+
+	dp_peer_info("%s deletion of link peer %pK (" QDF_MAC_ADDR_FMT ") "
+		     "from MLD peer %pK (" QDF_MAC_ADDR_FMT "), "
+		     "idx %u num_links %u",
+		     (i != DP_MAX_MLO_LINKS) ? "Successful" : "Failed",
+		     link_peer, QDF_MAC_ADDR_REF(link_peer->mac_addr.raw),
+		     mld_peer, QDF_MAC_ADDR_REF(mld_peer->mac_addr.raw),
+		     i, mld_peer->num_links);
+
+	dp_cfg_event_record_mlo_link_delink_evt(soc, DP_CFG_EVENT_MLO_DEL_LINK,
+						mld_peer, link_peer, i,
+						(i != DP_MAX_MLO_LINKS) ? 1 : 0);
+
+	return num_links;
+}
+
+/**
+ * dp_get_link_peers_ref_from_mld_peer() - get link peers pointer and
+					   increase link peers ref_cnt
+ * @soc: dp_soc handle
+ * @mld_peer: dp mld peer pointer
+ * @mld_link_peers: structure that hold links peers pointer array and number
+ * @mod_id: id of module requesting reference
+ *
+ * Return: None
+ */
+static inline
+void dp_get_link_peers_ref_from_mld_peer(
+				struct dp_soc *soc,
+				struct dp_peer *mld_peer,
+				struct dp_mld_link_peers *mld_link_peers,
+				enum dp_mod_id mod_id)
+{
+	struct dp_peer *peer;
+	uint8_t i = 0, j = 0;
+	struct dp_peer_link_info *link_peer_info;
+
+	qdf_mem_zero(mld_link_peers, sizeof(*mld_link_peers));
+	qdf_spin_lock_bh(&mld_peer->link_peers_info_lock);
+	for (i = 0; i < DP_MAX_MLO_LINKS; i++)  {
+		link_peer_info = &mld_peer->link_peers[i];
+		if (link_peer_info->is_valid) {
+			peer = dp_link_peer_hash_find_by_chip_id(
+						soc,
+						link_peer_info->mac_addr.raw,
+						true,
+						link_peer_info->vdev_id,
+						link_peer_info->chip_id,
+						mod_id);
+			if (peer)
+				mld_link_peers->link_peers[j++] = peer;
+		}
+	}
+	qdf_spin_unlock_bh(&mld_peer->link_peers_info_lock);
+
+	mld_link_peers->num_links = j;
+}
+
+/**
+ * dp_release_link_peers_ref() - release all link peers reference
+ * @mld_link_peers: structure that hold links peers pointer array and number
+ * @mod_id: id of module requesting reference
+ *
+ * Return: None.
+ */
+static inline
+void dp_release_link_peers_ref(
+			struct dp_mld_link_peers *mld_link_peers,
+			enum dp_mod_id mod_id)
+{
+	struct dp_peer *peer;
+	uint8_t i;
+
+	for (i = 0; i < mld_link_peers->num_links; i++) {
+		peer = mld_link_peers->link_peers[i];
+		if (peer)
+			dp_peer_unref_delete(peer, mod_id);
+		mld_link_peers->link_peers[i] = NULL;
+	}
+
+	 mld_link_peers->num_links = 0;
+}
+
+/**
+ * dp_get_link_peer_id_by_lmac_id() - Get link peer id using peer id and lmac id
+ * @soc: Datapath soc handle
+ * @peer_id: peer id
+ * @lmac_id: lmac id to find the link peer on given lmac
+ *
+ * Return: peer_id of link peer if found
+ *         else return HTT_INVALID_PEER
+ */
+static inline
+uint16_t dp_get_link_peer_id_by_lmac_id(struct dp_soc *soc, uint16_t peer_id,
+					uint8_t lmac_id)
+{
+	uint8_t i;
+	struct dp_peer *peer;
+	struct dp_peer *link_peer;
+	struct dp_soc *link_peer_soc;
+	struct dp_mld_link_peers link_peers_info;
+	uint16_t link_peer_id = HTT_INVALID_PEER;
+
+	peer = dp_peer_get_ref_by_id(soc, peer_id, DP_MOD_ID_CDP);
+
+	if (!peer)
+		return HTT_INVALID_PEER;
+
+	if (IS_MLO_DP_MLD_PEER(peer)) {
+		/* get link peers with reference */
+		dp_get_link_peers_ref_from_mld_peer(soc, peer, &link_peers_info,
+						    DP_MOD_ID_CDP);
+
+		for (i = 0; i < link_peers_info.num_links; i++) {
+			link_peer = link_peers_info.link_peers[i];
+			link_peer_soc = link_peer->vdev->pdev->soc;
+			if ((link_peer_soc == soc) &&
+			    (link_peer->vdev->pdev->lmac_id == lmac_id)) {
+				link_peer_id = link_peer->peer_id;
+				break;
+			}
+		}
+		/* release link peers reference */
+		dp_release_link_peers_ref(&link_peers_info, DP_MOD_ID_CDP);
+	} else {
+		link_peer_id = peer_id;
+	}
+
+	dp_peer_unref_delete(peer, DP_MOD_ID_CDP);
+
+	return link_peer_id;
+}
+
+/**
+ * dp_peer_get_tgt_peer_hash_find() - get dp_peer handle
+ * @soc: soc handle
+ * @peer_mac_addr: peer mac address
+ * @mac_addr_is_aligned: is mac addr aligned
+ * @vdev_id: vdev_id
+ * @mod_id: id of module requesting reference
+ *
+ * for MLO connection, get corresponding MLD peer,
+ * otherwise get link peer for non-MLO case.
+ *
+ * return: peer in success
+ *         NULL in failure
+ */
+static inline
+struct dp_peer *dp_peer_get_tgt_peer_hash_find(struct dp_soc *soc,
+					       uint8_t *peer_mac,
+					       int mac_addr_is_aligned,
+					       uint8_t vdev_id,
+					       enum dp_mod_id mod_id)
+{
+	struct dp_peer *ta_peer = NULL;
+	struct dp_peer *peer = dp_peer_find_hash_find(soc,
+						      peer_mac, 0, vdev_id,
+						      mod_id);
+
+	if (peer) {
+		/* mlo connection link peer, get mld peer with reference */
+		if (IS_MLO_DP_LINK_PEER(peer)) {
+			/* increase mld peer ref_cnt */
+			if (QDF_STATUS_SUCCESS ==
+			    dp_peer_get_ref(soc, peer->mld_peer, mod_id))
+				ta_peer = peer->mld_peer;
+			else
+				ta_peer = NULL;
+
+			/* release peer reference that added by hash find */
+			dp_peer_unref_delete(peer, mod_id);
+		} else {
+		/* mlo MLD peer or non-mlo link peer */
+			ta_peer = peer;
+		}
+	} else {
+		dp_peer_err("fail to find peer:" QDF_MAC_ADDR_FMT,
+			    QDF_MAC_ADDR_REF(peer_mac));
+	}
+
+	return ta_peer;
+}
+
+/**
+ * dp_peer_get_tgt_peer_by_id() - Returns target peer object given the peer id
+ * @soc		: core DP soc context
+ * @peer_id	: peer id from peer object can be retrieved
+ * @mod_id      : ID of module requesting reference
+ *
+ * for MLO connection, get corresponding MLD peer,
+ * otherwise get link peer for non-MLO case.
+ *
+ * return: peer in success
+ *         NULL in failure
+ */
+static inline
+struct dp_peer *dp_peer_get_tgt_peer_by_id(struct dp_soc *soc,
+					   uint16_t peer_id,
+					   enum dp_mod_id mod_id)
+{
+	struct dp_peer *ta_peer = NULL;
+	struct dp_peer *peer = dp_peer_get_ref_by_id(soc, peer_id, mod_id);
+
+	if (peer) {
+		/* mlo connection link peer, get mld peer with reference */
+		if (IS_MLO_DP_LINK_PEER(peer)) {
+			/* increase mld peer ref_cnt */
+			if (QDF_STATUS_SUCCESS ==
+				dp_peer_get_ref(soc, peer->mld_peer, mod_id))
+				ta_peer = peer->mld_peer;
+			else
+				ta_peer = NULL;
+
+			/* release peer reference that added by hash find */
+			dp_peer_unref_delete(peer, mod_id);
+		} else {
+		/* mlo MLD peer or non-mlo link peer */
+			ta_peer = peer;
+		}
+	}
+
+	return ta_peer;
+}
+
+/**
+ * dp_peer_mlo_delete() - peer MLO related delete operation
+ * @peer: DP peer handle
+ * Return: None
+ */
+static inline
+void dp_peer_mlo_delete(struct dp_peer *peer)
+{
+	struct dp_peer *ml_peer;
+	struct dp_soc *soc;
+
+	dp_info("peer " QDF_MAC_ADDR_FMT " type %d",
+		QDF_MAC_ADDR_REF(peer->mac_addr.raw), peer->peer_type);
+
+	/* MLO connection link peer */
+	if (IS_MLO_DP_LINK_PEER(peer)) {
+		ml_peer = peer->mld_peer;
+		soc = ml_peer->vdev->pdev->soc;
+
+		/* if last link peer deletion, delete MLD peer */
+		if (dp_mld_peer_del_link_peer(peer->mld_peer, peer) == 0)
+			dp_peer_delete(soc, peer->mld_peer, NULL);
+	}
+}
+
+/**
+ * dp_peer_mlo_setup() - create MLD peer and MLO related initialization
+ * @soc: Soc handle
+ * @vdev_id: Vdev ID
+ * @peer_setup_info: peer setup information for MLO
+ */
+QDF_STATUS dp_peer_mlo_setup(
+			struct dp_soc *soc,
+			struct dp_peer *peer,
+			uint8_t vdev_id,
+			struct cdp_peer_setup_info *setup_info);
+
+/**
+ * dp_get_tgt_peer_from_peer() - Get target peer from the given peer
+ * @peer: datapath peer
+ *
+ * Return: MLD peer in case of MLO Link peer
+ *	   Peer itself in other cases
+ */
+static inline
+struct dp_peer *dp_get_tgt_peer_from_peer(struct dp_peer *peer)
+{
+	return IS_MLO_DP_LINK_PEER(peer) ? peer->mld_peer : peer;
+}
+
+/**
+ * dp_get_primary_link_peer_by_id(): Get primary link peer from the given
+ *					peer id
+ * @soc: core DP soc context
+ * @peer_id: peer id
+ * @mod_id: ID of module requesting reference
+ *
+ * Return: primary link peer for the MLO peer
+ *	   legacy peer itself in case of legacy peer
+ */
+static inline
+struct dp_peer *dp_get_primary_link_peer_by_id(struct dp_soc *soc,
+					       uint16_t peer_id,
+					       enum dp_mod_id mod_id)
+{
+	uint8_t i;
+	struct dp_mld_link_peers link_peers_info;
+	struct dp_peer *peer;
+	struct dp_peer *link_peer;
+	struct dp_peer *primary_peer = NULL;
+
+	peer = dp_peer_get_ref_by_id(soc, peer_id, mod_id);
+
+	if (!peer)
+		return NULL;
+
+	if (IS_MLO_DP_MLD_PEER(peer)) {
+		/* get link peers with reference */
+		dp_get_link_peers_ref_from_mld_peer(soc, peer, &link_peers_info,
+						    mod_id);
+
+		for (i = 0; i < link_peers_info.num_links; i++) {
+			link_peer = link_peers_info.link_peers[i];
+			if (link_peer->primary_link) {
+				primary_peer = link_peer;
+				/*
+				 * Take additional reference over
+				 * primary link peer.
+				 */
+				dp_peer_get_ref(NULL, primary_peer, mod_id);
+				break;
+			}
+		}
+		/* release link peers reference */
+		dp_release_link_peers_ref(&link_peers_info, mod_id);
+		dp_peer_unref_delete(peer, mod_id);
+	} else {
+		primary_peer = peer;
+	}
+
+	return primary_peer;
+}
+
+/**
+ * dp_get_txrx_peer() - Get dp_txrx_peer from passed dp_peer
+ * @peer: Datapath peer
+ *
+ * Return: dp_txrx_peer from MLD peer if peer type is link peer
+ *	   dp_txrx_peer from peer itself for other cases
+ */
+static inline
+struct dp_txrx_peer *dp_get_txrx_peer(struct dp_peer *peer)
+{
+	return IS_MLO_DP_LINK_PEER(peer) ?
+				peer->mld_peer->txrx_peer : peer->txrx_peer;
+}
+
+/**
+ * dp_peer_is_primary_link_peer() - Check if peer is primary link peer
+ * @peer: Datapath peer
+ *
+ * Return: true if peer is primary link peer or legacy peer
+ *	   false otherwise
+ */
+static inline
+bool dp_peer_is_primary_link_peer(struct dp_peer *peer)
+{
+	if (IS_MLO_DP_LINK_PEER(peer) && peer->primary_link)
+		return true;
+	else if (IS_DP_LEGACY_PEER(peer))
+		return true;
+	else
+		return false;
+}
+
+/**
+ * dp_tgt_txrx_peer_get_ref_by_id() - Gets tgt txrx peer for given the peer id
+ *
+ * @soc		: core DP soc context
+ * @peer_id	: peer id from peer object can be retrieved
+ * @handle	: reference handle
+ * @mod_id      : ID of module requesting reference
+ *
+ * Return: struct dp_txrx_peer*: Pointer to txrx DP peer object
+ */
+static inline struct dp_txrx_peer *
+dp_tgt_txrx_peer_get_ref_by_id(struct dp_soc *soc,
+			       uint16_t peer_id,
+			       dp_txrx_ref_handle *handle,
+			       enum dp_mod_id mod_id)
+
+{
+	struct dp_peer *peer;
+	struct dp_txrx_peer *txrx_peer;
+
+	peer = dp_peer_get_ref_by_id(soc, peer_id, mod_id);
+	if (!peer)
+		return NULL;
+
+	txrx_peer = dp_get_txrx_peer(peer);
+	if (txrx_peer) {
+		*handle = (dp_txrx_ref_handle)peer;
+		return txrx_peer;
+	}
+
+	dp_peer_unref_delete(peer, mod_id);
+	return NULL;
+}
+
+/**
+ * dp_print_mlo_ast_stats_be() - Print AST stats for MLO peers
+ *
+ * @soc	: core DP soc context
+ *
+ * Return: void
+ */
+void dp_print_mlo_ast_stats_be(struct dp_soc *soc);
+
+#else
+
+#define IS_MLO_DP_MLD_TXRX_PEER(_peer) false
+
+#define DP_PEER_SET_TYPE(_peer, _type_val) /* no op */
+/* is legacy peer */
+#define IS_DP_LEGACY_PEER(_peer) true
+#define IS_MLO_DP_LINK_PEER(_peer) false
+#define IS_MLO_DP_MLD_PEER(_peer) false
+#define DP_GET_MLD_PEER_FROM_PEER(link_peer) NULL
+
+static inline
+struct dp_peer *dp_peer_hash_find_wrapper(struct dp_soc *soc,
+					  struct cdp_peer_info *peer_info,
+					  enum dp_mod_id mod_id)
+{
+	return dp_peer_find_hash_find(soc, peer_info->mac_addr,
+				      peer_info->mac_addr_is_aligned,
+				      peer_info->vdev_id,
+				      mod_id);
+}
+
+static inline
+struct dp_peer *dp_peer_get_tgt_peer_hash_find(struct dp_soc *soc,
+					       uint8_t *peer_mac,
+					       int mac_addr_is_aligned,
+					       uint8_t vdev_id,
+					       enum dp_mod_id mod_id)
+{
+	return dp_peer_find_hash_find(soc, peer_mac,
+				      mac_addr_is_aligned, vdev_id,
+				      mod_id);
+}
+
+static inline
+struct dp_peer *dp_peer_get_tgt_peer_by_id(struct dp_soc *soc,
+					   uint16_t peer_id,
+					   enum dp_mod_id mod_id)
+{
+	return dp_peer_get_ref_by_id(soc, peer_id, mod_id);
+}
+
+static inline
+QDF_STATUS dp_peer_mlo_setup(
+			struct dp_soc *soc,
+			struct dp_peer *peer,
+			uint8_t vdev_id,
+			struct cdp_peer_setup_info *setup_info)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline
+void dp_mld_peer_init_link_peers_info(struct dp_peer *mld_peer)
+{
+}
+
+static inline
+void dp_mld_peer_deinit_link_peers_info(struct dp_peer *mld_peer)
+{
+}
+
+static inline
+void dp_link_peer_del_mld_peer(struct dp_peer *link_peer)
+{
+}
+
+static inline
+void dp_peer_mlo_delete(struct dp_peer *peer)
+{
+}
+
+static inline
+void dp_mlo_peer_authorize(struct dp_soc *soc,
+			   struct dp_peer *link_peer)
+{
+}
+
+static inline uint8_t dp_mlo_get_chip_id(struct dp_soc *soc)
+{
+	return 0;
+}
+
+static inline struct dp_peer *
+dp_link_peer_hash_find_by_chip_id(struct dp_soc *soc,
+				  uint8_t *peer_mac_addr,
+				  int mac_addr_is_aligned,
+				  uint8_t vdev_id,
+				  uint8_t chip_id,
+				  enum dp_mod_id mod_id)
+{
+	return dp_peer_find_hash_find(soc, peer_mac_addr,
+				      mac_addr_is_aligned,
+				      vdev_id, mod_id);
+}
+
+static inline
+struct dp_peer *dp_get_tgt_peer_from_peer(struct dp_peer *peer)
+{
+	return peer;
+}
+
+static inline
+struct dp_peer *dp_get_primary_link_peer_by_id(struct dp_soc *soc,
+					       uint16_t peer_id,
+					       enum dp_mod_id mod_id)
+{
+	return dp_peer_get_ref_by_id(soc, peer_id, mod_id);
+}
+
+static inline
+struct dp_txrx_peer *dp_get_txrx_peer(struct dp_peer *peer)
+{
+	return peer->txrx_peer;
+}
+
+static inline
+bool dp_peer_is_primary_link_peer(struct dp_peer *peer)
+{
+	return true;
+}
+
+/**
+ * dp_tgt_txrx_peer_get_ref_by_id() - Gets tgt txrx peer for given the peer id
+ *
+ * @soc		: core DP soc context
+ * @peer_id	: peer id from peer object can be retrieved
+ * @handle	: reference handle
+ * @mod_id      : ID of module requesting reference
+ *
+ * Return: struct dp_txrx_peer*: Pointer to txrx DP peer object
+ */
+static inline struct dp_txrx_peer *
+dp_tgt_txrx_peer_get_ref_by_id(struct dp_soc *soc,
+			       uint16_t peer_id,
+			       dp_txrx_ref_handle *handle,
+			       enum dp_mod_id mod_id)
+
+{
+	return dp_txrx_peer_get_ref_by_id(soc, peer_id, handle, mod_id);
+}
+
+static inline
+uint16_t dp_get_link_peer_id_by_lmac_id(struct dp_soc *soc, uint16_t peer_id,
+					uint8_t lmac_id)
+{
+	return peer_id;
+}
+
+static inline void dp_print_mlo_ast_stats_be(struct dp_soc *soc)
+{
+}
+#endif /* WLAN_FEATURE_11BE_MLO */
+
+static inline
+QDF_STATUS dp_peer_rx_tids_create(struct dp_peer *peer)
+{
+	uint8_t i;
+
+	if (IS_MLO_DP_MLD_PEER(peer)) {
+		dp_peer_info("skip for mld peer");
+		return QDF_STATUS_SUCCESS;
+	}
+
+	if (peer->rx_tid) {
+		QDF_BUG(0);
+		dp_peer_err("peer rx_tid mem already exist");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	peer->rx_tid = qdf_mem_malloc(DP_MAX_TIDS *
+				      sizeof(struct dp_rx_tid));
+
+	if (!peer->rx_tid) {
+		dp_err("fail to alloc tid for peer" QDF_MAC_ADDR_FMT,
+		       QDF_MAC_ADDR_REF(peer->mac_addr.raw));
+		return QDF_STATUS_E_NOMEM;
+	}
+
+	qdf_mem_zero(peer->rx_tid, DP_MAX_TIDS * sizeof(struct dp_rx_tid));
+	for (i = 0; i < DP_MAX_TIDS; i++)
+		qdf_spinlock_create(&peer->rx_tid[i].tid_lock);
+
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline
+void dp_peer_rx_tids_destroy(struct dp_peer *peer)
+{
+	uint8_t i;
+
+	if (!IS_MLO_DP_LINK_PEER(peer)) {
+		for (i = 0; i < DP_MAX_TIDS; i++)
+			qdf_spinlock_destroy(&peer->rx_tid[i].tid_lock);
+
+		qdf_mem_free(peer->rx_tid);
+	}
+
+	peer->rx_tid = NULL;
+}
+
+static inline
+void dp_peer_defrag_rx_tids_init(struct dp_txrx_peer *txrx_peer)
+{
+	uint8_t i;
+
+	qdf_mem_zero(&txrx_peer->rx_tid, DP_MAX_TIDS *
+		     sizeof(struct dp_rx_tid_defrag));
+
+	for (i = 0; i < DP_MAX_TIDS; i++)
+		qdf_spinlock_create(&txrx_peer->rx_tid[i].defrag_tid_lock);
+}
+
+static inline
+void dp_peer_defrag_rx_tids_deinit(struct dp_txrx_peer *txrx_peer)
+{
+	uint8_t i;
+
+	for (i = 0; i < DP_MAX_TIDS; i++)
+		qdf_spinlock_destroy(&txrx_peer->rx_tid[i].defrag_tid_lock);
+}
+
+#ifdef PEER_CACHE_RX_PKTS
+static inline
+void dp_peer_rx_bufq_resources_init(struct dp_txrx_peer *txrx_peer)
+{
+	qdf_spinlock_create(&txrx_peer->bufq_info.bufq_lock);
+	txrx_peer->bufq_info.thresh = DP_RX_CACHED_BUFQ_THRESH;
+	qdf_list_create(&txrx_peer->bufq_info.cached_bufq,
+			DP_RX_CACHED_BUFQ_THRESH);
+}
+
+static inline
+void dp_peer_rx_bufq_resources_deinit(struct dp_txrx_peer *txrx_peer)
+{
+	qdf_list_destroy(&txrx_peer->bufq_info.cached_bufq);
+	qdf_spinlock_destroy(&txrx_peer->bufq_info.bufq_lock);
+}
+
+#else
+static inline
+void dp_peer_rx_bufq_resources_init(struct dp_txrx_peer *txrx_peer)
+{
+}
+
+static inline
+void dp_peer_rx_bufq_resources_deinit(struct dp_txrx_peer *txrx_peer)
+{
+}
+#endif
+
+/**
+ * dp_peer_update_state() - update dp peer state
+ *
+ * @soc		: core DP soc context
+ * @peer	: DP peer
+ * @state	: new state
+ *
+ * Return: None
+ */
+static inline void
+dp_peer_update_state(struct dp_soc *soc,
+		     struct dp_peer *peer,
+		     enum dp_peer_state state)
+{
+	uint8_t peer_state;
+
+	qdf_spin_lock_bh(&peer->peer_state_lock);
+	peer_state = peer->peer_state;
+
+	switch (state) {
+	case DP_PEER_STATE_INIT:
+		DP_PEER_STATE_ASSERT
+			(peer, state, (peer_state != DP_PEER_STATE_ACTIVE) ||
+			 (peer_state != DP_PEER_STATE_LOGICAL_DELETE));
+		break;
+
+	case DP_PEER_STATE_ACTIVE:
+		DP_PEER_STATE_ASSERT(peer, state,
+				     (peer_state == DP_PEER_STATE_INIT));
+		break;
+
+	case DP_PEER_STATE_LOGICAL_DELETE:
+		DP_PEER_STATE_ASSERT(peer, state,
+				     (peer_state == DP_PEER_STATE_ACTIVE) ||
+				     (peer_state == DP_PEER_STATE_INIT));
+		break;
+
+	case DP_PEER_STATE_INACTIVE:
+		if (IS_MLO_DP_MLD_PEER(peer))
+			DP_PEER_STATE_ASSERT
+				(peer, state,
+				 (peer_state == DP_PEER_STATE_ACTIVE));
+		else
+			DP_PEER_STATE_ASSERT
+				(peer, state,
+				 (peer_state == DP_PEER_STATE_LOGICAL_DELETE));
+		break;
+
+	case DP_PEER_STATE_FREED:
+		if (peer->sta_self_peer)
+			DP_PEER_STATE_ASSERT
+			(peer, state, (peer_state == DP_PEER_STATE_INIT));
+		else
+			DP_PEER_STATE_ASSERT
+				(peer, state,
+				 (peer_state == DP_PEER_STATE_INACTIVE) ||
+				 (peer_state == DP_PEER_STATE_LOGICAL_DELETE));
+		break;
+
+	default:
+		qdf_spin_unlock_bh(&peer->peer_state_lock);
+		dp_alert("Invalid peer state %u for peer " QDF_MAC_ADDR_FMT,
+			 state, QDF_MAC_ADDR_REF(peer->mac_addr.raw));
+		return;
+	}
+	peer->peer_state = state;
+	qdf_spin_unlock_bh(&peer->peer_state_lock);
+	dp_info("Updating peer state from %u to %u mac " QDF_MAC_ADDR_FMT "\n",
+		peer_state, state,
+		QDF_MAC_ADDR_REF(peer->mac_addr.raw));
+}
+
+#ifdef REO_SHARED_QREF_TABLE_EN
+void dp_peer_rx_reo_shared_qaddr_delete(struct dp_soc *soc,
+					struct dp_peer *peer);
+#else
+static inline void dp_peer_rx_reo_shared_qaddr_delete(struct dp_soc *soc,
+						      struct dp_peer *peer) {}
+#endif
+
+/**
+ * dp_peer_check_wds_ext_peer() - Check WDS ext peer
+ *
+ * @peer: DP peer
+ *
+ * Return: True for WDS ext peer, false otherwise
+ */
+bool dp_peer_check_wds_ext_peer(struct dp_peer *peer);
 #endif /* _DP_PEER_H_ */

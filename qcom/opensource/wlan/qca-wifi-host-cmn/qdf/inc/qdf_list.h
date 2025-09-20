@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2018, 2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -104,6 +104,12 @@ static inline void qdf_list_create(__qdf_list_t *list, uint32_t max_size)
 #define qdf_list_for_each_del(list_ptr, cursor, next, node_field) \
 	__qdf_list_for_each_del(list_ptr, cursor, next, node_field)
 
+#define qdf_list_for_each_from(list_ptr, cursor, node_field) \
+	__qdf_list_for_each_from(list_ptr, cursor, node_field)
+
+#define qdf_list_first_entry_or_null(list_ptr, type, node_field) \
+	__qdf_list_first_entry_or_null(list_ptr, type, node_field)
+
 /**
  * qdf_init_list_head() - initialize list head
  * @list_head: pointer to list head
@@ -182,4 +188,31 @@ bool qdf_list_has_node(qdf_list_t *list, qdf_list_node_t *node);
  */
 bool qdf_list_node_in_any_list(const qdf_list_node_t *node);
 
+/**
+ * qdf_list_join - Join two lists and reinitialize the emptied list
+ * @list1: Pointer to list 1
+ * @list2: Pointer to list 2
+ *
+ * This API joins list1 and list2 and writes the resultant list (list1 + list2)
+ * to list1. list2 is re initialized to an empty list.
+ *
+ * Return: QDF_STATUS of operation
+ */
+QDF_STATUS qdf_list_join(qdf_list_t *list1, qdf_list_t *list2);
+
+/**
+ * qdf_list_split - Split a list into two chunks
+ * @new: Pointer to the list to store one of the chunks after splitting.
+ * This list will be overwritten by the API and hence it should be
+ * an empty list to avoid data loss.
+ * @list: Pointer to the list to be split
+ * @node: Pointer to a node within the @list. If @node is not present in
+ * the @list, behaviour is undefined.
+ *
+ * This API splits @list after @node. The initial portion of the @list
+ * up to and including @node will be moved to @new. The remaining portion will
+ * be assigned to @list.
+ */
+QDF_STATUS qdf_list_split(qdf_list_t *new, qdf_list_t *list,
+			  qdf_list_node_t *node);
 #endif /* __QDF_LIST_H */

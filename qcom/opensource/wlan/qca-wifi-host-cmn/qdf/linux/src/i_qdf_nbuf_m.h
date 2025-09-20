@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -45,6 +46,9 @@
 #define QDF_NBUF_CB_TX_DMA_BI_MAP(skb) \
 	(((struct qdf_nbuf_cb *)((skb)->cb))->u.tx.dev.priv_cb_m. \
 	dma_option.bi_map)
+#define QDF_NBUF_CB_TX_EXTRA_FRAG_FLAGS_NOTIFY_COMP(skb) \
+	(((struct qdf_nbuf_cb *)((skb)->cb))->u.tx.dev.priv_cb_m. \
+	flag_notify_comp)
 
 #define QDF_NBUF_CB_RX_PEER_ID(skb) \
 	(((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m.dp. \
@@ -81,9 +85,13 @@
 	 (((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m. \
 	 ipa_smmu_map)
 
-#define  QDF_NBUF_CB_RX_PACKET_REO_DEST_IND(skb) \
+#define  QDF_NBUF_CB_RX_PACKET_REO_DEST_IND_OR_SW_EXCPT(skb) \
 	(((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m. \
-	reo_dest_ind)
+	reo_dest_ind_or_sw_excpt)
+
+#define  QDF_NBUF_CB_RX_PACKET_LMAC_ID(skb) \
+	(((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m. \
+	lmac_id)
 
 #define __qdf_nbuf_ipa_owned_get(skb) \
 	QDF_NBUF_CB_TX_IPA_OWNED(skb)
@@ -150,6 +158,28 @@ static inline uint8_t *__qdf_nbuf_pull_head(struct sk_buff *skb, size_t size)
 }
 
 /**
+ * qdf_nbuf_is_intra_bss() - get intra bss bit
+ * @buf: Network buffer
+ *
+ * Return: integer value - 0/1
+ */
+static inline int qdf_nbuf_is_intra_bss(struct sk_buff *buf)
+{
+	return 0;
+}
+
+/**
+ * qdf_nbuf_set_intra_bss() - set intra bss bit
+ * @buf: Network buffer
+ * @val: 0/1
+ *
+ * Return: void
+ */
+static inline void qdf_nbuf_set_intra_bss(struct sk_buff *buf, uint8_t val)
+{
+}
+
+/**
  * qdf_nbuf_init_replenish_timer - Initialize the alloc replenish timer
  *
  * This function initializes the nbuf alloc fail replenish timer.
@@ -178,4 +208,15 @@ qdf_nbuf_deinit_replenish_timer(void)
 static inline void
 __qdf_nbuf_dma_inv_range(const void *buf_start, const void *buf_end) {}
 
+static inline void
+__qdf_nbuf_dma_inv_range_no_dsb(const void *buf_start, const void *buf_end) {}
+
+static inline void
+__qdf_nbuf_dma_clean_range_no_dsb(const void *buf_start, const void *buf_end) {}
+
+static inline void
+__qdf_dsb(void) {}
+
+static inline void
+__qdf_nbuf_dma_clean_range(const void *buf_start, const void *buf_end) {}
 #endif /*_I_QDF_NBUF_M_H */

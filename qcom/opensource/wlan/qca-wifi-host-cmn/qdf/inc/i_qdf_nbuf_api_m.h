@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2014-2017,2019-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2017,2019-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -53,6 +54,16 @@ static inline void qdf_nbuf_ipa_priv_set(qdf_nbuf_t buf, uint32_t priv)
 
 	QDF_BUG(!(priv & QDF_NBUF_IPA_CHECK_MASK));
 	__qdf_nbuf_ipa_priv_set(buf, priv);
+}
+
+static inline void qdf_nbuf_tx_notify_comp_set(qdf_nbuf_t buf, uint8_t val)
+{
+	QDF_NBUF_CB_TX_EXTRA_FRAG_FLAGS_NOTIFY_COMP(buf) = val;
+}
+
+static inline uint8_t qdf_nbuf_tx_notify_comp_get(qdf_nbuf_t buf)
+{
+	return QDF_NBUF_CB_TX_EXTRA_FRAG_FLAGS_NOTIFY_COMP(buf);
 }
 
 /**
@@ -121,6 +132,29 @@ static inline uint8_t qdf_nbuf_is_exc_frame(qdf_nbuf_t buf)
 }
 
 /**
+ * qdf_nbuf_set_lmac_id() - set lmac ID
+ * @buf: Network buffer
+ * @value: lmac ID value
+ *
+ * Return: none
+ */
+static inline void qdf_nbuf_set_lmac_id(qdf_nbuf_t buf, uint8_t value)
+{
+	QDF_NBUF_CB_RX_PACKET_LMAC_ID(buf) = value;
+}
+
+/**
+ * qdf_nbuf_get_lmac_id() - get lmac ID of RX packet
+ * @buf: Network buffer
+ *
+ * Return: lmac ID value
+ */
+static inline uint8_t qdf_nbuf_get_lmac_id(qdf_nbuf_t buf)
+{
+	return QDF_NBUF_CB_RX_PACKET_LMAC_ID(buf);
+}
+
+/**
  * qdf_nbuf_set_rx_ipa_smmu_map() - set ipa smmu mapped flag
  * @buf: Network buffer
  * @value: 1 - ipa smmu mapped, 0 - ipa smmu unmapped
@@ -145,26 +179,53 @@ static inline uint8_t qdf_nbuf_is_rx_ipa_smmu_map(qdf_nbuf_t buf)
 }
 
 /**
- * qdf_nbuf_set_rx_reo_dest_ind() - set reo destination indication
+ * qdf_nbuf_set_rx_reo_dest_ind_or_sw_excpt() - set reo destination indication
+						or sw exception flag
  * @buf: Network buffer
- * @value: reo destination indication value to set
+ * @value: value to set
  *
  * Return: none
  */
-static inline void qdf_nbuf_set_rx_reo_dest_ind(qdf_nbuf_t buf,
-						uint8_t value)
+static inline void qdf_nbuf_set_rx_reo_dest_ind_or_sw_excpt(qdf_nbuf_t buf,
+							    uint8_t value)
 {
-	QDF_NBUF_CB_RX_PACKET_REO_DEST_IND(buf) = value;
+	QDF_NBUF_CB_RX_PACKET_REO_DEST_IND_OR_SW_EXCPT(buf) = value;
 }
 
 /**
- * qdf_nbuf_get_rx_reo_dest_ind() - get reo destination indication
+ * qdf_nbuf_get_rx_reo_dest_ind_or_sw_excpt() - get reo destination indication
+						or sw exception flag
  * @buf: Network buffer
  *
- * Return reo destination indication value (0 ~ 31)
+ * Return reo destination indication value (0 ~ 31) or sw exception (0 ~ 1)
  */
-static inline uint8_t qdf_nbuf_get_rx_reo_dest_ind(qdf_nbuf_t buf)
+static inline uint8_t qdf_nbuf_get_rx_reo_dest_ind_or_sw_excpt(qdf_nbuf_t buf)
 {
-	return QDF_NBUF_CB_RX_PACKET_REO_DEST_IND(buf);
+	return QDF_NBUF_CB_RX_PACKET_REO_DEST_IND_OR_SW_EXCPT(buf);
+}
+
+/**
+ * qdf_nbuf_get_tx_fctx() - get fctx of nbuf
+ *
+ * @buf: Network buffer
+ * Return: fctx value
+ */
+static inline void *qdf_nbuf_get_tx_fctx(qdf_nbuf_t buf)
+{
+	return NULL;
+}
+
+/**
+ * qdf_nbuf_set_tx_fctx_type() - set ftype and fctx
+ *
+ * @buf: Network buffer
+ * @ctx: address to fctx
+ * @type: ftype
+ *
+ * Return: void
+ */
+static inline void
+qdf_nbuf_set_tx_fctx_type(qdf_nbuf_t buf, void *ctx, uint8_t type)
+{
 }
 #endif /* _QDF_NBUF_M_H */

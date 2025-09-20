@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -102,7 +103,7 @@ static bool target_if_is_dfs_3(uint32_t target_type)
 	return is_dfs_3;
 }
 
-#ifdef QCA_MCL_DFS_SUPPORT
+#ifdef MOBILE_DFS_SUPPORT
 /**
  * target_if_radar_event_handler() - handle radar event when
  * phyerr filter offload is enabled.
@@ -213,6 +214,57 @@ static bool target_if_dfs_offload(struct wlan_objmgr_psoc *psoc)
 				   wmi_service_dfs_phyerr_offload);
 }
 
+/**
+ * target_if_dfs_bangradar_320_supp: Check the service of
+ * 'wmi_service_bang_radar_320_support' whether the bang radar 320 is
+ * supported or not. If the service is enabled, then it returns true.
+ */
+
+static bool target_if_dfs_bangradar_320_supp(struct wlan_objmgr_psoc *psoc)
+{
+	wmi_unified_t wmi_handle;
+
+	wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+	if (!wmi_handle) {
+		target_if_err("null wmi_handle");
+		return false;
+	}
+
+	return wmi_service_enabled(wmi_handle,
+				   wmi_service_bang_radar_320_support);
+}
+
+#ifdef WLAN_FEATURE_11BE
+/**
+ * target_if_dfs_is_radar_found_chan_freq_eq_center_freq: Check whether the
+ * service of 'radar_found_chan_freq' representing the center frequency of the
+ * radar segment is supported or not. If the service is not enabled, then
+ * chan_freq will indicate the channel's primary 20MHz center.
+ */
+static bool
+target_if_dfs_is_radar_found_chan_freq_eq_center_freq(
+						struct wlan_objmgr_psoc *psoc)
+{
+	wmi_unified_t wmi_handle;
+
+	wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+	if (!wmi_handle) {
+		target_if_err("null wmi_handle");
+		return false;
+	}
+	return wmi_service_enabled
+		(wmi_handle,
+		 wmi_service_radar_found_chan_freq_eq_center_freq);
+}
+#else
+static bool
+target_if_dfs_is_radar_found_chan_freq_eq_center_freq(
+						struct wlan_objmgr_psoc *psoc)
+{
+	return false;
+}
+#endif
+
 static QDF_STATUS target_if_dfs_get_target_type(struct wlan_objmgr_pdev *pdev,
 						uint32_t *target_type)
 {
@@ -285,7 +337,7 @@ static QDF_STATUS target_if_dfs_is_pdev_5ghz(struct wlan_objmgr_pdev *pdev,
 	}
 
 	if (reg_cap_ptr[pdev_id].wireless_modes &
-			WMI_HOST_REGDMN_MODE_11A)
+			HOST_REGDMN_MODE_11A)
 		*is_5ghz = true;
 	else
 		*is_5ghz = false;
@@ -293,7 +345,7 @@ static QDF_STATUS target_if_dfs_is_pdev_5ghz(struct wlan_objmgr_pdev *pdev,
 	return QDF_STATUS_SUCCESS;
 }
 
-#ifdef QCA_MCL_DFS_SUPPORT
+#ifdef MOBILE_DFS_SUPPORT
 /**
  * target_if_dfs_set_phyerr_filter_offload() - config phyerr filter offload.
  * @pdev: Pointer to DFS pdev object.
@@ -373,6 +425,20 @@ static QDF_STATUS target_send_dfs_offload_enable_cmd(
 	return status;
 }
 
+#if defined(WLAN_DFS_PARTIAL_OFFLOAD) && defined(HOST_DFS_SPOOF_TEST)
+static void target_if_register_dfs_tx_ops_send_avg(
+		struct wlan_lmac_if_dfs_tx_ops *dfs_tx_ops)
+{
+	dfs_tx_ops->dfs_send_avg_radar_params_to_fw =
+		&target_if_dfs_send_avg_params_to_fw;
+}
+#else
+static inline void target_if_register_dfs_tx_ops_send_avg(
+		struct wlan_lmac_if_dfs_tx_ops *dfs_tx_ops)
+{
+}
+#endif
+
 QDF_STATUS target_if_register_dfs_tx_ops(struct wlan_lmac_if_tx_ops *tx_ops)
 {
 	struct wlan_lmac_if_dfs_tx_ops *dfs_tx_ops;
@@ -399,9 +465,14 @@ QDF_STATUS target_if_register_dfs_tx_ops(struct wlan_lmac_if_tx_ops *tx_ops)
 				&target_if_dfs_set_phyerr_filter_offload;
 
 	dfs_tx_ops->dfs_get_caps = &target_if_dfs_get_caps;
-	dfs_tx_ops->dfs_send_avg_radar_params_to_fw =
-		&target_if_dfs_send_avg_params_to_fw;
+
+	target_if_register_dfs_tx_ops_send_avg(dfs_tx_ops);
+
 	dfs_tx_ops->dfs_is_tgt_offload = &target_if_dfs_offload;
+	dfs_tx_ops->dfs_is_tgt_bangradar_320_supp =
+				&target_if_dfs_bangradar_320_supp;
+	dfs_tx_ops->dfs_is_tgt_radar_found_chan_freq_eq_center_freq =
+		&target_if_dfs_is_radar_found_chan_freq_eq_center_freq;
 
 	dfs_tx_ops->dfs_send_usenol_pdev_param =
 		&target_send_usenol_pdev_param;

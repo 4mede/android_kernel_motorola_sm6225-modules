@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
- *
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -108,6 +108,38 @@ static void wlan_iot_sim_register_rx_ops(struct wlan_lmac_if_rx_ops *rx_ops)
 }
 #endif
 
+#if defined(QCA_SUPPORT_SON) || defined(WLAN_FEATURE_SON)
+/* Function pointer for son rx_ops registration function */
+void (*wlan_lmac_if_son_rx_ops)(struct wlan_lmac_if_rx_ops *rx_ops);
+
+QDF_STATUS wlan_lmac_if_son_set_rx_ops_register_cb(void (*handler)
+				(struct wlan_lmac_if_rx_ops *))
+{
+	wlan_lmac_if_son_rx_ops = handler;
+
+	return QDF_STATUS_SUCCESS;
+}
+
+qdf_export_symbol(wlan_lmac_if_son_set_rx_ops_register_cb);
+
+static void wlan_son_register_rx_ops(struct wlan_lmac_if_rx_ops *rx_ops)
+{
+	if (wlan_lmac_if_son_rx_ops)
+		wlan_lmac_if_son_rx_ops(rx_ops);
+	else
+		qdf_info("\n***** SON MODULE NOT LOADED *****\n");
+}
+
+void wlan_lmac_if_son_mod_register_rx_ops(struct wlan_lmac_if_rx_ops *rx_ops)
+{
+	wlan_son_register_rx_ops(rx_ops);
+}
+#else
+static void wlan_son_register_rx_ops(struct wlan_lmac_if_rx_ops *rx_ops)
+{
+}
+#endif
+
 /**
  * wlan_global_lmac_if_rx_ops_register() - Global lmac_if
  * rx handler register
@@ -129,7 +161,7 @@ wlan_global_lmac_if_rx_ops_register(struct wlan_lmac_if_rx_ops *rx_ops)
 		qdf_err("lmac if rx ops pointer is NULL");
 		return QDF_STATUS_E_INVAL;
 	}
-	/* Registeration for UMAC componets */
+	/* Registration for UMAC components */
 	wlan_lmac_if_umac_rx_ops_register(rx_ops);
 
 	/* spectral rx_ops registration*/
@@ -137,6 +169,9 @@ wlan_global_lmac_if_rx_ops_register(struct wlan_lmac_if_rx_ops *rx_ops)
 
 	/* iot_sim rx_ops registration*/
 	wlan_iot_sim_register_rx_ops(rx_ops);
+
+	/* son rx_ops registration*/
+	wlan_son_register_rx_ops(rx_ops);
 
 	return QDF_STATUS_SUCCESS;
 }

@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2013-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -66,8 +67,37 @@ extern "C" {
 #define TARGET_TYPE_QCA5018   29
 #endif
 
-#ifndef TARGET_TYPE_QCN9100
-#define TARGET_TYPE_QCN9100   30
+#ifndef TARGET_TYPE_QCN6122
+#define TARGET_TYPE_QCN6122   30
+#endif
+
+/* Hamilton */
+#ifndef TARGET_TYPE_KIWI
+#define TARGET_TYPE_KIWI 31
+#endif
+
+#ifndef TARGET_TYPE_QCN9224
+#define TARGET_TYPE_QCN9224      32
+#endif
+
+/* Alder */
+#ifndef TARGET_TYPE_QCA9574
+#define TARGET_TYPE_QCA9574      33
+#endif
+
+/* Yamuna */
+#ifndef TARGET_TYPE_MANGO
+#define TARGET_TYPE_MANGO 34
+#endif
+
+/* Miami */
+#ifndef TARGET_TYPE_QCA5332
+#define TARGET_TYPE_QCA5332   35
+#endif
+
+/* York */
+#ifndef TARGET_TYPE_QCN9160
+#define TARGET_TYPE_QCN9160    36
 #endif
 
 #ifdef __cplusplus

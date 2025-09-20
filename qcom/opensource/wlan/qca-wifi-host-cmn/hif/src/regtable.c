@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2013-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -92,14 +93,6 @@ void hif_target_register_tbl_attach(struct hif_softc *scn, u32 target_type)
 		scn->target_ce_def = QCA9888_CE_TARGETdef;
 		break;
 #endif
-#ifdef ATH_AHB
-#if defined(IPQ4019_HEADERS_DEF)
-	case TARGET_TYPE_IPQ4019:
-		scn->targetdef = IPQ4019_TARGETdef;
-		scn->target_ce_def = IPQ4019_CE_TARGETdef;
-		break;
-#endif
-#endif
 #if defined(QCA8074_HEADERS_DEF)
 	case TARGET_TYPE_QCA8074:
 		scn->targetdef = QCA8074_TARGETdef;
@@ -125,6 +118,13 @@ void hif_target_register_tbl_attach(struct hif_softc *scn, u32 target_type)
 		scn->target_ce_def = QCA6018_CE_TARGETDEF;
 		break;
 #endif
+#if defined(QCA9574_HEADERS_DEF)
+	case TARGET_TYPE_QCA9574:
+		scn->targetdef = QCA9574_TARGETDEF;
+		scn->target_ce_def = QCA9574_CE_TARGETDEF;
+		hif_info("TARGET_TYPE_QCA9574");
+		break;
+#endif
 
 #if defined(QCN9000_HEADERS_DEF)
 	case TARGET_TYPE_QCN9000:
@@ -134,11 +134,33 @@ void hif_target_register_tbl_attach(struct hif_softc *scn, u32 target_type)
 		break;
 #endif
 
-#if defined(QCN9100_HEADERS_DEF)
-	case TARGET_TYPE_QCN9100:
-		scn->targetdef = QCN9100_TARGETDEF;
-		scn->target_ce_def = QCN9100_CE_TARGETDEF;
-		hif_info("TARGET_TYPE_QCN9100");
+#if defined(QCN9224_HEADERS_DEF)
+	case TARGET_TYPE_QCN9224:
+		if (scn->target_info.soc_version == 1) {
+			scn->targetdef = QCN9224v1_TARGETDEF;
+			scn->target_ce_def = QCN9224v1_CE_TARGETDEF;
+			hif_info("TARGET_TYPE_QCN9224v1");
+			break;
+		}
+		scn->targetdef = QCN9224_TARGETDEF;
+		scn->target_ce_def = QCN9224_CE_TARGETDEF;
+		hif_info("TARGET_TYPE_QCN9224");
+		break;
+#endif
+
+#if defined(QCN6122_HEADERS_DEF)
+	case TARGET_TYPE_QCN6122:
+		scn->targetdef = QCN6122_TARGETDEF;
+		scn->target_ce_def = QCN6122_CE_TARGETDEF;
+		hif_info("TARGET_TYPE_QCN6122");
+		break;
+#endif
+
+#if defined(QCN9160_HEADERS_DEF)
+	case TARGET_TYPE_QCN9160:
+		scn->targetdef = QCN9160_TARGETDEF;
+		scn->target_ce_def = QCN9160_CE_TARGETDEF;
+		hif_info("TARGET_TYPE_QCN9160");
 		break;
 #endif
 
@@ -147,6 +169,14 @@ void hif_target_register_tbl_attach(struct hif_softc *scn, u32 target_type)
 		scn->targetdef = QCA5018_TARGETDEF;
 		scn->target_ce_def = QCA5018_CE_TARGETDEF;
 		hif_info("TARGET_TYPE_QCA5018");
+		break;
+#endif
+
+#if defined(QCA5332_HEADERS_DEF)
+	case TARGET_TYPE_QCA5332:
+		scn->targetdef = QCA5332_TARGETDEF;
+		scn->target_ce_def = QCA5332_CE_TARGETDEF;
+		hif_info("TARGET_TYPE_QCA5332");
 		break;
 #endif
 
@@ -165,6 +195,20 @@ void hif_target_register_tbl_attach(struct hif_softc *scn, u32 target_type)
 		hif_info("TARGET_TYPE_QCA6490");
 		break;
 #endif /* QCA6490_HEADERS_DEF */
+
+#if defined(KIWI_HEADERS_DEF)
+	case TARGET_TYPE_KIWI:
+		scn->targetdef = KIWI_TARGETdef;
+		scn->target_ce_def = KIWI_CE_TARGETdef;
+		hif_info("TARGET_TYPE_KIWI");
+		break;
+
+	case TARGET_TYPE_MANGO:
+		scn->targetdef = KIWI_TARGETdef;
+		scn->target_ce_def = KIWI_CE_TARGETdef;
+		hif_info("TARGET_TYPE_MANGO");
+		break;
+#endif /* KIWI_HEADERS_DEF */
 
 #if defined(QCA6750_HEADERS_DEF)
 	case TARGET_TYPE_QCA6750:
@@ -233,13 +277,6 @@ void hif_register_tbl_attach(struct hif_softc *scn, u32 hif_type)
 		break;
 #endif
 
-#ifdef ATH_AHB
-#if defined(IPQ4019_HEADERS_DEF)
-	case HIF_TYPE_IPQ4019:
-		scn->hostdef = IPQ4019_HOSTdef;
-		break;
-#endif
-#endif
 #if defined(QCA8074_HEADERS_DEF)
 	case HIF_TYPE_QCA8074:
 		scn->hostdef = QCA8074_HOSTdef;
@@ -266,14 +303,39 @@ void hif_register_tbl_attach(struct hif_softc *scn, u32 hif_type)
 		scn->hostdef = QCN9000_HOSTDEF;
 		break;
 #endif
-#if defined(QCN9100_HEADERS_DEF)
-	case HIF_TYPE_QCN9100:
-		scn->hostdef = QCN9100_HOSTDEF;
+#if defined(QCN9224_HEADERS_DEF)
+	case HIF_TYPE_QCN9224:
+		if (scn->target_info.soc_version == 1) {
+			scn->hostdef = QCN9224v1_HOSTDEF;
+			break;
+		}
+		scn->hostdef = QCN9224_HOSTDEF;
+		break;
+#endif
+#if defined(QCN6122_HEADERS_DEF)
+	case HIF_TYPE_QCN6122:
+		scn->hostdef = QCN6122_HOSTDEF;
+		break;
+#endif
+#if defined(QCN9160_HEADERS_DEF)
+	case HIF_TYPE_QCN9160:
+		scn->hostdef = QCN9160_HOSTDEF;
 		break;
 #endif
 #if defined(QCA5018_HEADERS_DEF)
 	case HIF_TYPE_QCA5018:
 		scn->hostdef = QCA5018_HOSTDEF;
+		break;
+#endif
+#if defined(QCA5332_HEADERS_DEF)
+	case HIF_TYPE_QCA5332:
+		scn->hostdef = QCA5332_HOSTDEF;
+		break;
+#endif
+#if defined(QCA9574_HEADERS_DEF)
+	case HIF_TYPE_QCA9574:
+		scn->hostdef = QCA9574_HOSTDEF;
+		hif_info("HIF_TYPE_QCA9574");
 		break;
 #endif
 
@@ -290,6 +352,18 @@ void hif_register_tbl_attach(struct hif_softc *scn, u32 hif_type)
 		hif_info("HIF_TYPE_QCA6490");
 		break;
 #endif /* QCA6490_HEADERS_DEF */
+
+#if defined(KIWI_HEADERS_DEF)
+	case HIF_TYPE_KIWI:
+		scn->hostdef = KIWI_HOSTdef;
+		hif_info("HIF_TYPE_KIWI");
+		break;
+
+	case HIF_TYPE_MANGO:
+		scn->hostdef = KIWI_HOSTdef;
+		hif_info("HIF_TYPE_MANGO");
+		break;
+#endif /* KIWI_HEADERS_DEF */
 
 #if defined(QCA6750_HEADERS_DEF)
 	case HIF_TYPE_QCA6750:

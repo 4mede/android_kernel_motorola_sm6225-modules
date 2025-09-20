@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -35,8 +36,8 @@
 /*
  * Number of times to check for any pending tx/rx completion on
  * a copy engine, this count should be big enough. Once we hit
- * this threashold we'll not check for any Tx/Rx comlpetion in same
- * interrupt handling. Note that this threashold is only used for
+ * this threshold we'll not check for any Tx/Rx completion in same
+ * interrupt handling. Note that this threshold is only used for
  * Rx interrupt processing, this can be used tor Tx as well if we
  * suspect any infinite loop in checking for pending Tx completion.
  */
@@ -68,6 +69,12 @@ enum ce_id_type {
 	CE_ID_9,
 	CE_ID_10,
 	CE_ID_11,
+#ifdef QCA_WIFI_QCN9224
+	CE_ID_12,
+	CE_ID_13,
+	CE_ID_14,
+	CE_ID_15,
+#endif
 	CE_ID_MAX
 };
 
@@ -112,7 +119,7 @@ struct HIF_CE_pipe_info {
 	/* Handle of underlying Copy Engine */
 	struct CE_handle *ce_hdl;
 
-	/* Our pipe number; facilitiates use of pipe_info ptrs. */
+	/* Our pipe number; facilitates use of pipe_info ptrs. */
 	uint8_t pipe_num;
 
 	/* Convenience back pointer to HIF_CE_state. */
@@ -186,6 +193,11 @@ struct ce_stats {
 	uint64_t ce_tasklet_sched_bucket[CE_COUNT_MAX][CE_BUCKET_MAX];
 	uint64_t ce_tasklet_exec_last_update[CE_COUNT_MAX][CE_BUCKET_MAX];
 	uint64_t ce_tasklet_sched_last_update[CE_COUNT_MAX][CE_BUCKET_MAX];
+#ifdef CE_TASKLET_SCHEDULE_ON_FULL
+	uint32_t ce_ring_full_count[CE_COUNT_MAX];
+	uint32_t ce_manual_tasklet_schedule_count[CE_COUNT_MAX];
+	uint64_t ce_last_manual_tasklet_schedule_ts[CE_COUNT_MAX];
+#endif
 #endif
 };
 
@@ -222,6 +234,8 @@ struct HIF_CE_state {
 	struct CE_handle *ce_diag;
 	struct ce_stats stats;
 	struct ce_ops *ce_services;
+	struct service_to_pipe *tgt_svc_map;
+	int sz_tgt_svc_map;
 };
 
 /*
@@ -343,14 +357,16 @@ void hif_get_target_ce_config(struct hif_softc *scn,
 		uint32_t *shadow_cfg_v1_sz_ret);
 
 #ifdef WLAN_FEATURE_EPPING
-void hif_ce_prepare_epping_config(struct HIF_CE_state *hif_state);
+void hif_ce_prepare_epping_config(struct hif_softc *scn,
+				  struct HIF_CE_state *hif_state);
 void hif_select_epping_service_to_pipe_map(struct service_to_pipe
 					   **tgt_svc_map_to_use,
 					   uint32_t *sz_tgt_svc_map_to_use);
 
 #else
 static inline
-void hif_ce_prepare_epping_config(struct HIF_CE_state *hif_state)
+void hif_ce_prepare_epping_config(struct hif_softc *scn,
+				  struct HIF_CE_state *hif_state)
 { }
 static inline
 void hif_select_epping_service_to_pipe_map(struct service_to_pipe

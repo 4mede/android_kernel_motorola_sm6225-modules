@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -421,6 +421,7 @@ int wlan_cfg80211_sched_scan_start(struct wlan_objmgr_vdev *vdev,
 	int i, j, ret = 0;
 	QDF_STATUS status;
 	uint8_t num_chan = 0;
+	uint8_t updated_num_chan = 0;
 	uint16_t chan_freq;
 	struct wlan_objmgr_pdev *pdev = wlan_vdev_get_pdev(vdev);
 	struct wlan_objmgr_psoc *psoc;
@@ -436,7 +437,7 @@ int wlan_cfg80211_sched_scan_start(struct wlan_objmgr_vdev *vdev,
 	   SCAN_NOT_IN_PROGRESS) {
 		status = wlan_abort_scan(pdev,
 				wlan_objmgr_pdev_get_pdev_id(pdev),
-				INVAL_VDEV_ID, INVAL_SCAN_ID, true);
+				INVAL_VDEV_ID, CANCEL_HOST_SCAN_ID, true);
 		if (QDF_IS_STATUS_ERROR(status))
 			return -EBUSY;
 	}
@@ -453,7 +454,7 @@ int wlan_cfg80211_sched_scan_start(struct wlan_objmgr_vdev *vdev,
 	req->vdev_id = wlan_vdev_get_id(vdev);
 	req->vdev = vdev;
 	req->scan_policy_colocated_6ghz =
-		 wlan_cfg80211_is_colocated_6ghz_scan_supported(request->flags);
+		wlan_cfg80211_is_colocated_6ghz_scan_supported(request->flags);
 
 	if ((!req->networks_cnt) ||
 	    (req->networks_cnt > SCAN_PNO_MAX_SUPP_NETWORKS)) {
@@ -558,9 +559,9 @@ int wlan_cfg80211_sched_scan_start(struct wlan_objmgr_vdev *vdev,
 			uint32_t short_ssid =
 				wlan_construct_shortssid(tgt_req->ssid.ssid,
 							 tgt_req->ssid.length);
-
+			updated_num_chan = num_chan;
 			ucfg_scan_add_flags_to_pno_chan_list(vdev, req,
-							     &num_chan,
+							     &updated_num_chan,
 							     short_ssid, i);
 		}
 
@@ -626,8 +627,8 @@ int wlan_cfg80211_sched_scan_start(struct wlan_objmgr_vdev *vdev,
 	if (req->scan_random.randomize)
 		wlan_pno_scan_rand_attr(vdev, request, req);
 
-	if (ucfg_ie_whitelist_enabled(psoc, vdev))
-		ucfg_copy_ie_whitelist_attrs(psoc, &req->ie_whitelist);
+	if (ucfg_ie_allowlist_enabled(psoc, vdev))
+		ucfg_copy_ie_allowlist_attrs(psoc, &req->ie_allowlist);
 
 	osif_debug("Network count %d n_ssids %d fast_scan_period: %d msec slow_scan_period: %d msec, fast_scan_max_cycles: %d, relative_rssi %d band_pref %d, rssi_pref %d",
 		   req->networks_cnt, request->n_ssids, req->fast_scan_period,
@@ -636,9 +637,10 @@ int wlan_cfg80211_sched_scan_start(struct wlan_objmgr_vdev *vdev,
 		   req->band_rssi_pref.rssi);
 
 	for (i = 0; i < req->networks_cnt; i++)
-		osif_debug("[%d] ssid: %.*s, RSSI th %d bc NW type %u",
-			   i, req->networks_list[i].ssid.length,
-			   req->networks_list[i].ssid.ssid,
+		osif_debug("[%d] ssid: " QDF_SSID_FMT ", RSSI th %d bc NW type %u",
+			   i,
+			   QDF_SSID_REF(req->networks_list[i].ssid.length,
+					req->networks_list[i].ssid.ssid),
 			   req->networks_list[i].rssi_thresh,
 			   req->networks_list[i].bc_new_type);
 
@@ -847,6 +849,7 @@ static QDF_STATUS wlan_scan_request_dequeue(
  * @netdev: Net device
  * @req : Scan request
  * @aborted : true scan aborted false scan success
+ * @osif_priv: OS private structure
  *
  * This function notifies scan done to cfg80211
  *
@@ -854,14 +857,23 @@ static QDF_STATUS wlan_scan_request_dequeue(
  */
 void wlan_cfg80211_scan_done(struct net_device *netdev,
 			     struct cfg80211_scan_request *req,
-			     bool aborted)
+			     bool aborted, struct pdev_osif_priv *osif_priv)
 {
 	struct cfg80211_scan_info info = {
 		.aborted = aborted
 	};
+	bool driver_internal_netdev_state;
 
-	if (netdev->flags & IFF_UP)
+	driver_internal_netdev_state = netdev->flags & IFF_UP;
+	if (osif_priv->osif_check_netdev_state)
+		driver_internal_netdev_state =
+			osif_priv->osif_check_netdev_state(netdev);
+
+	if (driver_internal_netdev_state)
 		cfg80211_scan_done(req, &info);
+	else
+		osif_debug("scan done callback has been dropped :%s",
+			   (netdev)->name);
 }
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0))
 /**
@@ -869,6 +881,7 @@ void wlan_cfg80211_scan_done(struct net_device *netdev,
  * @netdev: Net device
  * @req : Scan request
  * @aborted : true scan aborted false scan success
+ * @osif_priv - OS private structure
  *
  * This function notifies scan done to cfg80211
  *
@@ -876,10 +889,19 @@ void wlan_cfg80211_scan_done(struct net_device *netdev,
  */
 void wlan_cfg80211_scan_done(struct net_device *netdev,
 			     struct cfg80211_scan_request *req,
-			     bool aborted)
+			     bool aborted, struct pdev_osif_priv *osif_priv)
 {
-	if (netdev->flags & IFF_UP)
+	bool driver_internal_net_state;
+
+	driver_internal_netdev_state = netdev->flags & IFF_UP;
+	if (osif_priv->osif_check_netdev_state)
+		driver_internal_net_state =
+			osif_priv->osif_check_netdev_state(netdev);
+
+	if (driver_internal_netdev_state)
 		cfg80211_scan_done(req, aborted);
+	else
+		osif_debug("scan request has been dropped :%s", (netdev)->name);
 }
 #endif
 
@@ -1088,6 +1110,7 @@ static void wlan_cfg80211_scan_done_callback(
 		return;
 
 	pdev = wlan_vdev_get_pdev(vdev);
+	osif_priv = wlan_pdev_get_ospriv(pdev);
 	status = wlan_scan_request_dequeue(
 			pdev, scan_id, &req, &source, &netdev,
 			&scan_start_timestamp);
@@ -1098,6 +1121,12 @@ static void wlan_cfg80211_scan_done_callback(
 
 	if (!netdev) {
 		osif_err("net dev is NULL,Drop scan event Id: %d", scan_id);
+		/*
+		 * Free scan request in case of VENDOR_SCAN as it is
+		 * allocated in driver.
+		 */
+		if (source == VENDOR_SCAN)
+			qdf_mem_free(req);
 		goto allow_suspend;
 	}
 
@@ -1105,6 +1134,12 @@ static void wlan_cfg80211_scan_done_callback(
 	status = wlan_objmgr_vdev_try_get_ref(vdev, WLAN_OSIF_ID);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		osif_err("Failed to get vdev reference: scan Id: %d", scan_id);
+		/*
+		 * Free scan request in case of VENDOR_SCAN as it is
+		 * allocated in driver.
+		 */
+		if (source == VENDOR_SCAN)
+			qdf_mem_free(req);
 		goto allow_suspend;
 	}
 
@@ -1116,7 +1151,7 @@ static void wlan_cfg80211_scan_done_callback(
 	 * scan done event will be posted
 	 */
 	if (NL_SCAN == source)
-		wlan_cfg80211_scan_done(netdev, req, !success);
+		wlan_cfg80211_scan_done(netdev, req, !success, osif_priv);
 	else
 		wlan_vendor_scan_callback(req, !success);
 
@@ -1130,7 +1165,6 @@ static void wlan_cfg80211_scan_done_callback(
 		       util_scan_get_ev_reason_name(event->reason),
 		       event->reason, unique_bss_count);
 allow_suspend:
-	osif_priv = wlan_pdev_get_ospriv(pdev);
 	qdf_mutex_acquire(&osif_priv->osif_scan->scan_req_q_lock);
 	if (qdf_list_empty(&osif_priv->osif_scan->scan_req_q)) {
 		struct wlan_objmgr_psoc *psoc;
@@ -1335,7 +1369,7 @@ void wlan_cfg80211_cleanup_scan_queue(struct wlan_objmgr_pdev *pdev,
 		source = scan_req->source;
 		if (NL_SCAN == source)
 			wlan_cfg80211_scan_done(scan_req->dev, req,
-						aborted);
+						aborted, osif_priv);
 		else
 			wlan_vendor_scan_callback(req, aborted);
 
@@ -1365,6 +1399,7 @@ static void wlan_cfg80211_update_scan_policy_type_flags(
 		scan_req->scan_policy_low_span = true;
 	if (req->flags & NL80211_SCAN_FLAG_LOW_POWER)
 		scan_req->scan_policy_low_power = true;
+
 	if (wlan_cfg80211_is_colocated_6ghz_scan_supported(req->flags))
 		scan_req->scan_policy_colocated_6ghz = true;
 }
@@ -1389,6 +1424,66 @@ wlan_cfg80211_allow_simultaneous_scan(struct wlan_objmgr_psoc *psoc)
 	return true;
 }
 #endif
+
+enum scan_priority convert_nl_scan_priority_to_internal(
+	enum qca_wlan_vendor_scan_priority nl_scan_priority)
+{
+	switch (nl_scan_priority) {
+	case QCA_WLAN_VENDOR_SCAN_PRIORITY_VERY_LOW:
+		return SCAN_PRIORITY_VERY_LOW;
+
+	case QCA_WLAN_VENDOR_SCAN_PRIORITY_LOW:
+		return SCAN_PRIORITY_LOW;
+
+	case QCA_WLAN_VENDOR_SCAN_PRIORITY_MEDIUM:
+		return SCAN_PRIORITY_MEDIUM;
+
+	case QCA_WLAN_VENDOR_SCAN_PRIORITY_HIGH:
+		return SCAN_PRIORITY_HIGH;
+
+	case QCA_WLAN_VENDOR_SCAN_PRIORITY_VERY_HIGH:
+		return SCAN_PRIORITY_VERY_HIGH;
+
+	default:
+		return SCAN_PRIORITY_COUNT;
+	}
+}
+
+bool wlan_is_scan_allowed(struct wlan_objmgr_vdev *vdev)
+{
+	struct wlan_objmgr_pdev *pdev = wlan_vdev_get_pdev(vdev);
+	struct pdev_osif_priv *osif_priv;
+	struct wlan_objmgr_psoc *psoc;
+	enum QDF_OPMODE opmode = wlan_vdev_mlme_get_opmode(vdev);
+
+	psoc = wlan_pdev_get_psoc(pdev);
+	if (!psoc) {
+		osif_err("Invalid psoc object");
+		return false;
+	}
+
+	osif_priv = wlan_pdev_get_ospriv(pdev);
+	if (!osif_priv) {
+		osif_err("Invalid osif priv object");
+		return false;
+	}
+	/*
+	 * For a non-SAP vdevs, if a scan is already going on i.e the scan queue
+	 * is not empty, and the simultaneous scan is disabled, dont allow 2nd
+	 * scan.
+	 */
+	qdf_mutex_acquire(&osif_priv->osif_scan->scan_req_q_lock);
+	if (!wlan_cfg80211_allow_simultaneous_scan(psoc) &&
+	    !qdf_list_empty(&osif_priv->osif_scan->scan_req_q) &&
+	    opmode != QDF_SAP_MODE) {
+		qdf_mutex_release(&osif_priv->osif_scan->scan_req_q_lock);
+		osif_err_rl("Simultaneous scan disabled, reject scan");
+		return false;
+	}
+	qdf_mutex_release(&osif_priv->osif_scan->scan_req_q_lock);
+
+	return true;
+}
 
 int wlan_cfg80211_scan(struct wlan_objmgr_vdev *vdev,
 		       struct cfg80211_scan_request *request,
@@ -1421,27 +1516,14 @@ int wlan_cfg80211_scan(struct wlan_objmgr_vdev *vdev,
 	osif_debug("%s(vdev%d): mode %d", request->wdev->netdev->name,
 		   wlan_vdev_get_id(vdev), opmode);
 
-	/* Get NL global context from objmgr*/
+	if (!wlan_is_scan_allowed(vdev))
+		return -EBUSY;
+
 	osif_priv = wlan_pdev_get_ospriv(pdev);
 	if (!osif_priv) {
 		osif_err("Invalid osif priv object");
 		return -EINVAL;
 	}
-
-	/*
-	 * For a non-SAP vdevs, if a scan is already going on i.e the scan queue
-	 * is not empty, and the simultaneous scan is disabled, dont allow 2nd
-	 * scan.
-	 */
-	qdf_mutex_acquire(&osif_priv->osif_scan->scan_req_q_lock);
-	if (!wlan_cfg80211_allow_simultaneous_scan(psoc) &&
-	    !qdf_list_empty(&osif_priv->osif_scan->scan_req_q) &&
-	    opmode != QDF_SAP_MODE) {
-		qdf_mutex_release(&osif_priv->osif_scan->scan_req_q_lock);
-		osif_err("Simultaneous scan disabled, reject scan");
-		return -EBUSY;
-	}
-	qdf_mutex_release(&osif_priv->osif_scan->scan_req_q_lock);
 
 	req = qdf_mem_malloc(sizeof(*req));
 	if (!req)
@@ -1556,6 +1638,14 @@ int wlan_cfg80211_scan(struct wlan_objmgr_vdev *vdev,
 	if (qdf_is_macaddr_zero(&req->scan_req.bssid_list[0]))
 		qdf_set_macaddr_broadcast(&req->scan_req.bssid_list[0]);
 
+	if (params->scan_f_2ghz && !params->scan_f_5ghz) {
+		req->scan_req.scan_f_2ghz = true;
+		req->scan_req.scan_f_5ghz = false;
+	} else if (!params->scan_f_2ghz && params->scan_f_5ghz) {
+		req->scan_req.scan_f_2ghz = false;
+		req->scan_req.scan_f_5ghz = true;
+	}
+
 	if (request->n_channels) {
 #ifdef WLAN_POLICY_MGR_ENABLE
 		bool ap_or_go_present =
@@ -1584,17 +1674,26 @@ int wlan_cfg80211_scan(struct wlan_objmgr_vdev *vdev,
 					continue;
 			}
 #endif
-			req->scan_req.chan_list.chan[num_chan].freq = c_freq;
-			band = util_scan_scm_freq_to_band(c_freq);
-			if (band == WLAN_BAND_2_4_GHZ)
-				req->scan_req.chan_list.chan[num_chan].phymode =
-					SCAN_PHY_MODE_11G;
-			else
-				req->scan_req.chan_list.chan[num_chan].phymode =
-					SCAN_PHY_MODE_11A;
-			num_chan++;
-			if (num_chan >= NUM_CHANNELS)
-				break;
+
+			if ((req->scan_req.scan_f_2ghz &&
+			     WLAN_REG_IS_24GHZ_CH_FREQ(c_freq)) ||
+			    (req->scan_req.scan_f_5ghz &&
+			     (WLAN_REG_IS_5GHZ_CH_FREQ(c_freq) ||
+			      WLAN_REG_IS_49GHZ_FREQ(c_freq) ||
+			      WLAN_REG_IS_6GHZ_CHAN_FREQ(c_freq)))) {
+				req->scan_req.chan_list.chan[num_chan].freq =
+									c_freq;
+				band = util_scan_scm_freq_to_band(c_freq);
+				if (band == WLAN_BAND_2_4_GHZ)
+					req->scan_req.chan_list.chan[num_chan].phymode =
+						SCAN_PHY_MODE_11G;
+				else
+					req->scan_req.chan_list.chan[num_chan].phymode =
+						SCAN_PHY_MODE_11A;
+				num_chan++;
+				if (num_chan >= NUM_CHANNELS)
+					break;
+			}
 		}
 	}
 	if (!num_chan) {
@@ -1648,14 +1747,21 @@ int wlan_cfg80211_scan(struct wlan_objmgr_vdev *vdev,
 	if (!is_p2p_scan) {
 		if (req->scan_req.scan_random.randomize)
 			wlan_scan_rand_attrs(vdev, request, req);
-		if (ucfg_ie_whitelist_enabled(psoc, vdev) &&
-		    ucfg_copy_ie_whitelist_attrs(psoc,
-					&req->scan_req.ie_whitelist))
-			req->scan_req.scan_f_en_ie_whitelist_in_probe = true;
+		if (ucfg_ie_allowlist_enabled(psoc, vdev) &&
+		    ucfg_copy_ie_allowlist_attrs(psoc,
+						 &req->scan_req.ie_allowlist))
+			req->scan_req.scan_f_en_ie_allowlist_in_probe = true;
 	}
 
 	if (request->flags & NL80211_SCAN_FLAG_FLUSH)
 		ucfg_scan_flush_results(pdev, NULL);
+
+	if (params->scan_probe_unicast_ra)
+		req->scan_req.scan_ctrl_flags_ext |=
+				SCAN_FLAG_EXT_FORCE_UNICAST_RA;
+
+	osif_debug("scan_ctrl_flags_ext %0x",
+		   req->scan_req.scan_ctrl_flags_ext);
 
 	/*
 	 * Acquire wakelock to handle the case where APP's send scan to connect.
@@ -1873,7 +1979,7 @@ wlan_get_ieee80211_channel(struct wiphy *wiphy,
 
 	chan = ieee80211_get_channel(wiphy, chan_freq);
 	if (!chan)
-		osif_err("chan is NULL, freq: %d", chan_freq);
+		osif_err_rl("chan is NULL, freq: %d", chan_freq);
 
 	return chan;
 }
@@ -2047,10 +2153,10 @@ void wlan_cfg80211_inform_bss_frame(struct wlan_objmgr_pdev *pdev,
 	bss_data.chan = wlan_get_ieee80211_channel(wiphy, pdev,
 		scan_params->channel.chan_freq);
 	if (!bss_data.chan) {
-		osif_err("Channel not found for bss "QDF_MAC_ADDR_FMT" seq %d chan_freq %d",
-			 QDF_MAC_ADDR_REF(bss_data.mgmt->bssid),
-			 scan_params->seq_num,
-			 scan_params->channel.chan_freq);
+		osif_err_rl("Channel not found for bss " QDF_MAC_ADDR_FMT " seq %d chan_freq %d",
+			    QDF_MAC_ADDR_REF(bss_data.mgmt->bssid),
+			    scan_params->seq_num,
+			    scan_params->channel.chan_freq);
 		qdf_mem_free(bss_data.mgmt);
 		return;
 	}
@@ -2122,8 +2228,9 @@ QDF_STATUS  __wlan_cfg80211_unlink_bss_list(struct wiphy *wiphy,
 		osif_info("BSS "QDF_MAC_ADDR_FMT" not found",
 			  QDF_MAC_ADDR_REF(bssid));
 	} else {
-		osif_debug("unlink entry for ssid:%.*s and BSSID "QDF_MAC_ADDR_FMT,
-			   ssid_len, ssid, QDF_MAC_ADDR_REF(bssid));
+		osif_debug("unlink entry for ssid:" QDF_SSID_FMT " and BSSID " QDF_MAC_ADDR_FMT,
+			   QDF_SSID_REF(ssid_len, ssid),
+			   QDF_MAC_ADDR_REF(bssid));
 		cfg80211_unlink_bss(wiphy, bss);
 		wlan_cfg80211_put_bss(wiphy, bss);
 	}
@@ -2139,11 +2246,13 @@ QDF_STATUS  __wlan_cfg80211_unlink_bss_list(struct wiphy *wiphy,
 	 */
 	bss = wlan_cfg80211_get_bss(wiphy, NULL, bssid, NULL, 0);
 	if (!bss) {
-		osif_debug("Hidden bss not found for Ssid:%.*s BSSID: "QDF_MAC_ADDR_FMT" sid_len %d",
-			   ssid_len, ssid, QDF_MAC_ADDR_REF(bssid), ssid_len);
+		osif_debug("Hidden bss not found for ssid:" QDF_SSID_FMT " BSSID: " QDF_MAC_ADDR_FMT " sid_len %d",
+			   QDF_SSID_REF(ssid_len, ssid),
+			   QDF_MAC_ADDR_REF(bssid), ssid_len);
 	} else {
-		osif_debug("unlink entry for Hidden ssid:%.*s and BSSID "QDF_MAC_ADDR_FMT,
-			   ssid_len, ssid, QDF_MAC_ADDR_REF(bssid));
+		osif_debug("unlink entry for Hidden ssid:" QDF_SSID_FMT " and BSSID " QDF_MAC_ADDR_FMT,
+			   QDF_SSID_REF(ssid_len, ssid),
+			   QDF_MAC_ADDR_REF(bssid));
 
 		cfg80211_unlink_bss(wiphy, bss);
 		/* cfg80211_get_bss get bss with ref count so release it */

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -49,9 +49,10 @@
  */
 QDF_COMPILE_TIME_ASSERT(dp_tx_desc_size,
 			((sizeof(struct dp_tx_desc_s)) <=
-			 (PAGE_SIZE >> DP_TX_DESC_ID_PAGE_OS)) &&
+			 (DP_BLOCKMEM_SIZE >> DP_TX_DESC_ID_PAGE_OS)) &&
 			((sizeof(struct dp_tx_desc_s)) >
-			 (PAGE_SIZE >> (DP_TX_DESC_ID_PAGE_OS + 1))));
+			 (DP_BLOCKMEM_SIZE >> (DP_TX_DESC_ID_PAGE_OS + 1)))
+		       );
 
 #ifdef QCA_LL_TX_FLOW_CONTROL_V2
 #define TX_DESC_LOCK_CREATE(lock)
@@ -93,33 +94,50 @@ do {                                                   \
 #endif /* !QCA_LL_TX_FLOW_CONTROL_V2 */
 #define MAX_POOL_BUFF_COUNT 10000
 
+#ifdef DP_TX_TRACKING
+static inline void dp_tx_desc_set_magic(struct dp_tx_desc_s *tx_desc,
+					uint32_t magic_pattern)
+{
+	tx_desc->magic = magic_pattern;
+}
+#else
+static inline void dp_tx_desc_set_magic(struct dp_tx_desc_s *tx_desc,
+					uint32_t magic_pattern)
+{
+}
+#endif
+
 QDF_STATUS dp_tx_desc_pool_alloc(struct dp_soc *soc, uint8_t pool_id,
-				 uint16_t num_elem);
+				 uint32_t num_elem);
 QDF_STATUS dp_tx_desc_pool_init(struct dp_soc *soc, uint8_t pool_id,
-				uint16_t num_elem);
+				uint32_t num_elem);
 void dp_tx_desc_pool_free(struct dp_soc *soc, uint8_t pool_id);
 void dp_tx_desc_pool_deinit(struct dp_soc *soc, uint8_t pool_id);
 
 QDF_STATUS dp_tx_ext_desc_pool_alloc(struct dp_soc *soc, uint8_t pool_id,
-				     uint16_t num_elem);
+				     uint32_t num_elem);
 QDF_STATUS dp_tx_ext_desc_pool_init(struct dp_soc *soc, uint8_t pool_id,
-				    uint16_t num_elem);
+				    uint32_t num_elem);
 void dp_tx_ext_desc_pool_free(struct dp_soc *soc, uint8_t pool_id);
 void dp_tx_ext_desc_pool_deinit(struct dp_soc *soc, uint8_t pool_id);
 
 QDF_STATUS dp_tx_tso_desc_pool_alloc(struct dp_soc *soc, uint8_t pool_id,
-				     uint16_t num_elem);
+				     uint32_t num_elem);
 QDF_STATUS dp_tx_tso_desc_pool_init(struct dp_soc *soc, uint8_t pool_id,
-				    uint16_t num_elem);
+				    uint32_t num_elem);
 void dp_tx_tso_desc_pool_free(struct dp_soc *soc, uint8_t pool_id);
 void dp_tx_tso_desc_pool_deinit(struct dp_soc *soc, uint8_t pool_id);
 
 QDF_STATUS dp_tx_tso_num_seg_pool_alloc(struct dp_soc *soc, uint8_t pool_id,
-		uint16_t num_elem);
+		uint32_t num_elem);
 QDF_STATUS dp_tx_tso_num_seg_pool_init(struct dp_soc *soc, uint8_t pool_id,
-				       uint16_t num_elem);
+				       uint32_t num_elem);
 void dp_tx_tso_num_seg_pool_free(struct dp_soc *soc, uint8_t pool_id);
 void dp_tx_tso_num_seg_pool_deinit(struct dp_soc *soc, uint8_t pool_id);
+
+#ifdef DP_UMAC_HW_RESET_SUPPORT
+void dp_tx_desc_pool_cleanup(struct dp_soc *soc, qdf_nbuf_t *nbuf_list);
+#endif
 
 #ifdef QCA_LL_TX_FLOW_CONTROL_V2
 void dp_tx_flow_control_init(struct dp_soc *);
@@ -133,10 +151,10 @@ void dp_tx_flow_pool_unmap(struct cdp_soc_t *handle, uint8_t pdev_id,
 			   uint8_t vdev_id);
 void dp_tx_clear_flow_pool_stats(struct dp_soc *soc);
 struct dp_tx_desc_pool_s *dp_tx_create_flow_pool(struct dp_soc *soc,
-	uint8_t flow_pool_id, uint16_t flow_pool_size);
+	uint8_t flow_pool_id, uint32_t flow_pool_size);
 
 QDF_STATUS dp_tx_flow_pool_map_handler(struct dp_pdev *pdev, uint8_t flow_id,
-	uint8_t flow_type, uint8_t flow_pool_id, uint16_t flow_pool_size);
+	uint8_t flow_type, uint8_t flow_pool_id, uint32_t flow_pool_size);
 void dp_tx_flow_pool_unmap_handler(struct dp_pdev *pdev, uint8_t flow_id,
 	uint8_t flow_type, uint8_t flow_pool_id);
 
@@ -251,19 +269,19 @@ dp_tx_adjust_flow_pool_state(struct dp_soc *soc,
 		soc->pause_cb(pool->flow_pool_id,
 			      WLAN_NETIF_PRIORITY_QUEUE_OFF,
 			      WLAN_DATA_FLOW_CTRL_PRI);
-		/* fallthrough */
+		fallthrough;
 
 	case FLOW_POOL_VO_PAUSED:
 		soc->pause_cb(pool->flow_pool_id,
 			      WLAN_NETIF_VO_QUEUE_OFF,
 			      WLAN_DATA_FLOW_CTRL_VO);
-		/* fallthrough */
+		fallthrough;
 
 	case FLOW_POOL_VI_PAUSED:
 		soc->pause_cb(pool->flow_pool_id,
 			      WLAN_NETIF_VI_QUEUE_OFF,
 			      WLAN_DATA_FLOW_CTRL_VI);
-		/* fallthrough */
+		fallthrough;
 
 	case FLOW_POOL_BE_BK_PAUSED:
 		soc->pause_cb(pool->flow_pool_id,
@@ -271,7 +289,7 @@ dp_tx_adjust_flow_pool_state(struct dp_soc *soc,
 			      WLAN_DATA_FLOW_CTRL_BE_BK);
 		break;
 	default:
-		dp_err("Invalid pool staus:%u to adjust", pool->status);
+		dp_err("Invalid pool status:%u to adjust", pool->status);
 	}
 }
 
@@ -301,7 +319,8 @@ dp_tx_desc_alloc(struct dp_soc *soc, uint8_t desc_pool_id)
 			tx_desc = dp_tx_get_desc_flow_pool(pool);
 			tx_desc->pool_id = desc_pool_id;
 			tx_desc->flags = DP_TX_DESC_FLAG_ALLOCATED;
-
+			dp_tx_desc_set_magic(tx_desc,
+					     DP_TX_MAGIC_PATTERN_INUSE);
 			is_pause = dp_tx_is_threshold_reached(pool,
 							      pool->avail_desc);
 
@@ -363,6 +382,7 @@ dp_tx_desc_alloc(struct dp_soc *soc, uint8_t desc_pool_id)
 		}
 		qdf_spin_unlock_bh(&pool->flow_pool_lock);
 	} else {
+		dp_err_rl("NULL desc pool pool_id %d", desc_pool_id);
 		soc->pool_stats.pkt_drop_no_pool++;
 	}
 
@@ -391,6 +411,7 @@ dp_tx_desc_free(struct dp_soc *soc, struct dp_tx_desc_s *tx_desc,
 	tx_desc->vdev_id = DP_INVALID_VDEV_ID;
 	tx_desc->nbuf = NULL;
 	tx_desc->flags = 0;
+	dp_tx_desc_set_magic(tx_desc, DP_TX_MAGIC_PATTERN_FREE);
 	dp_tx_put_desc_flow_pool(pool, tx_desc);
 	switch (pool->status) {
 	case FLOW_POOL_ACTIVE_PAUSED:
@@ -399,7 +420,7 @@ dp_tx_desc_free(struct dp_soc *soc, struct dp_tx_desc_s *tx_desc,
 			reason = WLAN_DATA_FLOW_CTRL_PRI;
 			pool->status = FLOW_POOL_VO_PAUSED;
 
-			/* Update maxinum pause duration for HI queue */
+			/* Update maximum pause duration for HI queue */
 			pause_dur = unpause_time -
 					pool->latest_pause_time[DP_TH_HI];
 			if (pool->max_pause_time[DP_TH_HI] < pause_dur)
@@ -412,7 +433,7 @@ dp_tx_desc_free(struct dp_soc *soc, struct dp_tx_desc_s *tx_desc,
 			reason = WLAN_DATA_FLOW_CTRL_VO;
 			pool->status = FLOW_POOL_VI_PAUSED;
 
-			/* Update maxinum pause duration for VO queue */
+			/* Update maximum pause duration for VO queue */
 			pause_dur = unpause_time -
 					pool->latest_pause_time[DP_TH_VO];
 			if (pool->max_pause_time[DP_TH_VO] < pause_dur)
@@ -425,7 +446,7 @@ dp_tx_desc_free(struct dp_soc *soc, struct dp_tx_desc_s *tx_desc,
 			reason = WLAN_DATA_FLOW_CTRL_VI;
 			pool->status = FLOW_POOL_BE_BK_PAUSED;
 
-			/* Update maxinum pause duration for VI queue */
+			/* Update maximum pause duration for VI queue */
 			pause_dur = unpause_time -
 					pool->latest_pause_time[DP_TH_VI];
 			if (pool->max_pause_time[DP_TH_VI] < pause_dur)
@@ -438,7 +459,7 @@ dp_tx_desc_free(struct dp_soc *soc, struct dp_tx_desc_s *tx_desc,
 			reason = WLAN_DATA_FLOW_CTRL_BE_BK;
 			pool->status = FLOW_POOL_ACTIVE_UNPAUSED;
 
-			/* Update maxinum pause duration for BE_BK queue */
+			/* Update maximum pause duration for BE_BK queue */
 			pause_dur = unpause_time -
 					pool->latest_pause_time[DP_TH_BE_BK];
 			if (pool->max_pause_time[DP_TH_BE_BK] < pause_dur)
@@ -503,6 +524,8 @@ dp_tx_desc_alloc(struct dp_soc *soc, uint8_t desc_pool_id)
 			tx_desc = dp_tx_get_desc_flow_pool(pool);
 			tx_desc->pool_id = desc_pool_id;
 			tx_desc->flags = DP_TX_DESC_FLAG_ALLOCATED;
+			dp_tx_desc_set_magic(tx_desc,
+					     DP_TX_MAGIC_PATTERN_INUSE);
 			if (qdf_unlikely(pool->avail_desc < pool->stop_th)) {
 				pool->status = FLOW_POOL_ACTIVE_PAUSED;
 				qdf_spin_unlock_bh(&pool->flow_pool_lock);
@@ -513,17 +536,6 @@ dp_tx_desc_alloc(struct dp_soc *soc, uint8_t desc_pool_id)
 			} else {
 				qdf_spin_unlock_bh(&pool->flow_pool_lock);
 			}
-
-			/*
-			 * If one packet is going to be sent, PM usage count
-			 * needs to be incremented by one to prevent future
-			 * runtime suspend. This should be tied with the
-			 * success of allocating one descriptor. It will be
-			 * decremented after the packet has been sent.
-			 */
-			hif_pm_runtime_get_noresume(
-				soc->hif_handle,
-				RTPM_ID_DP_TX_DESC_ALLOC_FREE);
 		} else {
 			pool->pkt_drop_no_desc++;
 			qdf_spin_unlock_bh(&pool->flow_pool_lock);
@@ -531,7 +543,6 @@ dp_tx_desc_alloc(struct dp_soc *soc, uint8_t desc_pool_id)
 	} else {
 		soc->pool_stats.pkt_drop_no_pool++;
 	}
-
 
 	return tx_desc;
 }
@@ -555,6 +566,7 @@ dp_tx_desc_free(struct dp_soc *soc, struct dp_tx_desc_s *tx_desc,
 	tx_desc->vdev_id = DP_INVALID_VDEV_ID;
 	tx_desc->nbuf = NULL;
 	tx_desc->flags = 0;
+	dp_tx_desc_set_magic(tx_desc, DP_TX_MAGIC_PATTERN_FREE);
 	dp_tx_put_desc_flow_pool(pool, tx_desc);
 	switch (pool->status) {
 	case FLOW_POOL_ACTIVE_PAUSED:
@@ -572,7 +584,7 @@ dp_tx_desc_free(struct dp_soc *soc, struct dp_tx_desc_s *tx_desc,
 			qdf_spin_unlock_bh(&pool->flow_pool_lock);
 			qdf_print("%s %d pool is freed!!",
 				  __func__, __LINE__);
-			goto out;
+			return;
 		}
 		break;
 
@@ -585,14 +597,6 @@ dp_tx_desc_free(struct dp_soc *soc, struct dp_tx_desc_s *tx_desc,
 	};
 
 	qdf_spin_unlock_bh(&pool->flow_pool_lock);
-
-out:
-	/**
-	 * Decrement PM usage count if the packet has been sent. This
-	 * should be tied with the success of freeing one descriptor.
-	 */
-	hif_pm_runtime_put(soc->hif_handle,
-			   RTPM_ID_DP_TX_DESC_ALLOC_FREE);
 }
 
 #endif /* QCA_AC_BASED_FLOW_CONTROL */
@@ -627,7 +631,7 @@ static inline void dp_tx_flow_control_deinit(struct dp_soc *handle)
 
 static inline QDF_STATUS dp_tx_flow_pool_map_handler(struct dp_pdev *pdev,
 	uint8_t flow_id, uint8_t flow_type, uint8_t flow_pool_id,
-	uint16_t flow_pool_size)
+	uint32_t flow_pool_size)
 {
 	return QDF_STATUS_SUCCESS;
 }
@@ -636,6 +640,20 @@ static inline void dp_tx_flow_pool_unmap_handler(struct dp_pdev *pdev,
 	uint8_t flow_id, uint8_t flow_type, uint8_t flow_pool_id)
 {
 }
+
+#ifdef QCA_DP_TX_HW_SW_NBUF_DESC_PREFETCH
+static inline
+void dp_tx_prefetch_desc(struct dp_tx_desc_s *tx_desc)
+{
+	if (tx_desc)
+		prefetch(tx_desc);
+}
+#else
+static inline
+void dp_tx_prefetch_desc(struct dp_tx_desc_s *tx_desc)
+{
+}
+#endif
 
 /**
  * dp_tx_desc_alloc() - Allocate a Software Tx Descriptor from given pool
@@ -664,6 +682,7 @@ static inline struct dp_tx_desc_s *dp_tx_desc_alloc(struct dp_soc *soc,
 	pool->freelist = pool->freelist->next;
 	pool->num_allocated++;
 	pool->num_free--;
+	dp_tx_prefetch_desc(pool->freelist);
 
 	tx_desc->flags = DP_TX_DESC_FLAG_ALLOCATED;
 
@@ -866,7 +885,7 @@ static inline void dp_tx_desc_update_fast_comp_flag(struct dp_soc *soc,
 static inline struct dp_tx_desc_s *dp_tx_desc_find(struct dp_soc *soc,
 		uint8_t pool_id, uint16_t page_id, uint16_t offset)
 {
-	struct dp_tx_desc_pool_s *tx_desc_pool = &((soc)->tx_desc[(pool_id)]);
+	struct dp_tx_desc_pool_s *tx_desc_pool = &soc->tx_desc[pool_id];
 
 	return tx_desc_pool->desc_pages.cacheable_pages[page_id] +
 		tx_desc_pool->elem_size * offset;

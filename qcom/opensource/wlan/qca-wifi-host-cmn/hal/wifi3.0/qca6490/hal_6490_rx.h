@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -280,6 +280,9 @@
 #define HAL_RX_GET_SW_FRAME_GROUP_ID(rx_mpdu_start)	\
 	HAL_RX_GET(rx_mpdu_start, RX_MPDU_INFO_9, SW_FRAME_GROUP_ID)
 
+#define HAL_RX_GET_SW_PEER_ID(rx_mpdu_start)	\
+	HAL_RX_GET(rx_mpdu_start, RX_MPDU_INFO_10, SW_PEER_ID)
+
 #define HAL_REO_R0_CONFIG(soc, reg_val, reo_params)		\
 	do { \
 		reg_val &= \
@@ -420,6 +423,18 @@ RX_MSDU_DETAILS_2_RX_MSDU_DESC_INFO_DETAILS_RESERVED_0A_OFFSET))
 		RX_MSDU_END_18_CUMULATIVE_IP_LENGTH_OFFSET)),	\
 		RX_MSDU_END_18_CUMULATIVE_IP_LENGTH_MASK,	\
 		RX_MSDU_END_18_CUMULATIVE_IP_LENGTH_LSB))
+
+#define HAL_RX_MSDU_END_RESERVED_1A_GET(_rx_msdu_end)	\
+	(_HAL_MS((*_OFFSET_TO_WORD_PTR(_rx_msdu_end,	\
+		RX_MSDU_END_1_RESERVED_1A_OFFSET)),	\
+		RX_MSDU_END_1_RESERVED_1A_MASK,	\
+		RX_MSDU_END_1_RESERVED_1A_LSB))
+
+#define HAL_RX_MSDU_END_L3_TYPE_GET(_rx_msdu_end)     \
+	(_HAL_MS((*_OFFSET_TO_WORD_PTR(_rx_msdu_end,	\
+		RX_MSDU_END_5_L3_TYPE_OFFSET)),	\
+		RX_MSDU_END_5_L3_TYPE_MASK,	\
+		RX_MSDU_END_5_L3_TYPE_LSB))
 
 #if defined(QCA_WIFI_QCA6490) && defined(WLAN_CFR_ENABLE) && \
 	defined(WLAN_ENH_CFR_ENABLE)

@@ -1,6 +1,6 @@
-
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -366,7 +366,7 @@ static QDF_STATUS nan_ndp_initiator_req_tlv(wmi_unified_t wmi_handle,
 	wmi_ndp_transport_ip_param *tcp_ip_param;
 
 	/*
-	 * WMI command expects 4 byte alligned len:
+	 * WMI command expects 4 byte aligned len:
 	 * round up ndp_cfg_len and ndp_app_info_len to 4 bytes
 	 */
 	ndp_cfg_len = qdf_roundup(ndp_req->ndp_config.ndp_cfg_len, 4);
@@ -493,7 +493,7 @@ static QDF_STATUS nan_ndp_responder_req_tlv(wmi_unified_t wmi_handle,
 		 req->ndp_info.ndp_app_info_len);
 
 	/*
-	 * WMI command expects 4 byte alligned len:
+	 * WMI command expects 4 byte aligned len:
 	 * round up ndp_cfg_len and ndp_app_info_len to 4 bytes
 	 */
 	ndp_cfg_len = qdf_roundup(req->ndp_config.ndp_cfg_len, 4);
@@ -606,7 +606,7 @@ static QDF_STATUS nan_ndp_end_req_tlv(wmi_unified_t wmi_handle,
 
 	/* len of tlv following fixed param  */
 	ndp_end_req_len = sizeof(wmi_ndp_end_req) * req->num_ndp_instances;
-	/* above comes out to 4 byte alligned already, no need of padding */
+	/* above comes out to 4 byte aligned already, no need of padding */
 	len = sizeof(*cmd) + ndp_end_req_len + WMI_TLV_HDR_SIZE;
 	buf = wmi_buf_alloc(wmi_handle, len);
 	if (!buf) {
@@ -750,6 +750,13 @@ static QDF_STATUS extract_ndp_ind_tlv(wmi_unified_t wmi_handle,
 		return QDF_STATUS_E_INVAL;
 	}
 
+	if (fixed_params->service_id_len > event->num_service_id) {
+		wmi_err("FW msg service id len %d more than TLV hdr %d",
+			fixed_params->service_id_len,
+			event->num_service_id);
+		return QDF_STATUS_E_INVAL;
+	}
+
 	if (fixed_params->ndp_cfg_len >
 		(WMI_SVC_MSG_MAX_SIZE - sizeof(*fixed_params))) {
 		wmi_err("excess wmi buffer: ndp_cfg_len %d",
@@ -772,6 +779,15 @@ static QDF_STATUS extract_ndp_ind_tlv(wmi_unified_t wmi_handle,
 		(WMI_SVC_MSG_MAX_SIZE - total_array_len)) {
 		wmi_err("excess wmi buffer: ndp_cfg_len %d",
 			fixed_params->nan_scid_len);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	total_array_len += fixed_params->nan_scid_len;
+
+	if (fixed_params->service_id_len >
+	    (WMI_SVC_MSG_MAX_SIZE - total_array_len)) {
+		wmi_err("excess wmi buffer: service_cfg_len %d",
+			fixed_params->service_id_len);
 		return QDF_STATUS_E_INVAL;
 	}
 
@@ -840,6 +856,18 @@ static QDF_STATUS extract_ndp_ind_tlv(wmi_unified_t wmi_handle,
 	}
 	wmi_debug("IPv6 addr present: %d, addr: %pI6",
 		 rsp->is_ipv6_addr_present, rsp->ipv6_addr);
+
+	rsp->is_service_id_present = false;
+	if (fixed_params->service_id_len && event->service_id) {
+		if (fixed_params->service_id_len < NDP_SERVICE_ID_LEN) {
+			wmi_err("Invalid service id length %d",
+				event->num_service_id);
+			return QDF_STATUS_E_INVAL;
+		}
+		rsp->is_service_id_present = true;
+		qdf_mem_copy(rsp->service_id, event->service_id,
+			     NDP_SERVICE_ID_LEN);
+	}
 
 	return QDF_STATUS_SUCCESS;
 }

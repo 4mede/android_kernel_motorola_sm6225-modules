@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -392,7 +393,7 @@ static void scheduler_thread_process_queues(struct scheduler_ctx *sch_ctx,
 
 			sched_history_start(msg);
 			qdf_timer_start(&sch_ctx->watchdog_timer,
-					SCHEDULER_WATCHDOG_TIMEOUT);
+					sch_ctx->timeout);
 			status = sch_ctx->queue_ctx.
 					scheduler_msg_process_fn[i](msg);
 			qdf_timer_stop(&sch_ctx->watchdog_timer);
@@ -463,7 +464,6 @@ int scheduler_thread(void *arg)
 	/* If we get here the scheduler thread must exit */
 	sched_debug("Scheduler thread exiting");
 	qdf_event_set(&sch_ctx->sch_shutdown);
-	qdf_exit_thread(QDF_STATUS_SUCCESS);
 
 	return 0;
 }

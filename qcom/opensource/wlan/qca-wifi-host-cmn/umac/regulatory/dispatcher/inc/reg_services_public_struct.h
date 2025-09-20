@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -25,7 +25,9 @@
 #ifndef __REG_SERVICES_PUBLIC_STRUCT_H_
 #define __REG_SERVICES_PUBLIC_STRUCT_H_
 
-#define REG_SBS_SEPARATION_THRESHOLD 100
+#ifdef CONFIG_AFC_SUPPORT
+#include <wlan_reg_afc.h>
+#endif
 
 #ifdef CONFIG_BAND_6GHZ
 #define REG_MAX_CHANNELS_PER_OPERATING_CLASS        70
@@ -37,7 +39,7 @@
 #define REG_PSD_MAX_TXPOWER_FOR_SUBORDINATE_CLIENT  5    /* dBm */
 #define REG_EIRP_MAX_TXPOWER_FOR_SUBORDINATE_CLIENT 24   /* dBm */
 #else
-#define REG_MAX_CHANNELS_PER_OPERATING_CLASS  25
+#define REG_MAX_CHANNELS_PER_OPERATING_CLASS        28
 #endif
 
 #define REG_MAX_SUPP_OPER_CLASSES 32
@@ -46,7 +48,7 @@
 #define MAX_STA_VDEV_CNT 4
 #define INVALID_VDEV_ID 0xFF
 #define INVALID_CHANNEL_NUM 0x0
-#define CH_AVOID_MAX_RANGE   4
+#define CH_AVOID_MAX_RANGE   (NUM_5GHZ_CHANNELS + NUM_24GHZ_CHANNELS)
 #define REG_ALPHA2_LEN 2
 #define MAX_REG_RULES 10
 #define MAX_6G_REG_RULES 5
@@ -57,6 +59,7 @@
 #define REGULATORY_CHAN_NO_OFDM      BIT(6)
 #define REGULATORY_CHAN_INDOOR_ONLY  BIT(9)
 #define REGULATORY_CHAN_AFC          BIT(13)
+#define REGULATORY_CHAN_AFC_NOT_DONE BIT(16)
 
 #define REGULATORY_CHAN_NO_HT40      BIT(4)
 #define REGULATORY_CHAN_NO_80MHZ     BIT(7)
@@ -71,6 +74,9 @@
 #define REGULATORY_CHAN_NO11N        BIT(3)
 #define REGULATORY_PHYMODE_NO11AC    BIT(4)
 #define REGULATORY_PHYMODE_NO11AX    BIT(5)
+#ifdef WLAN_FEATURE_11BE
+#define REGULATORY_PHYMODE_NO11BE    BIT(6)
+#endif
 
 #define BW_5_MHZ      5
 #define BW_10_MHZ     10
@@ -79,9 +85,19 @@
 #define BW_40_MHZ     40
 #define BW_80_MHZ     80
 #define BW_160_MHZ    160
+#ifdef WLAN_FEATURE_11BE
+#define BW_320_MHZ    320
+#endif
 #define BW_40_MHZ     40
 
 #define MAX_NUM_PWR_LEVEL 16
+
+#ifdef CONFIG_REG_CLIENT
+#define MAX_NUM_FCC_RULES 2
+#endif
+
+/* no subchannels punctured */
+#define NO_SCHANS_PUNC 0x0000
 
 /**
  * enum dfs_reg - DFS region
@@ -461,7 +477,7 @@ enum channel_enum {
 	MAX_24GHZ_CHANNEL = CHAN_ENUM_2484,
 	NUM_24GHZ_CHANNELS = (MAX_24GHZ_CHANNEL - MIN_24GHZ_CHANNEL + 1),
 
-	INVALID_CHANNEL = 0xBAD,
+	INVALID_CHANNEL = NUM_CHANNELS,
 
 #ifdef CONFIG_49GHZ_CHAN
 	MIN_49GHZ_CHANNEL = CHAN_ENUM_4912,
@@ -474,14 +490,14 @@ enum channel_enum {
 #endif /* CONFIG_49GHZ_CHAN */
 
 	MIN_5GHZ_CHANNEL = CHAN_ENUM_5180,
+#ifdef WLAN_FEATURE_DSRC
+	MAX_5GHZ_CHANNEL = CHAN_ENUM_5920,
+#else
 	MAX_5GHZ_CHANNEL = CHAN_ENUM_5885,
+#endif
 	NUM_5GHZ_CHANNELS = (MAX_5GHZ_CHANNEL - MIN_5GHZ_CHANNEL + 1),
 
 #ifdef WLAN_FEATURE_DSRC
-	MIN_5GHZ_CHANNEL = CHAN_ENUM_5180,
-	MAX_5GHZ_CHANNEL = CHAN_ENUM_5920,
-	NUM_5GHZ_CHANNELS = (MAX_5GHZ_CHANNEL - MIN_5GHZ_CHANNEL + 1),
-
 	MIN_DSRC_CHANNEL = CHAN_ENUM_5850,
 	MAX_DSRC_CHANNEL = CHAN_ENUM_5920,
 	NUM_DSRC_CHANNELS = (MAX_DSRC_CHANNEL - MIN_DSRC_CHANNEL + 1),
@@ -564,11 +580,13 @@ enum reg_6g_ap_type {
  * @REG_SUBORDINATE_CLIENT: Subordinate client
  * @REG_MAX_CLIENT_TYPE: Maximum value possible for max tx-power category
  * (2 bits) sub-field in the TPE (Transmit Power Envelope) IE
+ * REG_INVALID_CLIENT_TYPE: Invalid client type
  */
 enum reg_6g_client_type {
 	REG_DEFAULT_CLIENT = 0,
 	REG_SUBORDINATE_CLIENT = 1,
 	REG_MAX_CLIENT_TYPE = 2,
+	REG_INVALID_CLIENT_TYPE = REG_MAX_CLIENT_TYPE,
 };
 
 /**
@@ -608,6 +626,17 @@ enum ctl_value {
 };
 
 /**
+ * struct freq_range: The range/band of frequencies, indicated by left and right
+ * edge frequencies.
+ * @left: Left edge frequency(inclusive)
+ * @right: Right edge frequency(inclusive)
+ */
+struct freq_range {
+	qdf_freq_t left;
+	qdf_freq_t right;
+};
+
+/**
  * struct ch_params
  * @ch_width: channel width
  * @sec_ch_offset: secondary channel offset
@@ -615,6 +644,13 @@ enum ctl_value {
  * @center_freq_seg1: channel number segment 1
  * @mhz_freq_seg0: Center frequency for segment 0
  * @mhz_freq_seg1: Center frequency for segment 1
+ * @reg_punc_bitmap: Output puncturing bitmap
+ * @is_create_punc_bitmap: Whether puncturing bitmap is to be created or not
+ *                         Parameter 'reg_punc_bitmap' is valid only if
+ *                         is_create_punc_bitmap is true
+ * @input_punc_bitmap: Input puncture bitmap. The channels which are indicated
+ *                     as punctured by this bitmap are not validated by the
+ *                     regulatory.
  */
 struct ch_params {
 	enum phy_ch_width ch_width;
@@ -623,7 +659,29 @@ struct ch_params {
 	uint8_t center_freq_seg1;
 	qdf_freq_t mhz_freq_seg0;
 	qdf_freq_t mhz_freq_seg1;
+#ifdef WLAN_FEATURE_11BE
+	uint16_t reg_punc_bitmap;
+	bool is_create_punc_bitmap;
+	uint16_t input_punc_bitmap;
+#endif
 };
+
+/**
+ * struct reg_channel_list
+ * @num_ch_params: Number of chan_param elements
+ * @chan_param: Object of type struct ch_params to hold channel params
+ * Currently chan_param is an array of 2 because maximum possible 320
+ * channels for a given primary channel is 2. This may be dynamically
+ * allocated in the future by the caller if num_ch_params is greater than 2.
+ *
+ */
+#ifdef WLAN_FEATURE_11BE
+#define MAX_NUM_CHAN_PARAM 2
+struct reg_channel_list {
+	uint8_t num_ch_params;
+	struct ch_params chan_param[MAX_NUM_CHAN_PARAM];
+};
+#endif
 
 /**
  * struct channel_power
@@ -671,6 +729,18 @@ enum behav_limit {
 };
 
 /**
+ * struct c_freq_lst: The list data structure for the center frequencies
+ * @num_cfis: Number of center frequencies
+ * @p_cfis_arr: Start address of the array of center frequency indices. Center
+ *              for 40/80/160/320MHz band channel opclasses. For 20MHz the list
+ *              is empty as it is already available in @channels variable.
+ */
+struct c_freq_lst {
+	uint8_t num_cfis;
+	const uint8_t *p_cfis_arr;
+};
+
+/**
  * struct reg_dmn_op_class_map_t: operating class
  * @op_class: operating class number
  * @chan_spacing: channel spacing
@@ -678,14 +748,31 @@ enum behav_limit {
  * @behav_limit: OR of bitmaps of enum behav_limit
  * @start_freq: starting frequency
  * @channels: channel set
+ * @p_cfi_lst_obj: Pointer to center frequency indices list
  */
 struct reg_dmn_op_class_map_t {
 	uint8_t op_class;
-	uint8_t chan_spacing;
+	uint16_t chan_spacing;
 	enum offset_t offset;
 	uint16_t behav_limit;
 	qdf_freq_t start_freq;
 	uint8_t channels[REG_MAX_CHANNELS_PER_OPERATING_CLASS];
+	const struct c_freq_lst *p_cfi_lst_obj;
+};
+
+/**
+ * enum opclass_config: Opclass configuration
+ * @OPCLASSES_SUPPORTED_BY_CUR_HWMODE: Retrieve opclasses that is supported
+ * by the current hw mode.
+ * @OPCLASSES_NOT_SUPPORTED_BY_CUR_HWMODE: Retrieve opclasses that are not
+ * supported by the current hw mode.
+ * OPCLASSES_SUPPORTED_BY_DOMAIN: Populate the opclass supported by the radio
+ * without considering the capability of current hwmode.
+ */
+enum opclass_config {
+	OPCLASSES_SUPPORTED_BY_CUR_HWMODE = 1,
+	OPCLASSES_NOT_SUPPORTED_BY_CUR_HWMODE = 2,
+	OPCLASSES_SUPPORTED_BY_DOMAIN = 3
 };
 
 /**
@@ -702,7 +789,7 @@ struct reg_dmn_op_class_map_t {
  */
 struct regdmn_ap_cap_opclass_t {
 	uint8_t op_class;
-	uint8_t ch_width;
+	uint16_t ch_width;
 	qdf_freq_t start_freq;
 	uint16_t behav_limit;
 	uint8_t max_tx_pwr_dbm;
@@ -879,8 +966,13 @@ struct get_usable_chan_req_params {
  * @nol_chan: whether channel is nol
  * @nol_history: Set NOL-History when STA vap detects RADAR.
  * @is_chan_hop_blocked: Whether channel is blocked for ACS hopping.
+ * @ht40intol_flags: Contains Flags to indicate whether the 40PLUS/40MINUS
+ *                   version of the channel is blocked by ACS due to
+ *                   intolerance.
  * @psd_flag: is PSD channel or not
  * @psd_eirp: PSD power level
+ * @is_static_punctured: is static punctured
+ * @power_type: channel power type
  */
 struct regulatory_channel {
 	qdf_freq_t center_freq;
@@ -895,11 +987,92 @@ struct regulatory_channel {
 	bool nol_history;
 #ifdef CONFIG_HOST_FIND_CHAN
 	bool is_chan_hop_blocked;
+	uint8_t ht40intol_flags;
 #endif
 #ifdef CONFIG_BAND_6GHZ
 	bool psd_flag;
 	uint16_t psd_eirp;
 #endif
+#ifdef CONFIG_REG_CLIENT
+	uint8_t is_static_punctured;
+	enum reg_6g_ap_type power_type;
+#endif
+};
+
+/** struct ap_cli_pwr_mode_info: AP and client power mode information
+ * @is_mode_ap: Is it AP or CLIENT
+ * @cli_type:  Is the client a default or subordinate
+ * @ap_pwr_mode: LPI, SP or VLP
+ */
+struct ap_cli_pwr_mode_info {
+	bool is_mode_ap;
+	enum reg_6g_client_type cli_type;
+	enum reg_6g_ap_type ap_pwr_mode;
+};
+
+/**
+ * enum supported_6g_pwr_types: 6G supported AP and Client power types
+ * @REG_BEST_PWR_MODE: Best power mode
+ * @REG_CURRENT_PWR_MODE: Current power mode
+ * @REG_AP_LPI: LPI AP power mode
+ * @REG_AP_SP: SP AP power mode
+ * @REG_AP_VLP: VLP AP power mode
+ * @REG_CLI_DEF_LPI: LPI default client mode
+ * @REG_CLI_DEF_SP: SP default client mode
+ * @REG_CLI_DEF_VLP: VLP default client mode
+ * @REG_CLI_SUB_LPI: LPI subordinate client mode
+ * @REG_CLI_SUB_SP: SP subordinate client mode
+ * @REG_CLI_SUB_VLP: VLP subordinate client mode
+ * @REG_INVALID_PWR_MODE: Invalid power mode
+ */
+enum supported_6g_pwr_types {
+	REG_BEST_PWR_MODE    = -1,
+	REG_CURRENT_PWR_MODE = 0,
+	REG_AP_LPI           = 1,
+	REG_AP_SP            = 2,
+	REG_AP_VLP           = 3,
+	REG_CLI_DEF_LPI      = 4,
+	REG_CLI_DEF_SP       = 5,
+	REG_CLI_DEF_VLP      = 6,
+	REG_CLI_SUB_LPI      = 7,
+	REG_CLI_SUB_SP       = 8,
+	REG_CLI_SUB_VLP      = 9,
+	REG_INVALID_PWR_MODE = 10,
+};
+
+#define MAX_PWR_TYPES 10
+/**
+ * struct psd_val: Regulatory power information
+ * @psd_flag: Boolean to indicate if PSD is supported or not
+ * @psd_eirp: PSD power
+ * @tx_power: Maximum EIRP
+ */
+struct psd_val {
+	bool psd_flag;
+	uint16_t psd_eirp;
+	uint32_t tx_power;
+};
+
+/**
+ * struct super_chan_info: Information of a 6G channel for every power
+ * mode
+ * @power_types: Bitmap whose bit positions indicate the power modes supported
+ * by a channel
+ * @best_power_mode: Best power mode of a channel
+ * @min_bw: Array of minimum bandwidths per power mode
+ * @max_bw: Array of maximum bandwidths per power mode
+ * @chan_flags_arr: Array of channel flags
+ * @reg_chan_pwr: Array of powers
+ * @state_arr: Array of states
+ */
+struct super_chan_info {
+	uint16_t power_types;
+	enum supported_6g_pwr_types best_power_mode;
+	uint16_t min_bw[MAX_PWR_TYPES];
+	uint16_t max_bw[MAX_PWR_TYPES];
+	uint32_t chan_flags_arr[MAX_PWR_TYPES];
+	struct psd_val reg_chan_pwr[MAX_PWR_TYPES];
+	enum channel_state state_arr[MAX_PWR_TYPES];
 };
 
 /**
@@ -1009,6 +1182,18 @@ struct cur_reg_rule {
 	uint16_t psd_eirp;
 };
 
+#ifdef CONFIG_REG_CLIENT
+/**
+ * struct cur_fcc_rule
+ * @center_freq: center frequency
+ * @tx_power: transmission power
+ */
+struct cur_fcc_rule {
+	uint16_t center_freq;
+	uint8_t tx_power;
+};
+#endif
+
 /**
  * struct cur_regulatory_info
  * @psoc: psoc ptr
@@ -1027,6 +1212,8 @@ struct cur_reg_rule {
  * @max_bw_5g: maximum 5G bw
  * @num_2g_reg_rules: number 2G reg rules
  * @num_5g_reg_rules: number 5G  and 6G reg rules
+ * @reg_6g_thresh_priority_freq: All frequencies greater or equal will be given
+ * priority during channel selection by upper layer
  * @reg_rules_2g_ptr: ptr to 2G reg rules
  * @reg_rules_5g_ptr: ptr to 5G reg rules
  * @client_type: type of client
@@ -1043,6 +1230,8 @@ struct cur_reg_rule {
  * @num_6g_reg_rules_client: list of number of 6G reg rules for client
  * @reg_rules_6g_ap_ptr: ptr to 6G AP reg rules
  * @reg_rules_6g_client_ptr: list of ptr to 6G client reg rules
+ * @fcc_rules_ptr: ptr to fcc rules
+ * @num_fcc_rules: Number of fcc rules sent by firmware
  */
 struct cur_regulatory_info {
 	struct wlan_objmgr_psoc *psoc;
@@ -1061,6 +1250,7 @@ struct cur_regulatory_info {
 	uint32_t max_bw_5g;
 	uint32_t num_2g_reg_rules;
 	uint32_t num_5g_reg_rules;
+	qdf_freq_t reg_6g_thresh_priority_freq;
 	struct cur_reg_rule *reg_rules_2g_ptr;
 	struct cur_reg_rule *reg_rules_5g_ptr;
 	enum reg_6g_client_type client_type;
@@ -1077,7 +1267,167 @@ struct cur_regulatory_info {
 	uint32_t num_6g_reg_rules_client[REG_CURRENT_MAX_AP_TYPE][REG_MAX_CLIENT_TYPE];
 	struct cur_reg_rule *reg_rules_6g_ap_ptr[REG_CURRENT_MAX_AP_TYPE];
 	struct cur_reg_rule *reg_rules_6g_client_ptr[REG_CURRENT_MAX_AP_TYPE][REG_MAX_CLIENT_TYPE];
+#ifdef CONFIG_REG_CLIENT
+	struct cur_fcc_rule *fcc_rules_ptr;
+	uint32_t num_fcc_rules;
+#endif
 };
+
+#if defined(CONFIG_AFC_SUPPORT) && defined(CONFIG_BAND_6GHZ)
+
+/**
+ * reg_afc_event_type indicates the type of AFC event sent from FW to host.
+ * 1. For sending Power Info REG_AFC_EVENT_POWER_INFO event is used.
+ * 2. For sending AFC expiry use REG_AFC_EVENT_TIMER_EXPIRY
+ * This type can be expanded in future as per requirements.
+ */
+enum reg_afc_event_type {
+	REG_AFC_EVENT_POWER_INFO = 1,
+	REG_AFC_EVENT_TIMER_EXPIRY = 2,
+};
+
+/**
+ * reg_afc_expiry_event_subtype indicates the subtype.
+ * 1. At boot up AFC expiry will contain AFC start.
+ * 2. If AFC timer expires AFC_RENEW status code will be sent to host
+ *    with expiry event.
+ * 3. If AFC server is not responding to FW in specified time, FW will
+ *    indicate host to switch to LPI.
+ */
+enum reg_afc_expiry_event_subtype {
+	REG_AFC_EXPIRY_EVENT_START = 1,
+	REG_AFC_EXPIRY_EVENT_RENEW = 2,
+	REG_AFC_EXPIRY_EVENT_SWITCH_TO_LPI = 3,
+	REG_AFC_EXPIRY_EVENT_STOP_TX = 4,
+};
+
+/**
+ * The following fw_status_code is mutually exclusive
+ * and is used in power event.
+ * 0. AFC power event is success.
+ * 1. If Host does not indicate AFC indication cmd within certain time
+ *    of AFC expiry, REG_FW_AFC_POWER_EVENT_RESP_NOT_RECEIVED will be used.
+ * 2. If FW is not able to parse afc_info, parsing_failure will be
+ *    indicated using REG_FW_AFC_POWER_EVENT_RESP_NOT_RECEIVED.
+ * 3. If due to some local reason AFC event is failed, AFC event failure
+ *    is indicated using REG_FW_AFC_POWER_EVENT_FAILURE.
+ */
+enum reg_fw_afc_power_event_status_code {
+	REG_FW_AFC_POWER_EVENT_SUCCESS = 0,
+	REG_FW_AFC_POWER_EVENT_RESP_NOT_RECEIVED = 1,
+	REG_FW_AFC_POWER_EVENT_RESP_PARSING_FAILURE = 2,
+	REG_FW_AFC_POWER_EVENT_FAILURE = 3,
+};
+
+/**
+ * The following reg_afc_server_resp_code is mutually exclusive.
+ * This response code will be indicated to AFC server.
+ * These codes are defined in WIFI spec doc for AFC as follows
+ * -1: General Failure
+ * 0:  Success
+ * 100 - 199: General errors related to the protocol
+ * 300 - 399: Error events specific to message exchange for the
+ *            Available Spectrum Inquiry
+ */
+enum reg_afc_serv_resp_code {
+	REG_AFC_SERV_RESP_GENERAL_FAILURE = -1,
+	REG_AFC_SERV_RESP_SUCCESS = 0,
+	REG_AFC_SERV_RESP_VERSION_NOT_SUPPORTED = 100,
+	REG_AFC_SERV_RESP_DEVICE_UNALLOWED = 101,
+	REG_AFC_SERV_RESP_MISSING_PARAM = 102,
+	REG_AFC_SERV_RESP_INVALID_VALUE = 103,
+	REG_AFC_SERV_RESP_UNEXPECTED_PARAM = 106,
+	REG_AFC_SERV_RESP_UNSUPPORTED_SPECTRUM = 300,
+};
+
+/**
+ * struct afc_freq_obj
+ * @low_freq: Lower edge frequency
+ * @high_freq: Upper edge frequency
+ * @max_psd: Max PSD in 0.01 dBm/MHz units
+ */
+struct afc_freq_obj {
+	qdf_freq_t low_freq;
+	qdf_freq_t high_freq;
+	int16_t max_psd;
+};
+
+/**
+ * struct chan_eirp_obj
+ * @cfi: Channel frequency index
+ * @eirp_power: Max EIRP power in 0.01 dBm units
+ */
+struct chan_eirp_obj {
+	uint8_t cfi;
+	uint16_t eirp_power;
+};
+
+/**
+ * struct afc_chan_obj
+ * @global_opclass: Global Operating class
+ * @num_chans: Number of channels
+ * @chan_eirp_info: Pointer to afc channel EIRP object
+ */
+struct afc_chan_obj {
+	uint8_t global_opclass;
+	uint8_t num_chans;
+	struct chan_eirp_obj *chan_eirp_info;
+};
+
+/**
+ * struct reg_afc_expiry_event
+ * @request_id: AFC request id generated by the firmware
+ * @event_subtype: AFC expiry event subtype
+ */
+struct reg_afc_expiry_event {
+	uint32_t request_id;
+	enum reg_afc_expiry_event_subtype event_subtype;
+};
+
+/**
+ * struct reg_fw_afc_power_event
+ * @resp_id: AFC server response id
+ * @fw_status_code: firmware status code
+ * @serv_resp_code: AFC server response code
+ * @afc_wfa_version: AFC version
+ * @avail_exp_time_d: Expiry date of the AFC power info
+ * @avail_exp_time_t: Time left for expiry of the AFC power info
+ * @num_freq_objs: Number of freq objects
+ * @num_chan_objs: Number of channel objects
+ * @afc_freq_info: Pointer to AFC freq object
+ * @afc_chan_info: Pointer to AFC channel object
+ */
+struct reg_fw_afc_power_event {
+	uint32_t resp_id;
+	enum reg_fw_afc_power_event_status_code fw_status_code;
+	enum reg_afc_serv_resp_code serv_resp_code;
+	uint32_t afc_wfa_version;
+	uint32_t avail_exp_time_d;
+	uint32_t avail_exp_time_t;
+	uint8_t num_freq_objs;
+	uint8_t num_chan_objs;
+	struct afc_freq_obj *afc_freq_info;
+	struct afc_chan_obj *afc_chan_info;
+};
+
+/**
+ * struct afc_regulatory_info
+ * @psoc: psoc ptr
+ * @phy_id: phy id
+ * @event_type: AFC event type
+ * @expiry_info: pointer to information present in the AFC expiry event
+ * @power_info: pointer to information present in the AFC power event
+ */
+struct afc_regulatory_info {
+	struct wlan_objmgr_psoc *psoc;
+	uint8_t phy_id;
+	enum reg_afc_event_type event_type;
+	union {
+		struct reg_afc_expiry_event *expiry_info;
+		struct reg_fw_afc_power_event *power_info;
+	};
+};
+#endif
 
 /**
  * struct reg_rule_info
@@ -1178,6 +1528,16 @@ enum restart_beaconing_on_ch_avoid_rule {
  * @enable_5dot9_ghz_chan_in_master_mode: 5.9 GHz channel support in
  * master mode
  * @retain_nol_across_regdmn_update: Retain the NOL list across the regdomain.
+ * @coex_unsafe_chan_nb_user_prefer: Honor coex unsafe chan cmd from firmware or
+ * userspace
+ * @coex_unsafe_chan_reg_disable: To disable reg channels for received coex
+ * unsafe channels list
+ * @enable_6ghz_sp_pwrmode_supp: Enable target 6 GHz Standard Power mode support
+ * @afc_disable_timer_check: Disable target AFC timer check
+ * @afc_disable_request_id_check: Disable target AFC request id check
+ * @is_afc_reg_noaction: Whether no action to AFC power event
+ * @sta_sap_scc_on_indoor_channel: Value of sap+sta scc on indoor support
+ * @p2p_indoor_ch_support: Allow P2P GO in indoor channels
  */
 struct reg_config_vars {
 	uint32_t enable_11d_support;
@@ -1192,6 +1552,18 @@ struct reg_config_vars {
 	bool enable_11d_in_world_mode;
 	bool enable_5dot9_ghz_chan_in_master_mode;
 	bool retain_nol_across_regdmn_update;
+#ifdef FEATURE_WLAN_CH_AVOID_EXT
+	bool coex_unsafe_chan_nb_user_prefer;
+	bool coex_unsafe_chan_reg_disable;
+#endif
+#if defined(CONFIG_AFC_SUPPORT) && defined(CONFIG_BAND_6GHZ)
+	bool enable_6ghz_sp_pwrmode_supp;
+	bool afc_disable_timer_check;
+	bool afc_disable_request_id_check;
+	bool is_afc_reg_noaction;
+#endif
+	bool sta_sap_scc_on_indoor_channel;
+	bool p2p_indoor_ch_support;
 };
 
 /**
@@ -1219,8 +1591,11 @@ enum direction {
  * @dfs_region: dfs region
  * @phybitmap: phybitmap
  * @mas_chan_list: master chan list for 2GHz and 5GHz channels
+ * @is_6g_channel_list_populated: indicates the channel lists are populated
  * @mas_chan_list_6g_ap: master chan list for 6GHz AP channels
  * @mas_chan_list_6g_client: master chan list for 6GHz client
+ * @is_6g_afc_power_event_received: indicates if the AFC event is received.
+ * @mas_chan_list_6g_afc: master chan list for 6GHz AFC
  * @default_country: default country
  * @current_country: current country
  * @def_region_domain: default reg domain
@@ -1232,6 +1607,9 @@ enum direction {
  * @client_type: type of client
  * @rnr_tpe_usable: if RNR TPE octet is usable for country
  * @unspecified_ap_usable: if not set, AP usable for country
+ * @max_bw_5g: Maximum 5g Bandwidth
+ * @reg_6g_thresh_priority_freq: All frequencies greater or equal will be given
+ * priority during channel selection by upper layer
  */
 struct mas_chan_params {
 	enum dfs_reg dfs_region;
@@ -1241,6 +1619,10 @@ struct mas_chan_params {
 	bool is_6g_channel_list_populated;
 	struct regulatory_channel mas_chan_list_6g_ap[REG_CURRENT_MAX_AP_TYPE][NUM_6GHZ_CHANNELS];
 	struct regulatory_channel mas_chan_list_6g_client[REG_CURRENT_MAX_AP_TYPE][REG_MAX_CLIENT_TYPE][NUM_6GHZ_CHANNELS];
+#ifdef CONFIG_AFC_SUPPORT
+	bool is_6g_afc_power_event_received;
+	struct regulatory_channel mas_chan_list_6g_afc[NUM_6GHZ_CHANNELS];
+#endif
 #endif
 	char default_country[REG_ALPHA2_LEN + 1];
 	char current_country[REG_ALPHA2_LEN + 1];
@@ -1255,7 +1637,9 @@ struct mas_chan_params {
 	enum reg_6g_client_type client_type;
 	bool rnr_tpe_usable;
 	bool unspecified_ap_usable;
+	qdf_freq_t reg_6g_thresh_priority_freq;
 #endif
+	uint16_t max_bw_5g;
 };
 
 /**
@@ -1314,20 +1698,25 @@ struct cur_regdmn_info {
  * struct ch_avoid_freq_type
  * @start_freq: start freq
  * @end_freq: end freq
+ * @txpower: txpower
  */
 struct ch_avoid_freq_type {
 	qdf_freq_t start_freq;
 	qdf_freq_t end_freq;
+	int32_t txpower;
+	bool is_valid_txpower;
 };
 
 /**
  * struct ch_avoid_ind_type
  * @ch_avoid_range_cnt: count
  * @avoid_freq_range: avoid freq range array
+ * @restriction_mask: restriction mask to apply txpower
  */
 struct ch_avoid_ind_type {
 	uint32_t ch_avoid_range_cnt;
 	struct ch_avoid_freq_type avoid_freq_range[CH_AVOID_MAX_RANGE];
+	uint32_t restriction_mask;
 };
 
 /**
@@ -1338,6 +1727,8 @@ struct ch_avoid_ind_type {
 struct unsafe_ch_list {
 	uint16_t chan_cnt;
 	uint16_t chan_freq_list[NUM_CHANNELS];
+	int32_t txpower[NUM_CHANNELS];
+	bool is_valid_txpower[NUM_CHANNELS];
 };
 
 /**
@@ -1370,7 +1761,22 @@ struct reg_sched_payload {
 #define TWOG_CHAN_1_IN_MHZ         2412
 #define TWOG_CHAN_5_IN_MHZ         2432
 #define TWOG_CHAN_6_IN_MHZ         2437
+#define TWOG_CHAN_9_IN_MHZ         2452
 #define TWOG_CHAN_13_IN_MHZ        2472
+#define FIVEG_CHAN_36_IN_MHZ       5180
+#define FIVEG_CHAN_177_IN_MHZ      5885
+#define SIXG_CHAN_2_IN_MHZ         5935
+#define SIXG_CHAN_1_IN_MHZ         5955
+#define SIXG_CHAN_233_IN_MHZ       7115
+
+#define HT40_SEC_OFFSET              20
+
+#define IEEE_2GHZ_CH1                 1
+#define IEEE_2GHZ_CH14               14
+#define IEEE_5GHZ_CH36               36
+#define IEEE_6GHZ_CH1                 1
+#define IEEE_6GHZ_CH2                 2
+#define IEEE_CH_SEP                   5
 
 /**
  * struct reg_ctl_params - reg ctl and regd info
@@ -1397,6 +1803,7 @@ struct reg_ctl_params {
  * @REG_PHYMODE_11N: 802.11n phymode
  * @REG_PHYMODE_11AC: 802.11ac phymode
  * @REG_PHYMODE_11AX: 802.11ax phymode
+ * @REG_PHYMODE_11BE: 802.11be phymode
  * @REG_PHYMODE_MAX: placeholder for future phymodes
  */
 enum reg_phymode {
@@ -1407,6 +1814,9 @@ enum reg_phymode {
 	REG_PHYMODE_11N,
 	REG_PHYMODE_11AC,
 	REG_PHYMODE_11AX,
+#ifdef WLAN_FEATURE_11BE
+	REG_PHYMODE_11BE,
+#endif
 	REG_PHYMODE_MAX,
 };
 
@@ -1431,7 +1841,6 @@ struct chan_power_info {
  * @frequency: Array of operating frequency
  * @tpe: TPE values processed from TPE IE
  * @chan_power_info: power info to send to FW
- * @is_power_constraint_abs: is power constraint absolute or not
  */
 struct reg_tpc_power_info {
 	bool is_psd_power;
@@ -1443,7 +1852,451 @@ struct reg_tpc_power_info {
 	qdf_freq_t frequency[MAX_NUM_PWR_LEVEL];
 	uint8_t tpe[MAX_NUM_PWR_LEVEL];
 	struct chan_power_info chan_power_info[MAX_NUM_PWR_LEVEL];
-	bool is_power_constraint_abs;
 };
 
+#ifdef FEATURE_WLAN_CH_AVOID_EXT
+typedef struct unsafe_ch_list avoid_ch_ext_list;
+/**
+ * struct chan_5g_center_freq
+ * @center_freq_20: center frequency of max 200Mhz
+ * @center_freq_40: center frequency of max 40Mhz
+ * @center_freq_80: center frequency of max 80Mhz
+ * @center_freq_160: center frequency of max 160Mhz
+ */
+struct chan_5g_center_freq {
+	qdf_freq_t center_freq_20;
+	qdf_freq_t center_freq_40;
+	qdf_freq_t center_freq_80;
+	qdf_freq_t center_freq_160;
+};
+
+#define INVALID_CENTER_FREQ 0
+/*MAX 5g channel numbers, not include dsrc*/
+#define MAX_5G_CHAN_NUM 28
+
+#endif
+
+/**
+ * enum HOST_REGDMN_MODE:
+ * @HOST_REGDMN_MODE_11A: 11a channels
+ * @HOST_REGDMN_MODE_TURBO: 11a turbo-only channels
+ * @HOST_REGDMN_MODE_11B: 11b channels
+ * @HOST_REGDMN_MODE_PUREG: 11g channels (OFDM only)
+ * @HOST_REGDMN_MODE_11G: historical
+ * @HOST_REGDMN_MODE_108G: 11g+Turbo channels
+ * @HOST_REGDMN_MODE_108A: 11a+Turbo channels
+ * @HOST_REGDMN_MODE_11AC_VHT20_2G: 2GHz, VHT20
+ * @HOST_REGDMN_MODE_XR: XR channels
+ * @HOST_REGDMN_MODE_11A_HALF_RATE: 11a half rate channels
+ * @HOST_REGDMN_MODE_11A_QUARTER_RATE: 11a quarter rate channels
+ * @HOST_REGDMN_MODE_11NG_HT20: 11ng HT20 channels
+ * @HOST_REGDMN_MODE_11NA_HT20: 11na HT20 channels
+ * @HOST_REGDMN_MODE_11NG_HT40PLUS: 11ng HT40+ channels
+ * @HOST_REGDMN_MODE_11NG_HT40MINUS: 11ng HT40- channels
+ * @HOST_REGDMN_MODE_11NA_HT40PLUS: 11na HT40+ channels
+ * @HOST_REGDMN_MODE_11NA_HT40MINUS: 11na HT40- channels
+ * @HOST_REGDMN_MODE_11AC_VHT20: 5GHz, VHT20
+ * @HOST_REGDMN_MODE_11AC_VHT40PLUS: 5GHz, VHT40+ channels
+ * @HOST_REGDMN_MODE_11AC_VHT40MINUS: 5GHz, VHT40- channels
+ * @HOST_REGDMN_MODE_11AC_VHT80: 5GHz, VHT80 channels
+ * @HOST_REGDMN_MODE_11AC_VHT160: 5GHz, VHT160 channels
+ * @HOST_REGDMN_MODE_11AC_VHT80_80: 5GHz, VHT80+80 channels
+ * @HOST_REGDMN_MODE_11AXG_HE20: 11ax 2.4GHz, HE20 channels
+ * @HOST_REGDMN_MODE_11AXA_HE20: 11ax 5GHz, HE20 channels
+ * @HOST_REGDMN_MODE_11AXG_HE40PLUS: 11ax 2.4GHz, HE40+ channels
+ * @HOST_REGDMN_MODE_11AXG_HE40MINUS: 11ax 2.4GHz, HE40- channels
+ * @HOST_REGDMN_MODE_11AXA_HE40PLUS: 11ax 5GHz, HE40+ channels
+ * @HOST_REGDMN_MODE_11AXA_HE40MINUS: 11ax 5GHz, HE40- channels
+ * @HOST_REGDMN_MODE_11AXA_HE80: 11ax 5GHz, HE80 channels
+ * @HOST_REGDMN_MODE_11AXA_HE160: 11ax 5GHz, HE160 channels
+ * @HOST_REGDMN_MODE_11AXA_HE80_80: 11ax 5GHz, HE80+80 channels
+ * @HOST_REGDMN_MODE_11BEG_EHT20: 11be 2.4GHz, EHT20 channels
+ * @HOST_REGDMN_MODE_11BEA_EHT20: 11be 5GHz, EHT20 channels
+ * @HOST_REGDMN_MODE_11BEG_EHT40PLUS: 11be 2.4GHz, EHT40+ channels
+ * @HOST_REGDMN_MODE_11BEG_EHT40MINUS: 11be 2.4GHz, EHT40- channels
+ * @HOST_REGDMN_MODE_11BEA_EHT40PLUS: 11be 5GHz, EHT40+ channels
+ * @HOST_REGDMN_MODE_11BEA_EHT40MINUS: 11be 5GHz, EHT40- channels
+ * @HOST_REGDMN_MODE_11BEA_EHT80: 11be 5GHz, EHT80 channels
+ * @HOST_REGDMN_MODE_11BEA_EHT160: 11be 5GHz, EHT160 channels
+ * @HOST_REGDMN_MODE_11BEA_EHT320: 11be 5GHz, EHT320 channels
+ */
+enum {
+	HOST_REGDMN_MODE_11A = 0x00000001,
+	HOST_REGDMN_MODE_TURBO = 0x00000002,
+	HOST_REGDMN_MODE_11B = 0x00000004,
+	HOST_REGDMN_MODE_PUREG = 0x00000008,
+	HOST_REGDMN_MODE_11G = 0x00000008,
+	HOST_REGDMN_MODE_108G = 0x00000020,
+	HOST_REGDMN_MODE_108A = 0x00000040,
+	HOST_REGDMN_MODE_11AC_VHT20_2G = 0x00000080,
+	HOST_REGDMN_MODE_XR = 0x00000100,
+	HOST_REGDMN_MODE_11A_HALF_RATE = 0x00000200,
+	HOST_REGDMN_MODE_11A_QUARTER_RATE = 0x00000400,
+	HOST_REGDMN_MODE_11NG_HT20 = 0x00000800,
+	HOST_REGDMN_MODE_11NA_HT20 = 0x00001000,
+	HOST_REGDMN_MODE_11NG_HT40PLUS = 0x00002000,
+	HOST_REGDMN_MODE_11NG_HT40MINUS = 0x00004000,
+	HOST_REGDMN_MODE_11NA_HT40PLUS = 0x00008000,
+	HOST_REGDMN_MODE_11NA_HT40MINUS = 0x00010000,
+	HOST_REGDMN_MODE_11AC_VHT20 = 0x00020000,
+	HOST_REGDMN_MODE_11AC_VHT40PLUS = 0x00040000,
+	HOST_REGDMN_MODE_11AC_VHT40MINUS = 0x00080000,
+	HOST_REGDMN_MODE_11AC_VHT80 = 0x00100000,
+	HOST_REGDMN_MODE_11AC_VHT160 = 0x00200000,
+	HOST_REGDMN_MODE_11AC_VHT80_80 = 0x00400000,
+	HOST_REGDMN_MODE_11AXG_HE20 = 0x00800000,
+	HOST_REGDMN_MODE_11AXA_HE20 = 0x01000000,
+	HOST_REGDMN_MODE_11AXG_HE40PLUS = 0x02000000,
+	HOST_REGDMN_MODE_11AXG_HE40MINUS = 0x04000000,
+	HOST_REGDMN_MODE_11AXA_HE40PLUS = 0x08000000,
+	HOST_REGDMN_MODE_11AXA_HE40MINUS = 0x10000000,
+	HOST_REGDMN_MODE_11AXA_HE80 = 0x20000000,
+	HOST_REGDMN_MODE_11AXA_HE160 = 0x40000000,
+	HOST_REGDMN_MODE_11AXA_HE80_80 = 0x80000000,
+#ifdef WLAN_FEATURE_11BE
+	HOST_REGDMN_MODE_11BEG_EHT20 = 0x0000000100000000,
+	HOST_REGDMN_MODE_11BEA_EHT20 = 0x0000000200000000,
+	HOST_REGDMN_MODE_11BEG_EHT40PLUS = 0x0000000400000000,
+	HOST_REGDMN_MODE_11BEG_EHT40MINUS = 0x0000000800000000,
+	HOST_REGDMN_MODE_11BEA_EHT40PLUS = 0x0000001000000000,
+	HOST_REGDMN_MODE_11BEA_EHT40MINUS = 0x0000002000000000,
+	HOST_REGDMN_MODE_11BEA_EHT80 = 0x0000004000000000,
+	HOST_REGDMN_MODE_11BEA_EHT160 = 0x0000008000000000,
+	HOST_REGDMN_MODE_11BEA_EHT320 = 0x0000010000000000,
+#endif
+	HOST_REGDMN_MODE_ALL = 0xffffffffffffffff
+};
+
+#define WIRELESS_11AX_MODES  (HOST_REGDMN_MODE_11AXG_HE20 \
+			      | HOST_REGDMN_MODE_11AXG_HE40PLUS \
+			      | HOST_REGDMN_MODE_11AXG_HE40MINUS \
+			      | HOST_REGDMN_MODE_11AXA_HE20 \
+			      | HOST_REGDMN_MODE_11AXA_HE40PLUS \
+			      | HOST_REGDMN_MODE_11AXA_HE40MINUS \
+			      | HOST_REGDMN_MODE_11AXA_HE80 \
+			      | HOST_REGDMN_MODE_11AXA_HE160 \
+			      | HOST_REGDMN_MODE_11AXA_HE80_80)
+
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_11BE_MODES  (HOST_REGDMN_MODE_11BEG_EHT20 \
+			      | HOST_REGDMN_MODE_11BEA_EHT20 \
+			      | HOST_REGDMN_MODE_11BEG_EHT40PLUS \
+			      | HOST_REGDMN_MODE_11BEG_EHT40MINUS \
+			      | HOST_REGDMN_MODE_11BEA_EHT40PLUS \
+			      | HOST_REGDMN_MODE_11BEA_EHT40MINUS \
+			      | HOST_REGDMN_MODE_11BEA_EHT80 \
+			      | HOST_REGDMN_MODE_11BEA_EHT160 \
+			      | HOST_REGDMN_MODE_11BEA_EHT320)
+#endif
+
+#define WIRELESS_11AC_MODES  (HOST_REGDMN_MODE_11AC_VHT20 \
+			      | HOST_REGDMN_MODE_11AC_VHT40PLUS \
+			      | HOST_REGDMN_MODE_11AC_VHT40MINUS \
+			      | HOST_REGDMN_MODE_11AC_VHT80 \
+			      | HOST_REGDMN_MODE_11AC_VHT160 \
+			      | HOST_REGDMN_MODE_11AC_VHT80_80)
+
+#define WIRELESS_11N_MODES   (HOST_REGDMN_MODE_11NG_HT20 \
+			      | HOST_REGDMN_MODE_11NA_HT20 \
+			      | HOST_REGDMN_MODE_11NG_HT40PLUS \
+			      | HOST_REGDMN_MODE_11NG_HT40MINUS \
+			      | HOST_REGDMN_MODE_11NA_HT40PLUS \
+			      | HOST_REGDMN_MODE_11NA_HT40MINUS)
+
+#define WIRELESS_11G_MODES   (HOST_REGDMN_MODE_PUREG \
+			      | HOST_REGDMN_MODE_11G \
+			      | HOST_REGDMN_MODE_108G)
+
+#define WIRELESS_11B_MODES   (HOST_REGDMN_MODE_11B)
+
+#define WIRELESS_11A_MODES   (HOST_REGDMN_MODE_11A \
+			      | HOST_REGDMN_MODE_TURBO \
+			      | HOST_REGDMN_MODE_108A \
+			      | HOST_REGDMN_MODE_11A_HALF_RATE \
+			      | HOST_REGDMN_MODE_11A_QUARTER_RATE)
+
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_20_MODES    (HOST_REGDMN_MODE_11A \
+			      | HOST_REGDMN_MODE_TURBO \
+			      | HOST_REGDMN_MODE_11B \
+			      | HOST_REGDMN_MODE_PUREG \
+			      | HOST_REGDMN_MODE_11G \
+			      | HOST_REGDMN_MODE_11AC_VHT20_2G \
+			      | HOST_REGDMN_MODE_11NG_HT20 \
+			      | HOST_REGDMN_MODE_11NA_HT20 \
+			      | HOST_REGDMN_MODE_11AC_VHT20 \
+			      | HOST_REGDMN_MODE_11AXG_HE20 \
+			      | HOST_REGDMN_MODE_11AXA_HE20 \
+			      | HOST_REGDMN_MODE_11BEA_EHT20 \
+			      | HOST_REGDMN_MODE_11BEG_EHT20)
+#else
+#define WIRELESS_20_MODES    (HOST_REGDMN_MODE_11A \
+			      | HOST_REGDMN_MODE_TURBO \
+			      | HOST_REGDMN_MODE_11B \
+			      | HOST_REGDMN_MODE_PUREG \
+			      | HOST_REGDMN_MODE_11G \
+			      | HOST_REGDMN_MODE_11AC_VHT20_2G \
+			      | HOST_REGDMN_MODE_11NG_HT20 \
+			      | HOST_REGDMN_MODE_11NA_HT20 \
+			      | HOST_REGDMN_MODE_11AC_VHT20 \
+			      | HOST_REGDMN_MODE_11AXG_HE20 \
+			      | HOST_REGDMN_MODE_11AXA_HE20)
+#endif
+
+#define WIRELESS_10_MODES   (HOST_REGDMN_MODE_11A_HALF_RATE)
+#define WIRELESS_5_MODES    (HOST_REGDMN_MODE_11A_QUARTER_RATE)
+
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_40_MODES    (HOST_REGDMN_MODE_11NG_HT40PLUS \
+			      | HOST_REGDMN_MODE_11NG_HT40MINUS \
+			      | HOST_REGDMN_MODE_11NA_HT40PLUS \
+			      | HOST_REGDMN_MODE_11NA_HT40MINUS \
+			      | HOST_REGDMN_MODE_11AC_VHT40PLUS \
+			      | HOST_REGDMN_MODE_11AC_VHT40MINUS \
+			      | HOST_REGDMN_MODE_11AXG_HE40PLUS \
+			      | HOST_REGDMN_MODE_11AXG_HE40MINUS \
+			      | HOST_REGDMN_MODE_11AXA_HE40PLUS \
+			      | HOST_REGDMN_MODE_11AXA_HE40MINUS \
+			      | HOST_REGDMN_MODE_11BEA_EHT40PLUS \
+			      | HOST_REGDMN_MODE_11BEA_EHT40MINUS \
+			      | HOST_REGDMN_MODE_11BEG_EHT40PLUS \
+			      | HOST_REGDMN_MODE_11BEG_EHT40MINUS)
+#else
+#define WIRELESS_40_MODES    (HOST_REGDMN_MODE_11NG_HT40PLUS \
+			      | HOST_REGDMN_MODE_11NG_HT40MINUS \
+			      | HOST_REGDMN_MODE_11NA_HT40PLUS \
+			      | HOST_REGDMN_MODE_11NA_HT40MINUS \
+			      | HOST_REGDMN_MODE_11AC_VHT40PLUS \
+			      | HOST_REGDMN_MODE_11AC_VHT40MINUS \
+			      | HOST_REGDMN_MODE_11AXG_HE40PLUS \
+			      | HOST_REGDMN_MODE_11AXG_HE40MINUS \
+			      | HOST_REGDMN_MODE_11AXA_HE40PLUS \
+			      | HOST_REGDMN_MODE_11AXA_HE40MINUS)
+#endif
+
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_80_MODES    (HOST_REGDMN_MODE_11AC_VHT80 \
+			      | HOST_REGDMN_MODE_11AXA_HE80 \
+			      | HOST_REGDMN_MODE_11BEA_EHT80)
+#else
+#define WIRELESS_80_MODES    (HOST_REGDMN_MODE_11AC_VHT80 \
+			      | HOST_REGDMN_MODE_11AXA_HE80)
+#endif
+
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_160_MODES   (HOST_REGDMN_MODE_11AC_VHT160 \
+			      | HOST_REGDMN_MODE_11AXA_HE160 \
+			      | HOST_REGDMN_MODE_11BEA_EHT160)
+#else
+#define WIRELESS_160_MODES   (HOST_REGDMN_MODE_11AC_VHT160 \
+			      | HOST_REGDMN_MODE_11AXA_HE160)
+#endif
+
+#define WIRELESS_80P80_MODES (HOST_REGDMN_MODE_11AC_VHT80_80 \
+			      | HOST_REGDMN_MODE_11AXA_HE80_80)
+
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_320_MODES (HOST_REGDMN_MODE_11BEA_EHT320)
+#endif
+
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_6G_MODES_11BE (HOST_REGDMN_MODE_11BEA_EHT20 \
+				| HOST_REGDMN_MODE_11BEA_EHT40PLUS \
+				| HOST_REGDMN_MODE_11BEA_EHT40MINUS \
+				| HOST_REGDMN_MODE_11BEA_EHT80 \
+				| HOST_REGDMN_MODE_11BEA_EHT160 \
+				| HOST_REGDMN_MODE_11BEA_EHT320)
+#else
+#define WIRELESS_6G_MODES_11BE 0
+#endif /* WLAN_FEATURE_11BE*/
+
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_6G_MODES (HOST_REGDMN_MODE_11AXA_HE20 \
+			   | HOST_REGDMN_MODE_11AXA_HE40PLUS \
+			   | HOST_REGDMN_MODE_11AXA_HE40MINUS \
+			   | HOST_REGDMN_MODE_11AXA_HE80 \
+			   | HOST_REGDMN_MODE_11AXA_HE160 \
+			   | HOST_REGDMN_MODE_11AXA_HE80_80 \
+			   | HOST_REGDMN_MODE_11BEA_EHT20 \
+			   | HOST_REGDMN_MODE_11BEA_EHT40PLUS \
+			   | HOST_REGDMN_MODE_11BEA_EHT40MINUS \
+			   | HOST_REGDMN_MODE_11BEA_EHT80 \
+			   | HOST_REGDMN_MODE_11BEA_EHT160 \
+			   | HOST_REGDMN_MODE_11BEA_EHT320)
+#else
+#define WIRELESS_6G_MODES (HOST_REGDMN_MODE_11AXA_HE20 \
+			   | HOST_REGDMN_MODE_11AXA_HE40PLUS \
+			   | HOST_REGDMN_MODE_11AXA_HE40MINUS \
+			   | HOST_REGDMN_MODE_11AXA_HE80 \
+			   | HOST_REGDMN_MODE_11AXA_HE160 \
+			   | HOST_REGDMN_MODE_11AXA_HE80_80)
+#endif
+
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_5G_MODES_11BE (HOST_REGDMN_MODE_11BEA_EHT20 \
+				| HOST_REGDMN_MODE_11BEA_EHT40PLUS \
+				| HOST_REGDMN_MODE_11BEA_EHT40MINUS \
+				| HOST_REGDMN_MODE_11BEA_EHT80 \
+				| HOST_REGDMN_MODE_11BEA_EHT160 \
+				| HOST_REGDMN_MODE_11BEA_EHT320)
+#else
+#define WIRELESS_5G_MODES_11BE 0
+#endif /* WLAN_FEATURE_11BE*/
+
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_5G_MODES (HOST_REGDMN_MODE_11BEA_EHT20 \
+			   | HOST_REGDMN_MODE_11BEA_EHT40PLUS \
+			   | HOST_REGDMN_MODE_11BEA_EHT40MINUS \
+			   | HOST_REGDMN_MODE_11BEA_EHT80 \
+			   | HOST_REGDMN_MODE_11BEA_EHT160 \
+			   | HOST_REGDMN_MODE_11BEA_EHT320 \
+			   | HOST_REGDMN_MODE_11AXA_HE20 \
+			   | HOST_REGDMN_MODE_11AXA_HE40PLUS \
+			   | HOST_REGDMN_MODE_11AXA_HE40MINUS \
+			   | HOST_REGDMN_MODE_11AXA_HE80 \
+			   | HOST_REGDMN_MODE_11AXA_HE160 \
+			   | HOST_REGDMN_MODE_11AXA_HE80_80 \
+			   | HOST_REGDMN_MODE_11AC_VHT20 \
+			   | HOST_REGDMN_MODE_11AC_VHT40PLUS \
+			   | HOST_REGDMN_MODE_11AC_VHT40MINUS \
+			   | HOST_REGDMN_MODE_11AC_VHT80 \
+			   | HOST_REGDMN_MODE_11AC_VHT160 \
+			   | HOST_REGDMN_MODE_11AC_VHT80_80 \
+			   | HOST_REGDMN_MODE_11NA_HT20 \
+			   | HOST_REGDMN_MODE_11NA_HT40PLUS \
+			   | HOST_REGDMN_MODE_11NA_HT40MINUS \
+			   | HOST_REGDMN_MODE_11A \
+			   | HOST_REGDMN_MODE_TURBO \
+			   | HOST_REGDMN_MODE_108A \
+			   | HOST_REGDMN_MODE_11A_HALF_RATE \
+			   | HOST_REGDMN_MODE_11A_QUARTER_RATE)
+#else
+#define WIRELESS_5G_MODES (HOST_REGDMN_MODE_11AXA_HE20 \
+			   | HOST_REGDMN_MODE_11AXA_HE40PLUS \
+			   | HOST_REGDMN_MODE_11AXA_HE40MINUS \
+			   | HOST_REGDMN_MODE_11AXA_HE80 \
+			   | HOST_REGDMN_MODE_11AXA_HE160 \
+			   | HOST_REGDMN_MODE_11AXA_HE80_80 \
+			   | HOST_REGDMN_MODE_11AC_VHT20 \
+			   | HOST_REGDMN_MODE_11AC_VHT40PLUS \
+			   | HOST_REGDMN_MODE_11AC_VHT40MINUS \
+			   | HOST_REGDMN_MODE_11AC_VHT80 \
+			   | HOST_REGDMN_MODE_11AC_VHT160 \
+			   | HOST_REGDMN_MODE_11AC_VHT80_80 \
+			   | HOST_REGDMN_MODE_11NA_HT20 \
+			   | HOST_REGDMN_MODE_11NA_HT40PLUS \
+			   | HOST_REGDMN_MODE_11NA_HT40MINUS \
+			   | HOST_REGDMN_MODE_11A \
+			   | HOST_REGDMN_MODE_TURBO \
+			   | HOST_REGDMN_MODE_108A \
+			   | HOST_REGDMN_MODE_11A_HALF_RATE \
+			   | HOST_REGDMN_MODE_11A_QUARTER_RATE)
+#endif
+
+#define WIRELESS_49G_MODES (HOST_REGDMN_MODE_11A \
+			    | HOST_REGDMN_MODE_11A_HALF_RATE \
+			    | HOST_REGDMN_MODE_11A_QUARTER_RATE)
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_2G_MODES_11BE (HOST_REGDMN_MODE_11BEG_EHT20 \
+				| HOST_REGDMN_MODE_11BEG_EHT40PLUS \
+				| HOST_REGDMN_MODE_11BEG_EHT40MINUS)
+#else
+#define WIRELESS_2G_MODES_11BE 0
+#endif /* WLAN_FEATURE_11BE*/
+
+#ifdef WLAN_FEATURE_11BE
+#define WIRELESS_2G_MODES (HOST_REGDMN_MODE_11BEG_EHT20 \
+			   | HOST_REGDMN_MODE_11BEG_EHT40PLUS \
+			   | HOST_REGDMN_MODE_11BEG_EHT40MINUS \
+			   | HOST_REGDMN_MODE_11AXG_HE20 \
+			   | HOST_REGDMN_MODE_11AXG_HE40PLUS \
+			   | HOST_REGDMN_MODE_11AXG_HE40MINUS \
+			   | HOST_REGDMN_MODE_11NG_HT20 \
+			   | HOST_REGDMN_MODE_11NG_HT40PLUS \
+			   | HOST_REGDMN_MODE_11NG_HT40MINUS \
+			   | HOST_REGDMN_MODE_PUREG \
+			   | HOST_REGDMN_MODE_11G \
+			   | HOST_REGDMN_MODE_108G \
+			   | HOST_REGDMN_MODE_11B)
+#else
+#define WIRELESS_2G_MODES (HOST_REGDMN_MODE_11AXG_HE20 \
+			   | HOST_REGDMN_MODE_11AXG_HE40PLUS \
+			   | HOST_REGDMN_MODE_11AXG_HE40MINUS \
+			   | HOST_REGDMN_MODE_11NG_HT20 \
+			   | HOST_REGDMN_MODE_11NG_HT40PLUS \
+			   | HOST_REGDMN_MODE_11NG_HT40MINUS \
+			   | HOST_REGDMN_MODE_PUREG \
+			   | HOST_REGDMN_MODE_11G \
+			   | HOST_REGDMN_MODE_108G \
+			   | HOST_REGDMN_MODE_11B)
+#endif
+
+#ifdef CONFIG_AFC_SUPPORT
+/* enum reg_afc_cmd_type - Type of AFC command sent to FW
+ * @REG_AFC_CMD_SERV_RESP_READY : Server response is ready
+ * @REG_AFC_CMD_RESET_AFC: Indicate the target to reset AFC
+ */
+enum reg_afc_cmd_type {
+	REG_AFC_CMD_SERV_RESP_READY = 1,
+	REG_AFC_CMD_RESET_AFC = 2,
+};
+
+/* enum reg_afc_serv_resp_format - Indicate the format in which afc_serv_format
+ * is written in FW memory
+ * @REG_AFC_SERV_RESP_FORMAT_JSON - Server response in JSON format
+ * @REG_AFC_SERV_RESP_FORMAT_BINARY - Server response in BINARY format
+ */
+enum reg_afc_serv_resp_format {
+	REG_AFC_SERV_RESP_FORMAT_JSON = 0,
+	REG_AFC_SERV_RESP_FORMAT_BINARY = 1,
+};
+
+/**
+ * struct reg_afc_resp_rx_ind_info - regulatory AFC indication info
+ * @cmd_type: Type of AFC command send to FW
+ * @serv_resp_format: AFC server response format
+ */
+struct reg_afc_resp_rx_ind_info {
+	enum reg_afc_cmd_type cmd_type;
+	enum reg_afc_serv_resp_format serv_resp_format;
+};
+
+/**
+ * afc_req_rx_evt_handler() - Function prototype of AFC request received event
+ * handler
+ * @pdev: Pointer to pdev
+ * @afc_par_req: Pointer to AFC partial request
+ * @arg: Pointer to void (opaque) argument object
+ *
+ * Return: void
+ */
+typedef void (*afc_req_rx_evt_handler)(struct wlan_objmgr_pdev *pdev,
+				       struct wlan_afc_host_partial_request *afc_par_req,
+				       void *arg);
+
+/**
+ * afc_power_tx_evt_handler() - Function prototype of AFC power event sent
+ * handler
+ * @pdev: Pointer to pdev
+ * @power_info: Pointer to AFC power event data
+ * @arg: Pointer to void (opaque) argument object
+ *
+ * Return: void
+ */
+typedef void
+(*afc_power_tx_evt_handler)(struct wlan_objmgr_pdev *pdev,
+			    struct reg_fw_afc_power_event *power_info,
+			    void *arg);
+#endif
+
+/**
+ * reg_is_chan_enum_invalid() - Checks if the channel enum is invalid or not.
+ * @chan_enum: Input channel enum.
+ *
+ * Return: true if channel enum is invalid else false.
+ */
+static inline bool reg_is_chan_enum_invalid(enum channel_enum chan_enum)
+{
+	return chan_enum >= INVALID_CHANNEL;
+}
 #endif

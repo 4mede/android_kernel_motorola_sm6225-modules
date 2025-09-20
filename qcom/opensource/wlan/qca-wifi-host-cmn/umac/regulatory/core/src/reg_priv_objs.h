@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- *
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -26,6 +26,10 @@
 #define __REG_PRIV_OBJS_H
 
 #include <wlan_scan_public_structs.h>
+#ifdef CONFIG_AFC_SUPPORT
+#include "reg_services_common.h"
+#endif
+#include <wlan_objmgr_psoc_obj.h>
 
 #define reg_alert(params...) \
 	QDF_TRACE_FATAL(QDF_MODULE_ID_REGULATORY, params)
@@ -81,6 +85,56 @@ struct chan_change_cbk_entry {
 };
 
 /**
+ * typedef reg_ctry_change_callback() - Regulatory country change callback
+ * @mac_ctx: Pointer to mac context
+ * @vdev_id: vdev ID
+ */
+typedef void (*reg_ctry_change_callback)(
+		uint8_t vdev_id);
+
+/**
+ * struct ctry_change_cbk_entry - Country change callback entry
+ * @cbk: Callback
+ */
+struct ctry_change_cbk_entry {
+	reg_ctry_change_callback cbk;
+};
+
+/**
+ * typedef reg_is_chan_connected_callback() - Regulatory callback to check if
+ *                                            channel is connected
+ * @psoc: Pointer to psoc object
+ * @opmode: vdev operating mode
+ * @freq: Frequency
+ */
+typedef bool (*reg_is_chan_connected_callback)(
+		struct wlan_objmgr_psoc *psoc,
+		enum QDF_OPMODE opmode,
+		uint32_t      freq);
+
+/* struct is_chan_connected_cbk_entry - Is channel connected callback entry
+ * @cbk: Callback
+ */
+struct is_chan_connected_cbk_entry {
+	reg_is_chan_connected_callback cbk;
+};
+
+#ifdef CONFIG_REG_CLIENT
+#define MAX_INDOOR_LIST_SIZE 3
+
+/**
+ * struct indoor_concurrency_list - Active indoor station list
+ * @vdev_id: vdev ID
+ * @freq: frequency of the interface
+ * @chan_range: Range of channels based on bandwidth
+ */
+struct indoor_concurrency_list {
+	uint8_t vdev_id;
+	uint32_t freq;
+	const struct bonded_channel_freq *chan_range;
+};
+#endif
+/**
  * struct wlan_regulatory_psoc_priv_obj - wlan regulatory psoc private object
  * @mas_chan_params: master channel parameters list
  * @chan_list_recvd: whether channel list has been received
@@ -98,6 +152,7 @@ struct chan_change_cbk_entry {
  * @six_ghz_supported: whether 6ghz is supported
  * @five_dot_nine_ghz_supported: whether 5.9ghz is supported
  *	(service bit WMI_SERVICE_5_DOT_9GHZ_SUPPORT)
+ * @conn_chan_cb:
  * @enable_5dot9_ghz_chan_in_master_mode: 5.9 GHz channel support in
  *	master mode (ini fcc_5dot9_ghz_chan_in_master_mode)
  * @retain_nol_across_regdmn_update: Retain the NOL list across the regdomain
@@ -109,6 +164,25 @@ struct chan_change_cbk_entry {
  * supported
  * @is_upper_6g_edge_ch_disabled: whether upper 6ghz edge channel 7115MHz is
  * disabled
+ * @ch_avoid_ext_ind: whether need to update extended channel frequency list
+ * @avoid_freq_ext_list: the extended avoid channel frequency list
+ * @coex_unsafe_chan_nb_user_prefer: Honor coex unsafe chan cmd from firmware or
+ * userspace
+ * @coex_unsafe_chan_reg_disable: To disable reg channels for received coex
+ * unsafe channels list
+ * @reg_afc_dev_type: AFC device deployment type from BDF
+ * @reg_is_eirp_support_preferred: Whether target prefers EIRP format for
+ * WMI Set TPC command
+ * @enable_6ghz_sp_pwrmode_supp: Whether enable target Standard Power mode
+ *	support
+ * @afc_disable_timer_check: Whether disable target AFC timer check
+ * @afc_disable_request_id_check: Whether disable target AFC request id check
+ * @is_afc_reg_noaction: Whether no action to AFC power event
+ * @sta_sap_scc_on_indoor_channel: Value of sap+sta scc on indoor support
+ * @fcc_rules_ptr : Value of fcc channel frequency and tx_power list received
+ * @p2p_indoor_ch_support: Allow P2P GO in indoor channels
+ * from firmware
+ * @set_fcc_channel: Flag to set fcc channels
  */
 struct wlan_regulatory_psoc_priv_obj {
 	struct mas_chan_params mas_chan_params[PSOC_MAX_PHY_REG_CAP];
@@ -148,7 +222,9 @@ struct wlan_regulatory_psoc_priv_obj {
 	bool user_ctry_priority;
 	bool user_ctry_set;
 	struct chan_change_cbk_entry cbk_list[REG_MAX_CHAN_CHANGE_CBKS];
+	struct is_chan_connected_cbk_entry conn_chan_cb;
 	uint8_t num_chan_change_cbks;
+	struct ctry_change_cbk_entry cc_cbk;
 	uint8_t ch_avoid_ind;
 	struct unsafe_ch_list unsafe_chan_list;
 	struct ch_avoid_ind_type avoid_freq_list;
@@ -166,10 +242,30 @@ struct wlan_regulatory_psoc_priv_obj {
 	uint8_t domain_code_6g_client[REG_CURRENT_MAX_AP_TYPE][REG_MAX_CLIENT_TYPE];
 #endif
 	bool is_ext_tpc_supported;
-#if defined(CONFIG_BAND_6GHZ) && defined(CONFIG_REG_CLIENT)
+#if defined(CONFIG_BAND_6GHZ)
 	bool is_lower_6g_edge_ch_supported;
 	bool is_upper_6g_edge_ch_disabled;
 #endif
+#ifdef FEATURE_WLAN_CH_AVOID_EXT
+	bool ch_avoid_ext_ind;
+	struct ch_avoid_ind_type avoid_freq_ext_list;
+	bool coex_unsafe_chan_nb_user_prefer;
+	bool coex_unsafe_chan_reg_disable;
+#endif
+#ifdef CONFIG_AFC_SUPPORT
+	enum reg_afc_dev_deploy_type reg_afc_dev_type;
+	bool reg_is_eirp_support_preferred;
+	bool enable_6ghz_sp_pwrmode_supp;
+	bool afc_disable_timer_check;
+	bool afc_disable_request_id_check;
+	bool is_afc_reg_noaction;
+#endif
+	bool sta_sap_scc_on_indoor_channel;
+	bool p2p_indoor_ch_support;
+#ifdef CONFIG_REG_CLIENT
+	struct cur_fcc_rule fcc_rules_ptr[MAX_NUM_FCC_RULES];
+#endif
+	bool set_fcc_channel;
 };
 
 /**
@@ -178,20 +274,53 @@ struct wlan_regulatory_psoc_priv_obj {
  * @secondary_cur_chan_list: secondary current channel list, for concurrency
  * situations
  * @mas_chan_list: master channel list
+ * from the firmware.
  * @is_6g_channel_list_populated: indicates the channel lists are populated
  * @mas_chan_list_6g_ap: master channel list for 6G AP, includes all power types
  * @mas_chan_list_6g_client: master channel list for 6G client, includes
  *	all power types
+ * @super_chan_list: 6G super channel list that includes the information of
+ * all 6G power modes for every 6G channel
  * @band_capability: bitmap of bands enabled, using enum reg_wifi_band as the
  *	bit position value
  * @reg_6g_superid: 6Ghz super domain id
  * @pdev_opened: whether pdev has been opened by application
  * @reg_cur_6g_ap_pwr_type: 6G AP type ie VLP/SP/LPI.
  * @reg_cur_6g_client_mobility_type: 6G client type ie Default/Subordinate.
+ * @reg_target_client_type: 6 GHz client type received from target. The Client
+ *	type can be Default/Subordinate.
  * @reg_rnr_tpe_usable: Indicates whether RNR IE is applicable for current reg
  * domain.
  * @reg_unspecified_ap_usable: Indicates if the AP type mentioned is not part of
  * 802.11 standard.
+ * @max_phymode: The maximum phymode supported by the device and regulatory.
+ * @max_chwidth: The maximum bandwidth corresponding to the maximum phymode.
+ * @avoid_chan_ext_list: the extended avoid frequency list.
+ * @afc_cb_lock: The spinlock to synchronize afc callbacks
+ * @afc_cb_obj: The object containing the callback function and opaque argument
+ * @afc_pow_evt_cb_obj: The object containing the callback function and opaque
+ * argument for the AFC power event
+ * @afc_request_id: The last AFC request id received from FW/halphy
+ * @is_6g_afc_power_event_received: indicates if the AFC power event is
+ * received
+ * @is_6g_afc_expiry_event_received: indicates if the AFC exipiry event is
+ * received
+ * @afc_chan_list: Intersection of AFC master and Standard power channel list
+ * @mas_chan_list_6g_afc: AFC master channel list constructed from the AFC
+ * server response.
+ * @power_info: pointer to AFC power information received from the AFC event
+ * sent by the target
+ * @is_reg_noaction_on_afc_pwr_evt: indicates whether regulatory needs to
+ * take action when AFC Power event is received
+ * @reg_6g_thresh_priority_freq: All frequencies greater or equal will be given
+ * priority during channel selection by upper layer
+ * @reg_afc_dev_deployment_type: AFC device deployment type from BDF
+ * @sta_sap_scc_on_indoor_channel: Value of sap+sta scc on indoor support
+ * @indoor_concurrency_list: List of current indoor station interfaces
+ * @p2p_indoor_ch_support: Allow P2P GO in indoor channels
+ * @fcc_rules_ptr : Value of fcc channel frequency and tx_power list received
+ * from firmware
+ * @keep_6ghz_sta_cli_connection: Keep current STA/P2P client connection
  */
 struct wlan_regulatory_pdev_priv_obj {
 	struct regulatory_channel cur_chan_list[NUM_CHANNELS];
@@ -203,6 +332,7 @@ struct wlan_regulatory_pdev_priv_obj {
 	bool is_6g_channel_list_populated;
 	struct regulatory_channel mas_chan_list_6g_ap[REG_CURRENT_MAX_AP_TYPE][NUM_6GHZ_CHANNELS];
 	struct regulatory_channel mas_chan_list_6g_client[REG_CURRENT_MAX_AP_TYPE][REG_MAX_CLIENT_TYPE][NUM_6GHZ_CHANNELS];
+	struct super_chan_info super_chan_list[NUM_6GHZ_CHANNELS];
 #endif
 #ifdef DISABLE_CHANNEL_LIST
 	struct regulatory_channel cache_disable_chan_list[NUM_CHANNELS];
@@ -231,7 +361,7 @@ struct wlan_regulatory_pdev_priv_obj {
 	uint32_t band_capability;
 	bool indoor_chan_enabled;
 	bool en_chan_144;
-	uint32_t wireless_modes;
+	uint64_t wireless_modes;
 	struct ch_avoid_ind_type freq_avoid_list;
 	bool force_ssc_disable_indoor_channel;
 	bool sap_state;
@@ -242,9 +372,38 @@ struct wlan_regulatory_pdev_priv_obj {
 #if defined(CONFIG_BAND_6GHZ)
 	enum reg_6g_ap_type reg_cur_6g_ap_pwr_type;
 	enum reg_6g_client_type reg_cur_6g_client_mobility_type;
+	enum reg_6g_client_type reg_target_client_type;
 	bool reg_rnr_tpe_usable;
 	bool reg_unspecified_ap_usable;
+	qdf_freq_t reg_6g_thresh_priority_freq;
 #endif
+#ifdef CONFIG_HOST_FIND_CHAN
+	enum reg_phymode max_phymode;
+	enum phy_ch_width max_chwidth;
+#endif
+#ifdef FEATURE_WLAN_CH_AVOID_EXT
+	avoid_ch_ext_list avoid_chan_ext_list;
+#endif
+#ifdef CONFIG_AFC_SUPPORT
+	qdf_spinlock_t afc_cb_lock;
+	struct afc_cb_handler afc_cb_obj;
+	struct afc_pow_evt_cb_handler afc_pow_evt_cb_obj;
+	uint64_t afc_request_id;
+	bool is_6g_afc_power_event_received;
+	bool is_6g_afc_expiry_event_received;
+	struct regulatory_channel afc_chan_list[NUM_6GHZ_CHANNELS];
+	struct regulatory_channel mas_chan_list_6g_afc[NUM_6GHZ_CHANNELS];
+	struct reg_fw_afc_power_event *power_info;
+	bool is_reg_noaction_on_afc_pwr_evt;
+	enum reg_afc_dev_deploy_type reg_afc_dev_deployment_type;
+#endif
+	bool sta_sap_scc_on_indoor_channel;
+	bool p2p_indoor_ch_support;
+#ifdef CONFIG_REG_CLIENT
+	struct cur_fcc_rule fcc_rules_ptr[MAX_NUM_FCC_RULES];
+	struct indoor_concurrency_list indoor_list[MAX_INDOOR_LIST_SIZE];
+#endif
+	bool keep_6ghz_sta_cli_connection;
 };
 
 /**
@@ -316,4 +475,20 @@ QDF_STATUS wlan_regulatory_pdev_obj_created_notification(
  */
 QDF_STATUS wlan_regulatory_pdev_obj_destroyed_notification(
 		struct wlan_objmgr_pdev *pdev, void *arg_list);
+
+#ifdef CONFIG_AFC_SUPPORT
+/**
+ * reg_free_afc_pwr_info() - Free the AFC power information object
+ * @pdev_priv_obj: Pointer to pdev_priv_obj
+ *
+ * Return: void
+ */
+void
+reg_free_afc_pwr_info(struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj);
+#else
+static inline void
+reg_free_afc_pwr_info(struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj)
+{
+}
+#endif
 #endif

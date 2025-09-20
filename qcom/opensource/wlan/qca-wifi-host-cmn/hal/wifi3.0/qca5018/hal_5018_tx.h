@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -64,7 +65,7 @@ static void hal_tx_set_dscp_tid_map_5018(struct hal_soc *soc,
 	uint32_t value = 0, regval;
 	uint8_t val[DSCP_TID_TABLE_SIZE], cnt = 0;
 
-	if (id >= HAL_MAX_HW_DSCP_TID_V2_MAPS)
+	if (id >= HAL_MAX_HW_DSCP_TID_MAPS_11AX)
 		return;
 
 	cmn_reg_addr = HWIO_TCL_R0_CONS_RING_CMN_CTRL_REG_ADDR(
@@ -81,7 +82,7 @@ static void hal_tx_set_dscp_tid_map_5018(struct hal_soc *soc,
 
 	HAL_REG_WRITE(soc, cmn_reg_addr, regval);
 
-	/* Write 8 (24 bits) DSCP-TID mappings in each interation */
+	/* Write 8 (24 bits) DSCP-TID mappings in each iteration */
 	for (i = 0; i < 64; i += 8) {
 		value = (map[i] |
 			(map[i + 1] << 0x3) |

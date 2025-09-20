@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -57,6 +58,10 @@
 #define QDF_RET_IP NULL
 #endif /* __KERNEL__ */
 #include <qdf_status.h>
+#if defined(__ANDROID_COMMON_KERNEL__) && \
+	(LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)) && defined(MSM_PLATFORM)
+#include <linux/qcom-iommu-util.h>
+#endif
 
 #if IS_ENABLED(CONFIG_ARM_SMMU)
 #include <pld_common.h>
@@ -82,7 +87,7 @@ typedef struct mempool_elem {
  * @mem_size: Total size of the pool in bytes
  * @free_list: free pool list
  * @lock: spinlock object
- * @max_elem: Maximum number of elements in tha pool
+ * @max_elem: Maximum number of elements in the pool
  * @free_cnt: Number of free elements available
  */
 typedef struct __qdf_mempool_ctxt {
@@ -98,6 +103,7 @@ typedef struct __qdf_mempool_ctxt {
 	u_int32_t free_cnt;
 } __qdf_mempool_ctxt_t;
 
+typedef struct kmem_cache *qdf_kmem_cache_t;
 #endif /* __KERNEL__ */
 
 #define __page_size ((size_t)PAGE_SIZE)
@@ -145,7 +151,7 @@ enum dma_data_direction __qdf_dma_dir_to_os(qdf_dma_dir_t qdf_dir)
  * @buf: pointer to memory to be dma mapped
  * @dir: DMA map direction
  * @nbytes: number of bytes to be mapped.
- * @phy_addr: ponter to recive physical address.
+ * @phy_addr: pointer to receive physical address.
  *
  * Return: success/failure
  */
@@ -206,6 +212,11 @@ int __qdf_mempool_init(qdf_device_t osdev, __qdf_mempool_t *pool, int pool_cnt,
 void __qdf_mempool_destroy(qdf_device_t osdev, __qdf_mempool_t pool);
 void *__qdf_mempool_alloc(qdf_device_t osdev, __qdf_mempool_t pool);
 void __qdf_mempool_free(qdf_device_t osdev, __qdf_mempool_t pool, void *buf);
+qdf_kmem_cache_t __qdf_kmem_cache_create(const char *cache_name,
+					 qdf_size_t size);
+void __qdf_kmem_cache_destroy(qdf_kmem_cache_t cache);
+void* __qdf_kmem_cache_alloc(qdf_kmem_cache_t cache);
+void __qdf_kmem_cache_free(qdf_kmem_cache_t cache, void *node);
 #define QDF_RET_IP ((void *)_RET_IP_)
 
 #define __qdf_mempool_elem_size(_pool) ((_pool)->elem_size)
@@ -223,6 +234,154 @@ static inline bool __qdf_mem_smmu_s1_enabled(qdf_device_t osdev)
 }
 
 #if IS_ENABLED(CONFIG_ARM_SMMU) && defined(ENABLE_SMMU_S1_TRANSLATION)
+/*
+ * typedef __qdf_iommu_domain_t: abstraction for struct iommu_domain
+ */
+typedef struct iommu_domain __qdf_iommu_domain_t;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0))
+#if IS_ENABLED(CONFIG_QCOM_IOMMU_UTIL)
+/**
+ * __qdf_iommu_attr_to_os() - Convert qdf iommu attribute to OS mapping
+ *			      configurations bitmap
+ * @attr: QDF iommu attribute
+ *
+ * Return: IOMMU mapping configuration bitmaps
+ */
+static inline int __qdf_iommu_attr_to_os(enum qdf_iommu_attr attr)
+{
+	switch (attr) {
+	case QDF_DOMAIN_ATTR_S1_BYPASS:
+		return QCOM_IOMMU_MAPPING_CONF_S1_BYPASS;
+	case QDF_DOMAIN_ATTR_ATOMIC:
+		return QCOM_IOMMU_MAPPING_CONF_ATOMIC;
+	case QDF_DOMAIN_ATTR_FAST:
+		return QCOM_IOMMU_MAPPING_CONF_FAST;
+	default:
+		return -EINVAL;
+	}
+}
+
+/**
+ * __qdf_iommu_domain_get_attr() - API to get iommu domain attributes
+ *
+ * @domain: iommu domain
+ * @attr: iommu attribute
+ * @data: data pointer
+ *
+ * Return: 0 for success, and negative values otherwise
+ */
+static inline int
+__qdf_iommu_domain_get_attr(__qdf_iommu_domain_t *domain,
+			    enum qdf_iommu_attr attr, void *data)
+{
+	int mapping_config;
+	int mapping_bitmap;
+	int *value;
+
+	mapping_bitmap = __qdf_iommu_attr_to_os(attr);
+	if (mapping_bitmap < 0)
+		return -EINVAL;
+
+	mapping_config = qcom_iommu_get_mappings_configuration(domain);
+	if (mapping_config < 0)
+		return -EINVAL;
+
+	value = data;
+	*value = (mapping_config & mapping_bitmap) ? 1 : 0;
+
+	return 0;
+}
+#else /* !CONFIG_QCOM_IOMMU_UTIL */
+static inline int
+__qdf_iommu_domain_get_attr(__qdf_iommu_domain_t *domain,
+			    enum qdf_iommu_attr attr, void *data)
+{
+	return -ENOTSUPP;
+}
+#endif /* CONFIG_QCOM_IOMMU_UTIL */
+#else
+/**
+ * __qdf_iommu_attr_to_os() - Convert qdf iommu attribute to OS specific enum
+ * @attr: QDF iommu attribute
+ *
+ * Return: enum iommu_attr
+ */
+static inline
+enum iommu_attr __qdf_iommu_attr_to_os(enum qdf_iommu_attr attr)
+{
+	switch (attr) {
+	case QDF_DOMAIN_ATTR_GEOMETRY:
+		return DOMAIN_ATTR_GEOMETRY;
+	case QDF_DOMAIN_ATTR_PAGING:
+		return DOMAIN_ATTR_PAGING;
+	case QDF_DOMAIN_ATTR_WINDOWS:
+		return DOMAIN_ATTR_WINDOWS;
+	case QDF_DOMAIN_ATTR_FSL_PAMU_STASH:
+		return DOMAIN_ATTR_FSL_PAMU_STASH;
+	case QDF_DOMAIN_ATTR_FSL_PAMU_ENABLE:
+		return DOMAIN_ATTR_FSL_PAMU_ENABLE;
+	case QDF_DOMAIN_ATTR_FSL_PAMUV1:
+		return DOMAIN_ATTR_FSL_PAMUV1;
+	case QDF_DOMAIN_ATTR_NESTING:
+		return DOMAIN_ATTR_NESTING;
+	case QDF_DOMAIN_ATTR_DMA_USE_FLUSH_QUEUE:
+		return DOMAIN_ATTR_DMA_USE_FLUSH_QUEUE;
+	case QDF_DOMAIN_ATTR_CONTEXT_BANK:
+		return DOMAIN_ATTR_CONTEXT_BANK;
+	case QDF_DOMAIN_ATTR_NON_FATAL_FAULTS:
+		return DOMAIN_ATTR_NON_FATAL_FAULTS;
+	case QDF_DOMAIN_ATTR_S1_BYPASS:
+		return DOMAIN_ATTR_S1_BYPASS;
+	case QDF_DOMAIN_ATTR_ATOMIC:
+		return DOMAIN_ATTR_ATOMIC;
+	case QDF_DOMAIN_ATTR_SECURE_VMID:
+		return DOMAIN_ATTR_SECURE_VMID;
+	case QDF_DOMAIN_ATTR_FAST:
+		return DOMAIN_ATTR_FAST;
+	case QDF_DOMAIN_ATTR_PGTBL_INFO:
+		return DOMAIN_ATTR_PGTBL_INFO;
+	case QDF_DOMAIN_ATTR_USE_UPSTREAM_HINT:
+		return DOMAIN_ATTR_USE_UPSTREAM_HINT;
+	case QDF_DOMAIN_ATTR_EARLY_MAP:
+		return DOMAIN_ATTR_EARLY_MAP;
+	case QDF_DOMAIN_ATTR_PAGE_TABLE_IS_COHERENT:
+		return DOMAIN_ATTR_PAGE_TABLE_IS_COHERENT;
+	case QDF_DOMAIN_ATTR_PAGE_TABLE_FORCE_COHERENT:
+		return DOMAIN_ATTR_PAGE_TABLE_FORCE_COHERENT;
+	case QDF_DOMAIN_ATTR_USE_LLC_NWA:
+		return DOMAIN_ATTR_USE_LLC_NWA;
+	case QDF_DOMAIN_ATTR_SPLIT_TABLES:
+		return DOMAIN_ATTR_SPLIT_TABLES;
+	case QDF_DOMAIN_ATTR_FAULT_MODEL_NO_CFRE:
+		return DOMAIN_ATTR_FAULT_MODEL_NO_CFRE;
+	case QDF_DOMAIN_ATTR_FAULT_MODEL_NO_STALL:
+		return DOMAIN_ATTR_FAULT_MODEL_NO_STALL;
+	case QDF_DOMAIN_ATTR_FAULT_MODEL_HUPCF:
+		return DOMAIN_ATTR_FAULT_MODEL_HUPCF;
+	default:
+		return DOMAIN_ATTR_EXTENDED_MAX;
+	}
+}
+
+/**
+ * __qdf_iommu_domain_get_attr() - API to get iommu domain attributes
+ *
+ * @domain: iommu domain
+ * @attr: iommu attribute
+ * @data: data pointer
+ *
+ * Return: iommu domain attr
+ */
+static inline int
+__qdf_iommu_domain_get_attr(__qdf_iommu_domain_t *domain,
+			    enum qdf_iommu_attr attr, void *data)
+{
+	return iommu_domain_get_attr(domain, __qdf_iommu_attr_to_os(attr),
+				     data);
+}
+#endif
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
 /**
  * __qdf_dev_get_domain() - get iommu domain from osdev
@@ -283,7 +442,7 @@ __qdf_mem_paddr_from_dmaaddr(qdf_device_t osdev,
 
 /**
  * __qdf_os_mem_dma_get_sgtable() - Returns DMA memory scatter gather table
- * @dev: device instace
+ * @dev: device instance
  * @sgt: scatter gather table pointer
  * @cpu_addr: HLOS virtual address
  * @dma_addr: dma/iova
@@ -454,6 +613,7 @@ __qdf_mem_set_dma_pa(qdf_device_t osdev,
 	mem_info->pa = dma_pa;
 }
 
+
 /**
  * __qdf_mem_alloc_consistent() - allocates consistent qdf memory
  * @osdev: OS device handle
@@ -494,6 +654,54 @@ void *__qdf_mem_malloc(qdf_size_t size, const char *func, uint32_t line);
  * Return: None
  */
 void __qdf_mem_free(void *ptr);
+
+/**
+ * __qdf_mem_valloc() - QDF virtual memory allocation API
+ * @size: Number of bytes of virtual memory to allocate.
+ * @func: Caller function name
+ * @line: Line number
+ *
+ * Return: A valid memory location on success, or NULL on failure
+ */
+void *__qdf_mem_valloc(size_t size, const char *func, uint32_t line);
+
+/**
+ * __qdf_mem_vfree() - QDF API to free virtual memory
+ * @ptr: Pointer to the virtual memory to free
+ *
+ * Return: None
+ */
+void __qdf_mem_vfree(void *ptr);
+
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+/**
+ * __qdf_untracked_mem_malloc() - allocates non-QDF memory
+ * @size: Number of bytes of memory to allocate.
+ *
+ * @func: Function name of the call site
+ * @line: line number of the call site
+ *
+ * This function will dynamically allocate the specified number of bytes of
+ * memory. Memory allocated is not tracked by qdf memory debug framework.
+ *
+ * Return:
+ * Upon successful allocation, returns a non-NULL pointer to the allocated
+ * memory.  If this function is unable to allocate the amount of memory
+ * specified (for any reason) it returns NULL.
+ */
+void *__qdf_untracked_mem_malloc(qdf_size_t size, const char *func,
+				 uint32_t line);
+
+/**
+ * __qdf_untracked_mem_free() - free non-QDF memory
+ * @ptr: Pointer to the starting address of the memory to be freed.
+ *
+ * This function will free the memory pointed to by 'ptr'.
+ * Return: None
+ */
+
+void __qdf_untracked_mem_free(void *ptr);
+#endif
 
 /**
  * __qdf_mem_free_consistent() - free consistent qdf memory

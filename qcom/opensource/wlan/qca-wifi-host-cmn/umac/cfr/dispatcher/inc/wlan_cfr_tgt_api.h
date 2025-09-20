@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -34,7 +35,7 @@
  *
  * Return: success/failure of init
  */
-int tgt_cfr_init_pdev(struct wlan_objmgr_pdev *pdev);
+QDF_STATUS tgt_cfr_init_pdev(struct wlan_objmgr_pdev *pdev);
 
 /**
  * tgt_cfr_deinit_pdev() - API that de-registers CFR to handlers.
@@ -42,7 +43,7 @@ int tgt_cfr_init_pdev(struct wlan_objmgr_pdev *pdev);
  *
  * Return: success/failure of de-init
  */
-int tgt_cfr_deinit_pdev(struct wlan_objmgr_pdev *pdev);
+QDF_STATUS tgt_cfr_deinit_pdev(struct wlan_objmgr_pdev *pdev);
 
 /**
  * tgt_cfr_get_target_type() - API to determine target type.
@@ -73,6 +74,15 @@ int tgt_cfr_start_capture(struct wlan_objmgr_pdev *pdev,
  */
 int tgt_cfr_stop_capture(struct wlan_objmgr_pdev *pdev,
 			 struct wlan_objmgr_peer *peer);
+
+/**
+ * tgt_cfr_validate_period() - API to validate cfr period configured by user
+ * @psoc: pointer to the psoc object
+ * @period: period value to validate
+ *
+ * Return: success/failure of periodicity validation
+ */
+int tgt_cfr_validate_period(struct wlan_objmgr_psoc *psoc, u_int32_t period);
 
 /**
  * tgt_cfr_enable_cfr_timer() - API to enable cfr timer
@@ -113,6 +123,16 @@ QDF_STATUS
 tgt_cfr_mo_marking_support_set(struct wlan_objmgr_psoc *psoc, uint32_t value);
 
 /**
+ * tgt_cfr_aoa_for_rcc_support_set() - API to set AoA for RCC support
+ * @psoc: pointer to psoc_object
+ * @value: value to be set
+ *
+ * Return: success/failure
+ */
+QDF_STATUS
+tgt_cfr_aoa_for_rcc_support_set(struct wlan_objmgr_psoc *psoc, uint32_t value);
+
+/**
  * tgt_cfr_info_send() - API to send cfr info
  * @pdev: pointer to pdev_object
  * @head: pointer to cfr info head
@@ -134,7 +154,7 @@ uint32_t tgt_cfr_info_send(struct wlan_objmgr_pdev *pdev, void *head,
  * @pdev: pointer to pdev_object
  * @rcc_param: rcc configurations
  *
- * Return: succcess / failure
+ * Return: success / failure
  */
 QDF_STATUS tgt_cfr_config_rcc(struct wlan_objmgr_pdev *pdev,
 			      struct cfr_rcc_param *rcc_param);

@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -28,13 +29,14 @@
 #include <qdf_types.h>
 #include <i_qdf_mem.h>
 #include <i_qdf_trace.h>
+#include <qdf_atomic.h>
 
 #define QDF_CACHE_LINE_SZ __qdf_cache_line_sz
 
 /**
  * qdf_align() - align to the given size.
  * @a: input that needs to be aligned.
- * @align_size: boundary on which 'a' has to be alinged.
+ * @align_size: boundary on which 'a' has to be aligned.
  *
  * Return: aligned value.
  */
@@ -93,6 +95,14 @@ void qdf_mem_init(void);
  */
 void qdf_mem_exit(void);
 
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+#define qdf_untracked_mem_malloc(size) \
+	__qdf_untracked_mem_malloc(size, __func__, __LINE__)
+
+#define qdf_untracked_mem_free(ptr) \
+	__qdf_untracked_mem_free(ptr)
+#endif
+
 #define QDF_MEM_FUNC_NAME_SIZE 48
 
 #ifdef MEMORY_DEBUG
@@ -102,6 +112,49 @@ void qdf_mem_exit(void);
  * Return: value of mem_debug_disabled qdf module argument
  */
 bool qdf_mem_debug_config_get(void);
+
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+/**
+ * qdf_mem_debug_disabled_set() - Set mem_debug_disabled
+ * @str_value: value of the module param
+ *
+ * This function will set qdf module param mem_debug_disabled
+ *
+ * Return: QDF_STATUS_SUCCESS on Success
+ */
+QDF_STATUS qdf_mem_debug_disabled_config_set(const char *str_value);
+#endif
+
+/**
+ * qdf_mem_malloc_atomic_debug() - debug version of QDF memory allocation API
+ * @size: Number of bytes of memory to allocate.
+ * @func: Function name of the call site
+ * @line: Line number of the call site
+ * @caller: Address of the caller function
+ *
+ * This function will dynamicallly allocate the specified number of bytes of
+ * memory and add it to the qdf tracking list to check for memory leaks and
+ * corruptions
+ *
+ * Return: A valid memory location on success, or NULL on failure
+ */
+void *qdf_mem_malloc_atomic_debug(size_t size, const char *func,
+				  uint32_t line, void *caller);
+
+/**
+ * qdf_mem_malloc_atomic_debug_fl() - allocation QDF memory atomically
+ * @size: Number of bytes of memory to allocate.
+ *
+ * This function will dynamicallly allocate the specified number of bytes of
+ * memory.
+ *
+ * Return:
+ * Upon successful allocate, returns a non-NULL pointer to the allocated
+ * memory.  If this function is unable to allocate the amount of memory
+ * specified (for any reason) it returns NULL.
+ */
+void *qdf_mem_malloc_atomic_debug_fl(qdf_size_t size, const char *func,
+				     uint32_t line);
 
 /**
  * qdf_mem_malloc_debug() - debug version of QDF memory allocation API
@@ -127,7 +180,8 @@ void *qdf_mem_malloc_debug(size_t size, const char *func, uint32_t line,
 	qdf_mem_malloc_debug(size, func, line, QDF_RET_IP, 0)
 
 #define qdf_mem_malloc_atomic(size) \
-	qdf_mem_malloc_debug(size, __func__, __LINE__, QDF_RET_IP, GFP_ATOMIC)
+	qdf_mem_malloc_atomic_debug(size, __func__, __LINE__, QDF_RET_IP)
+
 /**
  * qdf_mem_free_debug() - debug version of qdf_mem_free
  * @ptr: Pointer to the starting address of the memory to be freed.
@@ -144,7 +198,7 @@ void qdf_mem_free_debug(void *ptr, const char *file, uint32_t line);
 
 void qdf_mem_multi_pages_alloc_debug(qdf_device_t osdev,
 				     struct qdf_mem_multi_page_t *pages,
-				     size_t element_size, uint16_t element_num,
+				     size_t element_size, uint32_t element_num,
 				     qdf_dma_context_t memctxt, bool cacheable,
 				     const char *func, uint32_t line,
 				     void *caller);
@@ -244,6 +298,12 @@ static inline bool qdf_mem_debug_config_get(void)
 	return false;
 }
 
+static inline
+QDF_STATUS qdf_mem_debug_disabled_config_set(const char *str_value)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
 /**
  * qdf_mem_malloc() - allocation QDF memory
  * @size: Number of bytes of memory to allocate.
@@ -294,7 +354,7 @@ static inline void qdf_mem_check_for_leaks(void) { }
 
 void qdf_mem_multi_pages_alloc(qdf_device_t osdev,
 			       struct qdf_mem_multi_page_t *pages,
-			       size_t element_size, uint16_t element_num,
+			       size_t element_size, uint32_t element_num,
 			       qdf_dma_context_t memctxt, bool cacheable);
 
 void qdf_mem_multi_pages_free(qdf_device_t osdev,
@@ -302,6 +362,37 @@ void qdf_mem_multi_pages_free(qdf_device_t osdev,
 			      qdf_dma_context_t memctxt, bool cacheable);
 
 #endif /* MEMORY_DEBUG */
+
+/**
+ * qdf_mem_malloc_flags: Get mem allocation flags
+ *
+ * Return the flag to be use for memory allocation
+ * based on the context
+ *
+ * Returns: Based on the context, returns the GFP flag
+ * for memory alloaction
+ */
+int qdf_mem_malloc_flags(void);
+
+/**
+ * qdf_prealloc_disabled_config_get() - Get the user configuration of
+ *                                      prealloc_disabled
+ *
+ * Return: value of prealloc_disabled qdf module argument
+ */
+bool qdf_prealloc_disabled_config_get(void);
+
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+/**
+ * qdf_prealloc_disabled_config_set() - Set prealloc_disabled
+ * @str_value: value of the module param
+ *
+ * This function will set qdf module param prealloc_disabled
+ *
+ * Return: QDF_STATUS_SUCCESS on Success
+ */
+QDF_STATUS qdf_prealloc_disabled_config_set(const char *str_value);
+#endif
 
 /**
  * qdf_mem_multi_pages_zero() - zero out each page memory
@@ -463,7 +554,7 @@ void qdf_ether_addr_copy(void *dst_addr, const void *src_addr);
  * @buf: pointer to memory to be dma mapped
  * @dir: DMA map direction
  * @nbytes: number of bytes to be mapped.
- * @phy_addr: ponter to recive physical address.
+ * @phy_addr: pointer to receive physical address.
  *
  * Return: success/failure
  */
@@ -557,6 +648,59 @@ static inline void qdf_mempool_free(qdf_device_t osdev, qdf_mempool_t pool,
 	__qdf_mempool_free(osdev, pool, buf);
 }
 
+/**
+ * qdf_kmem_cache_create() - OS abstraction for cache creation
+ *
+ * @cache_name: Cache name
+ * @size: Size of the object to be created
+ *
+ * Return: Cache address on successful creation, else NULL
+ */
+static inline qdf_kmem_cache_t
+qdf_kmem_cache_create(const char *cache_name,
+		      qdf_size_t size)
+{
+	return __qdf_kmem_cache_create(cache_name, size);
+}
+
+/**
+ * qdf_kmem_cache_destroy() - OS abstraction for cache destructin
+ *
+ * @cache: Cache pointer
+ *
+ * Return: void
+ */
+static inline void qdf_kmem_cache_destroy(qdf_kmem_cache_t cache)
+{
+	__qdf_kmem_cache_destroy(cache);
+}
+
+/**
+ * qdf_kmem_cache_alloc() - Function to allocation object from a cache
+ *
+ * @cache: Cache address
+ *
+ * Return: Object from cache
+ *
+ */
+static inline void *qdf_kmem_cache_alloc(qdf_kmem_cache_t cache)
+{
+	return __qdf_kmem_cache_alloc(cache);
+}
+
+/**
+ * qdf_kmem_cache_free() - Function to free cache object
+ *
+ * @cache: Cache address
+ * @object: Object to be returned to cache
+ *
+ * Return: void
+ */
+static inline void qdf_kmem_cache_free(qdf_kmem_cache_t cache, void *node)
+{
+	__qdf_kmem_cache_free(cache, node);
+}
+
 void qdf_mem_dma_sync_single_for_device(qdf_device_t osdev,
 					qdf_dma_addr_t bus_addr,
 					qdf_size_t size,
@@ -604,12 +748,130 @@ void qdf_mem_skb_inc(qdf_size_t size);
  */
 void qdf_mem_skb_dec(qdf_size_t size);
 
+/**
+ * qdf_mem_skb_total_inc() - increment total skb allocation size
+ * in host driver in both debug and perf builds
+ * @size: size to be added
+ *
+ * Return: none
+ */
+void qdf_mem_skb_total_inc(qdf_size_t size);
+
+/**
+ * qdf_mem_skb_total_dec() - decrement total skb allocation size
+ * in the host driver in debug and perf flavors
+ * @size: size to be decremented
+ *
+ * Return: none
+ */
+void qdf_mem_skb_total_dec(qdf_size_t size);
+
+/**
+ * qdf_mem_dp_tx_skb_inc() - Increment Tx skb allocation size
+ * @size: size to be added
+ *
+ * Return: none
+ */
+void qdf_mem_dp_tx_skb_inc(qdf_size_t size);
+
+/**
+ * qdf_mem_dp_tx_skb_dec() - Decrement Tx skb allocation size
+ * @size: size to be decreased
+ *
+ * Return: none
+ */
+void qdf_mem_dp_tx_skb_dec(qdf_size_t size);
+
+/**
+ * qdf_mem_dp_rx_skb_inc() - Increment Rx skb allocation size
+ * @size: size to be added
+ *
+ * Return: none
+ */
+void qdf_mem_dp_rx_skb_inc(qdf_size_t size);
+
+/**
+ * qdf_mem_dp_rx_skb_dec() - Decrement Rx skb allocation size
+ * @size: size to be decreased
+ *
+ * Return: none
+ */
+void qdf_mem_dp_rx_skb_dec(qdf_size_t size);
+
+/**
+ * qdf_mem_dp_tx_skb_cnt_inc() - Increment Tx buffer count
+ *
+ * Return: none
+ */
+void qdf_mem_dp_tx_skb_cnt_inc(void);
+
+/**
+ * qdf_mem_dp_tx_skb_cnt_dec() - Decrement Tx buffer count
+ *
+ * Return: none
+ */
+void qdf_mem_dp_tx_skb_cnt_dec(void);
+
+/**
+ * qdf_mem_dp_rx_skb_cnt_inc() - Increment Rx buffer count
+ *
+ * Return: none
+ */
+void qdf_mem_dp_rx_skb_cnt_inc(void);
+
+/**
+ * qdf_mem_dp_rx_skb_cnt_dec() - Decrement Rx buffer count
+ *
+ * Return: none
+ */
+void qdf_mem_dp_rx_skb_cnt_dec(void);
 #else
+
 static inline void qdf_mem_skb_inc(qdf_size_t size)
 {
 }
 
 static inline void qdf_mem_skb_dec(qdf_size_t size)
+{
+}
+
+static inline void qdf_mem_skb_total_inc(qdf_size_t size)
+{
+}
+
+static inline void qdf_mem_skb_total_dec(qdf_size_t size)
+{
+}
+
+static inline void qdf_mem_dp_tx_skb_inc(qdf_size_t size)
+{
+}
+
+static inline void qdf_mem_dp_tx_skb_dec(qdf_size_t size)
+{
+}
+
+static inline void qdf_mem_dp_rx_skb_inc(qdf_size_t size)
+{
+}
+
+static inline void qdf_mem_dp_rx_skb_dec(qdf_size_t size)
+{
+}
+
+static inline void qdf_mem_dp_tx_skb_cnt_inc(void)
+{
+}
+
+static inline void qdf_mem_dp_tx_skb_cnt_dec(void)
+{
+}
+
+static inline void qdf_mem_dp_rx_skb_cnt_inc(void)
+{
+}
+
+static inline void qdf_mem_dp_rx_skb_cnt_dec(void)
 {
 }
 #endif /* CONFIG_WLAN_SYSFS_MEM_STATS */
@@ -631,6 +893,7 @@ static inline qdf_mem_info_t *qdf_mem_map_table_alloc(uint32_t num)
 	return mem_info_arr;
 }
 
+#ifdef ENHANCED_OS_ABSTRACTION
 /**
  * qdf_update_mem_map_table() - Update DMA memory map info
  * @osdev: Parent device instance
@@ -642,10 +905,31 @@ static inline qdf_mem_info_t *qdf_mem_map_table_alloc(uint32_t num)
  *
  * Return: none
  */
-static inline void qdf_update_mem_map_table(qdf_device_t osdev,
-					    qdf_mem_info_t *mem_info,
-					    qdf_dma_addr_t dma_addr,
-					    uint32_t mem_size)
+void qdf_update_mem_map_table(qdf_device_t osdev,
+			      qdf_mem_info_t *mem_info,
+			      qdf_dma_addr_t dma_addr,
+			      uint32_t mem_size);
+
+/**
+ * qdf_mem_paddr_from_dmaaddr() - get actual physical address from dma address
+ * @osdev: Parent device instance
+ * @dma_addr: DMA/IOVA address
+ *
+ * Get actual physical address from dma_addr based on SMMU enablement status.
+ * IF SMMU Stage 1 translation is enabled, DMA APIs return IO virtual address
+ * (IOVA) otherwise returns physical address. So get SMMU physical address
+ * mapping from IOVA.
+ *
+ * Return: dmaable physical address
+ */
+qdf_dma_addr_t qdf_mem_paddr_from_dmaaddr(qdf_device_t osdev,
+					  qdf_dma_addr_t dma_addr);
+#else
+static inline
+void qdf_update_mem_map_table(qdf_device_t osdev,
+			      qdf_mem_info_t *mem_info,
+			      qdf_dma_addr_t dma_addr,
+			      uint32_t mem_size)
 {
 	if (!mem_info) {
 		qdf_nofl_err("%s: NULL mem_info", __func__);
@@ -654,6 +938,14 @@ static inline void qdf_update_mem_map_table(qdf_device_t osdev,
 
 	__qdf_update_mem_map_table(osdev, mem_info, dma_addr, mem_size);
 }
+
+static inline
+qdf_dma_addr_t qdf_mem_paddr_from_dmaaddr(qdf_device_t osdev,
+					  qdf_dma_addr_t dma_addr)
+{
+	return __qdf_mem_paddr_from_dmaaddr(osdev, dma_addr);
+}
+#endif
 
 /**
  * qdf_mem_smmu_s1_enabled() - Return SMMU stage 1 translation enable status
@@ -667,26 +959,8 @@ static inline bool qdf_mem_smmu_s1_enabled(qdf_device_t osdev)
 }
 
 /**
- * qdf_mem_paddr_from_dmaaddr() - get actual physical address from dma address
- * @osdev: Parent device instance
- * @dma_addr: DMA/IOVA address
- *
- * Get actual physical address from dma_addr based on SMMU enablement status.
- * IF SMMU Stage 1 tranlation is enabled, DMA APIs return IO virtual address
- * (IOVA) otherwise returns physical address. So get SMMU physical address
- * mapping from IOVA.
- *
- * Return: dmaable physical address
- */
-static inline qdf_dma_addr_t qdf_mem_paddr_from_dmaaddr(qdf_device_t osdev,
-							qdf_dma_addr_t dma_addr)
-{
-	return __qdf_mem_paddr_from_dmaaddr(osdev, dma_addr);
-}
-
-/**
  * qdf_mem_dma_get_sgtable() - Returns DMA memory scatter gather table
- * @dev: device instace
+ * @dev: device instance
  * @sgt: scatter gather table pointer
  * @cpu_addr: HLOS virtual address
  * @dma_addr: dma address
@@ -731,7 +1005,7 @@ qdf_dma_get_sgtable_dma_addr(struct sg_table *sgt)
  * @mem_info: Pointer to allocated memory information
  *
  * Get dma address based on SMMU enablement status. If SMMU Stage 1
- * tranlation is enabled, DMA APIs return IO virtual address otherwise
+ * translation is enabled, DMA APIs return IO virtual address otherwise
  * returns physical address.
  *
  * Return: dma address
@@ -832,6 +1106,25 @@ qdf_mem_set_dma_pa(qdf_device_t osdev,
  */
 qdf_shared_mem_t *qdf_mem_shared_mem_alloc(qdf_device_t osdev, uint32_t size);
 
+#ifdef DP_UMAC_HW_RESET_SUPPORT
+/**
+ * qdf_tx_desc_pool_free_bufs() - Go through elems and call the registered  cb
+ * @ctxt: Context to be passed to the cb
+ * @pages: Multi page information storage
+ * @elem_size: Each element size
+ * @elem_count: Total number of elements should be allocated
+ * @cacheable: Coherent memory or cacheable memory
+ * @cb: Callback to free the elements
+ * @elem_list: elem list for delayed free
+ *
+ * Return: 0 on Succscc, or Error code
+ */
+int qdf_tx_desc_pool_free_bufs(void *ctxt, struct qdf_mem_multi_page_t *pages,
+			       uint32_t elem_size, uint32_t elem_count,
+			       uint8_t cacheable, qdf_mem_release_cb cb,
+			       void *elem_list);
+#endif
+
 /**
  * qdf_mem_shared_mem_free() - Free shared memory
  * @osdev: parent device instance
@@ -868,7 +1161,7 @@ static inline void qdf_mem_shared_mem_free(qdf_device_t osdev,
  * qdf_dma_mem_stats_read() - Return the DMA memory allocated in
  * host driver
  *
- * Return: None
+ * Return: Total DMA memory allocated
  */
 int32_t qdf_dma_mem_stats_read(void);
 
@@ -876,7 +1169,7 @@ int32_t qdf_dma_mem_stats_read(void);
  * qdf_heap_mem_stats_read() - Return the heap memory allocated
  * in host driver
  *
- * Return: None
+ * Return: Total heap memory allocated
  */
 int32_t qdf_heap_mem_stats_read(void);
 
@@ -884,8 +1177,164 @@ int32_t qdf_heap_mem_stats_read(void);
  * qdf_skb_mem_stats_read() - Return the SKB memory allocated in
  * host driver
  *
- * Return: None
+ * Return: Total SKB memory allocated
  */
 int32_t qdf_skb_mem_stats_read(void);
 
+/**
+ * qdf_skb_total_mem_stats_read() - Return the SKB memory allocated
+ * in the host driver tracked in both debug and perf builds
+ *
+ * Return: Total SKB memory allocated
+ */
+int32_t qdf_skb_total_mem_stats_read(void);
+
+/**
+ * qdf_skb_max_mem_stats_read() - Return the max SKB memory
+ * allocated in host driver. This is the high watermark for the
+ * total SKB allocated in the host driver
+ *
+ * Return: None
+ */
+int32_t qdf_skb_max_mem_stats_read(void);
+
+/**
+ * qdf_mem_tx_desc_cnt_read() - Return the outstanding Tx descs
+ * which are waiting on Tx completions
+ *
+ * Return: Outstanding Tx desc count
+ */
+int32_t qdf_mem_tx_desc_cnt_read(void);
+
+/**
+ * qdf_mem_tx_desc_max_read() - Return the max outstanding Tx
+ * descs which are waiting on Tx completions. This is the high
+ * watermark for the pending desc count
+ *
+ * Return: Max outstanding Tx desc count
+ */
+int32_t qdf_mem_tx_desc_max_read(void);
+
+/**
+ * qdf_mem_stats_init() - Initialize the qdf memstats fields on
+ * creating the sysfs node
+ *
+ * Return: None
+ */
+void qdf_mem_stats_init(void);
+
+/**
+ * qdf_dp_tx_skb_mem_stats_read() - Return the SKB memory
+ * allocated for Tx data path
+ *
+ * Return: Tx SKB memory allocated
+ */
+int32_t qdf_dp_tx_skb_mem_stats_read(void);
+
+/**
+ * qdf_dp_rx_skb_mem_stats_read() - Return the SKB memory
+ * allocated for Rx data path
+ *
+ * Return: Rx SKB memory allocated
+ */
+int32_t qdf_dp_rx_skb_mem_stats_read(void);
+
+/**
+ * qdf_dp_tx_skb_max_mem_stats_read() - Return the high
+ * watermark for the SKB memory allocated for Tx data path
+ *
+ * Return: Max Tx SKB memory allocated
+ */
+int32_t qdf_dp_tx_skb_max_mem_stats_read(void);
+
+/**
+ * qdf_dp_rx_skb_max_mem_stats_read() - Return the high
+ * watermark for the SKB memory allocated for Rx data path
+ *
+ * Return: Max Rx SKB memory allocated
+ */
+int32_t qdf_dp_rx_skb_max_mem_stats_read(void);
+
+/**
+ * qdf_mem_dp_tx_skb_cnt_read() - Return number of buffers
+ * allocated in the Tx data path by the host driver or
+ * buffers coming from the n/w stack
+ *
+ * Return: Number of DP Tx buffers allocated
+ */
+int32_t qdf_mem_dp_tx_skb_cnt_read(void);
+
+/**
+ * qdf_mem_dp_tx_skb_max_cnt_read() - Return max number of
+ * buffers allocated in the Tx data path
+ *
+ * Return: Max number of DP Tx buffers allocated
+ */
+int32_t qdf_mem_dp_tx_skb_max_cnt_read(void);
+
+/**
+ * qdf_mem_dp_rx_skb_cnt_read() - Return number of buffers
+ * allocated in the Rx data path
+ *
+ * Return: Number of DP Rx buffers allocated
+ */
+int32_t qdf_mem_dp_rx_skb_cnt_read(void);
+
+/**
+ * qdf_mem_dp_rx_skb_max_cnt_read() - Return max number of
+ * buffers allocated in the Rx data path
+ *
+ * Return: Max number of DP Rx buffers allocated
+ */
+int32_t qdf_mem_dp_rx_skb_max_cnt_read(void);
+
+/**
+ * qdf_mem_tx_desc_cnt_update() - Update the pending tx desc
+ * count and the high watermark for pending tx desc count
+ *
+ * @pending_tx_descs: outstanding Tx desc count
+ * @tx_descs_max: high watermark for outstanding Tx desc count
+ *
+ * Return: None
+ */
+void qdf_mem_tx_desc_cnt_update(qdf_atomic_t pending_tx_descs,
+				int32_t tx_descs_max);
+
+/**
+ * qdf_mem_vfree() - Free the virtual memory pointed to by ptr
+ * @ptr: Pointer to the starting address of the memory to
+ * be freed.
+ *
+ * Return: None
+ */
+#define qdf_mem_vfree(ptr)   __qdf_mem_vfree(ptr)
+
+/**
+ * qdf_mem_valloc() - Allocate virtual memory for the given
+ * size
+ * @size: Number of bytes of memory to be allocated
+ *
+ * Return: Pointer to the starting address of the allocated virtual memory
+ */
+#define qdf_mem_valloc(size) __qdf_mem_valloc(size, __func__, __LINE__)
+
+#if IS_ENABLED(CONFIG_ARM_SMMU) && defined(ENABLE_SMMU_S1_TRANSLATION)
+/*
+ * typedef qdf_iommu_domain_t: Platform independent iommu domain
+ * abstraction
+ */
+typedef __qdf_iommu_domain_t qdf_iommu_domain_t;
+
+/**
+ * qdf_iommu_domain_get_attr() - API to get iommu domain attributes
+ * @domain: iommu domain
+ * @attr: iommu attribute
+ * @data: data pointer
+ *
+ * Return: 0 on success, else errno
+ */
+int
+qdf_iommu_domain_get_attr(qdf_iommu_domain_t *domain,
+			  enum qdf_iommu_attr attr, void *data);
+#endif
 #endif /* __QDF_MEMORY_H */

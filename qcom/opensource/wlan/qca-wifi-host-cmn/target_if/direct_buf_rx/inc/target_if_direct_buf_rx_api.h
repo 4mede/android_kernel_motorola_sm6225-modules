@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -23,6 +24,19 @@
 #include "qdf_atomic.h"
 #include "wmi_unified_api.h"
 
+/**
+ * enum DBR_MODULE - Enum containing the modules supporting direct buf rx
+ * @DBR_MODULE_SPECTRAL: Module ID for Spectral
+ * @DBR_MODULE_CFR: Module ID for CFR
+ * @DBR_MODULE_MAX: Max module ID
+ */
+enum DBR_MODULE {
+	DBR_MODULE_SPECTRAL = 0,
+	DBR_MODULE_CFR      = 1,
+	DBR_MODULE_MAX,
+};
+
+#ifdef DIRECT_BUF_RX_ENABLE
 #ifdef WLAN_DEBUGFS
 #ifdef DIRECT_BUF_RX_DEBUG
 /* Base debugfs entry for DBR module */
@@ -62,18 +76,6 @@ extern qdf_dentry_t dbr_debugfs_entry;
 
 struct wlan_objmgr_psoc;
 struct wlan_lmac_if_tx_ops;
-
-/**
- * enum DBR_MODULE - Enum containing the modules supporting direct buf rx
- * @DBR_MODULE_SPECTRAL: Module ID for Spectral
- * @DBR_MODULE_CFR: Module ID for CFR
- * @DBR_MODULE_MAX: Max module ID
- */
-enum DBR_MODULE {
-	DBR_MODULE_SPECTRAL = 0,
-	DBR_MODULE_CFR      = 1,
-	DBR_MODULE_MAX,
-};
 
 #ifdef WMI_DBR_SUPPORT
 /**
@@ -169,4 +171,58 @@ QDF_STATUS target_if_dbr_cookie_lookup(struct wlan_objmgr_pdev *pdev,
 QDF_STATUS target_if_dbr_buf_release(struct wlan_objmgr_pdev *pdev,
 				     uint8_t mod_id, qdf_dma_addr_t paddr,
 				     uint32_t cookie, uint8_t srng_id);
+
+/**
+ * target_if_dbr_update_pdev_for_hw_mode_change() - Update DBR object in pdev
+ * structure for hw mode change
+ * @pdev: pointer to pdev object
+ * @phy_idx: Phy index
+ */
+QDF_STATUS target_if_dbr_update_pdev_for_hw_mode_change(
+		struct wlan_objmgr_pdev *pdev, int phy_idx);
+
+/**
+ * target_if_dbr_set_event_handler_ctx() - Set the context for
+ *                                         DBR event execution
+ * @psoc: Pointer to psoc object
+ * @dbr_handler_ctx: DBR event handler context
+ *
+ * Return: QDF status of operation
+ */
+QDF_STATUS target_if_dbr_set_event_handler_ctx(
+		struct wlan_objmgr_psoc *psoc,
+		enum wmi_rx_exec_ctx dbr_handler_ctx);
+#else /* DIRECT_BUF_RX_ENABLE*/
+
+static inline QDF_STATUS
+target_if_dbr_cookie_lookup(struct wlan_objmgr_pdev *pdev,
+			    uint8_t mod_id, qdf_dma_addr_t paddr,
+			    uint32_t *cookie, uint8_t srng_id)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS
+target_if_dbr_buf_release(struct wlan_objmgr_pdev *pdev,
+			  uint8_t mod_id, qdf_dma_addr_t paddr,
+			  uint32_t cookie, uint8_t srng_id)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS
+target_if_dbr_update_pdev_for_hw_mode_change(
+		struct wlan_objmgr_pdev *pdev, int phy_idx)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS
+target_if_dbr_set_event_handler_ctx(
+		struct wlan_objmgr_psoc *psoc,
+		enum wmi_rx_exec_ctx dbr_handler_ctx)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif /* DIRECT_BUF_RX_ENABLE */
 #endif /* _TARGET_IF_DIRECT_BUF_RX_API_H_ */

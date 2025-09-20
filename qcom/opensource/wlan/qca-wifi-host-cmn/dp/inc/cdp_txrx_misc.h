@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -25,6 +26,8 @@
 #define _CDP_TXRX_MISC_H_
 
 #include "cdp_txrx_handle.h"
+#include <cdp_txrx_cmn.h>
+
 /**
  * cdp_tx_non_std() - Allow the control-path SW to send data frames
  * @soc: data path soc handle
@@ -52,8 +55,7 @@ cdp_tx_non_std(ol_txrx_soc_handle soc, uint8_t vdev_id,
 	       enum ol_tx_spec tx_spec, qdf_nbuf_t msdu_list)
 {
 	if (!soc || !soc->ops || !soc->ops->misc_ops) {
-		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_DEBUG,
-			"%s invalid instance", __func__);
+		dp_cdp_debug("invalid instance");
 		return NULL;
 	}
 
@@ -805,8 +807,7 @@ cdp_txrx_ext_stats_request(ol_txrx_soc_handle soc, uint8_t pdev_id,
 			   struct cdp_txrx_ext_stats *req)
 {
 	if (!soc || !soc->ops || !soc->ops->misc_ops || !req) {
-		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
-			  "%s: Invalid Instance:", __func__);
+		dp_cdp_debug("Invalid Instance:");
 		return QDF_STATUS_E_INVAL;
 	}
 
@@ -828,8 +829,7 @@ static inline QDF_STATUS
 cdp_request_rx_hw_stats(ol_txrx_soc_handle soc, uint8_t vdev_id)
 {
 	if (!soc || !soc->ops || !soc->ops->misc_ops) {
-		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
-			  "%s: Invalid Instance:", __func__);
+		dp_cdp_debug("Invalid Instance:");
 		return QDF_STATUS_E_INVAL;
 	}
 
@@ -849,8 +849,7 @@ static inline void
 cdp_reset_rx_hw_ext_stats(ol_txrx_soc_handle soc)
 {
 	if (!soc || !soc->ops || !soc->ops->misc_ops) {
-		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
-			  "%s: Invalid Instance:", __func__);
+		dp_cdp_debug("Invalid Instance");
 		return;
 	}
 
@@ -871,8 +870,7 @@ cdp_vdev_inform_ll_conn(ol_txrx_soc_handle soc, uint8_t vdev_id,
 			enum vdev_ll_conn_actions action)
 {
 	if (!soc || !soc->ops || !soc->ops->misc_ops) {
-		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
-			  "%s: Invalid Instance:", __func__);
+		dp_cdp_debug("Invalid Instance:");
 		return QDF_STATUS_E_INVAL;
 	}
 
@@ -894,8 +892,7 @@ static inline QDF_STATUS
 cdp_soc_set_swlm_enable(ol_txrx_soc_handle soc, uint8_t value)
 {
 	if (!soc || !soc->ops || !soc->ops->misc_ops) {
-		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
-			  "%s: Invalid Instance:", __func__);
+		dp_cdp_debug("Invalid Instance:");
 		return QDF_STATUS_E_INVAL;
 	}
 
@@ -916,8 +913,7 @@ static inline uint8_t
 cdp_soc_is_swlm_enabled(ol_txrx_soc_handle soc)
 {
 	if (!soc || !soc->ops || !soc->ops->misc_ops) {
-		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
-			  "%s: Invalid Instance:", __func__);
+		dp_cdp_debug("Invalid Instance:");
 		return 0;
 	}
 
@@ -937,12 +933,145 @@ static inline void
 cdp_display_txrx_hw_info(ol_txrx_soc_handle soc)
 {
 	if (!soc || !soc->ops || !soc->ops->misc_ops) {
-		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
-			  "%s: Invalid Instance:", __func__);
+		dp_cdp_debug("Invalid Instance:");
 		return;
 	}
 
 	if (soc->ops->misc_ops->display_txrx_hw_info)
 		return soc->ops->misc_ops->display_txrx_hw_info(soc);
 }
+
+/**
+ * cdp_get_tx_rings_grp_bitmap() - Get tx rings grp bitmap
+ * @soc: soc handle
+ *
+ * Return: tx rings bitmap
+ */
+static inline uint32_t
+cdp_get_tx_rings_grp_bitmap(ol_txrx_soc_handle soc)
+{
+	if (!soc || !soc->ops || !soc->ops->misc_ops) {
+		dp_cdp_debug("Invalid Instance:");
+		return 0;
+	}
+
+	if (soc->ops->misc_ops->get_tx_rings_grp_bitmap)
+		return soc->ops->misc_ops->get_tx_rings_grp_bitmap(soc);
+
+	return 0;
+}
+
+#ifdef WLAN_FEATURE_PEER_TXQ_FLUSH_CONF
+/**
+ * cdp_set_peer_txq_flush_config() - Set the peer txq flush configuration
+ * @soc: Opaque handle to the DP soc object
+ * @vdev_id: VDEV identifier
+ * @mac: MAC address of the peer
+ * @ac: access category mask
+ * @tid: TID mask
+ * @policy: Flush policy
+ *
+ * Return: 0 on success, errno on failure
+ */
+static inline int
+cdp_set_peer_txq_flush_config(ol_txrx_soc_handle soc, uint8_t vdev_id,
+			      uint8_t *mac, uint8_t ac, uint32_t tid,
+			      enum cdp_peer_txq_flush_policy policy)
+{
+	if (!soc || !soc->ops || !soc->ops->misc_ops || !mac) {
+		dp_cdp_debug("Invalid parameters");
+		return 0;
+	}
+
+	if (soc->ops->misc_ops->set_peer_txq_flush_config) {
+		return soc->ops->misc_ops->set_peer_txq_flush_config(soc,
+								     vdev_id,
+								     mac, ac,
+								     tid,
+								     policy);
+	}
+
+	return 0;
+}
+#endif /* WLAN_FEATURE_PEER_TXQ_FLUSH_CONF */
+#ifdef FEATURE_RX_LINKSPEED_ROAM_TRIGGER
+/**
+ * cdp_set_bus_vote_lvl() - have a vote on bus bandwidth lvl
+ * @soc: datapath soc handle
+ * @high: whether TPUT level is high or not
+ *
+ * Return: void
+ */
+static inline void
+cdp_set_bus_vote_lvl_high(ol_txrx_soc_handle soc, bool high)
+{
+	if (!soc || !soc->ops || !soc->ops->misc_ops ||
+	    !soc->ops->misc_ops->set_bus_vote_lvl_high) {
+		dp_cdp_debug("Invalid Instance:");
+		return;
+	}
+
+	soc->ops->misc_ops->set_bus_vote_lvl_high(soc, high);
+}
+
+/**
+ * cdp_get_bus_vote_lvl() - get bus bandwidth lvl from dp
+ * @soc: datapath soc handle
+ *
+ * Return: bool, whether TPUT level is high or not
+ */
+static inline bool
+cdp_get_bus_lvl_high(ol_txrx_soc_handle soc)
+{
+	if (!soc || !soc->ops || !soc->ops->misc_ops ||
+	    !soc->ops->misc_ops->get_bus_vote_lvl_high) {
+		dp_cdp_debug("Invalid Instance:");
+		return false;
+	}
+
+	return soc->ops->misc_ops->get_bus_vote_lvl_high(soc);
+}
+#else
+static inline void
+cdp_set_bus_vote_lvl_high(ol_txrx_soc_handle soc, bool high)
+{
+}
+
+static inline bool
+cdp_get_bus_lvl_high(ol_txrx_soc_handle soc)
+{
+	/*
+	 * default bus lvl is high to
+	 * make sure not affect tput
+	 */
+	return true;
+}
+#endif
+
+#ifdef DP_TX_PACKET_INSPECT_FOR_ILP
+/**
+ * cdp_evaluate_update_tx_ilp_cfg() - Evaluate and update DP TX
+ *                                    ILP configuration
+ * @soc: DP SOC handle
+ * @num_msdu_idx_map: Number of HTT msdu index to qtype map in array
+ * @msdu_idx_map_arr: Pointer to HTT msdu index to qtype map array
+ *
+ * Return: Final updated TX ILP enable result, true - enabled, false - not
+ */
+static inline bool
+cdp_evaluate_update_tx_ilp_cfg(ol_txrx_soc_handle soc,
+			       uint8_t num_msdu_idx_map,
+			       uint8_t *msdu_idx_map_arr)
+{
+	if (!soc || !soc->ops || !soc->ops->misc_ops ||
+	    !soc->ops->misc_ops->evaluate_update_tx_ilp_cfg) {
+		dp_cdp_debug("Invalid Instance:");
+		return false;
+	}
+
+	return soc->ops->misc_ops->evaluate_update_tx_ilp_cfg(
+						soc, num_msdu_idx_map,
+						msdu_idx_map_arr);
+}
+#endif /* DP_TX_PACKET_INSPECT_FOR_ILP */
 #endif /* _CDP_TXRX_MISC_H_ */

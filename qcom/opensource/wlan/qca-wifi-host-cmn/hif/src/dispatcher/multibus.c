@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2018, 2020-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -62,8 +62,14 @@ static void hif_initialize_default_ops(struct hif_softc *hif_sc)
 	bus_ops->hif_grp_irq_deconfigure = &hif_dummy_grp_irq_deconfigure;
 	bus_ops->hif_config_irq_affinity =
 		&hif_dummy_config_irq_affinity;
+	bus_ops->hif_config_irq_by_ceid = &hif_dummy_config_irq_by_ceid;
 	bus_ops->hif_enable_grp_irqs = &hif_dummy_enable_grp_irqs;
 	bus_ops->hif_disable_grp_irqs = &hif_dummy_enable_grp_irqs;
+	bus_ops->hif_config_irq_clear_cpu_affinity =
+		&hif_dummy_config_irq_clear_cpu_affinity;
+#ifdef FEATURE_IRQ_AFFINITY
+	bus_ops->hif_set_grp_intr_affinity = &hif_dummy_set_grp_intr_affinity;
+#endif
 }
 
 #define NUM_OPS (sizeof(struct hif_bus_ops) / sizeof(void *))
@@ -182,7 +188,7 @@ void hif_bus_close(struct hif_softc *hif_sc)
  * @hif_ctx: hif context
  * @flag: true = keep bus alive false = let bus go to sleep
  *
- * Keeps the bus awake durring suspend.
+ * Keeps the bus awake during suspend.
  */
 void hif_bus_prevent_linkdown(struct hif_softc *hif_sc, bool flag)
 {
@@ -270,18 +276,6 @@ void hif_disable_bus(struct hif_softc *hif_sc)
 {
 	hif_sc->bus_ops.hif_disable_bus(hif_sc);
 }
-
-#ifdef FEATURE_RUNTIME_PM
-struct hif_runtime_pm_ctx *hif_bus_get_rpm_ctx(struct hif_softc *hif_sc)
-{
-	return hif_sc->bus_ops.hif_bus_get_rpm_ctx(hif_sc);
-}
-
-struct device *hif_bus_get_dev(struct hif_softc *hif_sc)
-{
-	return hif_sc->bus_ops.hif_bus_get_dev(hif_sc);
-}
-#endif
 
 int hif_bus_configure(struct hif_softc *hif_sc)
 {
@@ -477,6 +471,9 @@ int hif_apps_irqs_disable(struct hif_opaque_softc *hif_ctx)
 	if (!scn)
 		return -EINVAL;
 
+	if (pld_is_one_msi(scn->qdf_dev->dev))
+		return 0;
+
 	/* if the wake_irq is shared, don't disable it twice */
 	for (i = 0; i < scn->ce_count; ++i) {
 		int irq = scn->bus_ops.hif_map_ce_to_irq(scn, i);
@@ -497,6 +494,9 @@ int hif_apps_irqs_enable(struct hif_opaque_softc *hif_ctx)
 	scn = HIF_GET_SOFTC(hif_ctx);
 	if (!scn)
 		return -EINVAL;
+
+	if (pld_is_one_msi(scn->qdf_dev->dev))
+		return 0;
 
 	/* if the wake_irq is shared, don't enable it twice */
 	for (i = 0; i < scn->ce_count; ++i) {
@@ -616,12 +616,32 @@ void hif_config_irq_affinity(struct hif_softc *hif_sc)
 	hif_sc->bus_ops.hif_config_irq_affinity(hif_sc);
 }
 
+int hif_config_irq_by_ceid(struct hif_softc *hif_sc, int ce_id)
+{
+	return hif_sc->bus_ops.hif_config_irq_by_ceid(hif_sc, ce_id);
+}
+
+#ifdef HIF_CPU_CLEAR_AFFINITY
+void hif_config_irq_clear_cpu_affinity(struct hif_opaque_softc *scn,
+				       int intr_ctxt_id, int cpu)
+{
+	struct hif_softc *hif_sc = HIF_GET_SOFTC(scn);
+
+	hif_sc->bus_ops.hif_config_irq_clear_cpu_affinity(hif_sc,
+							  intr_ctxt_id, cpu);
+}
+
+qdf_export_symbol(hif_config_irq_clear_affinity);
+#endif
+
 #ifdef HIF_BUS_LOG_INFO
-void hif_log_bus_info(struct hif_softc *hif_sc, uint8_t *data,
+bool hif_log_bus_info(struct hif_softc *hif_sc, uint8_t *data,
 		      unsigned int *offset)
 {
 	if (hif_sc->bus_ops.hif_log_bus_info)
-		hif_sc->bus_ops.hif_log_bus_info(hif_sc, data, offset);
+		return hif_sc->bus_ops.hif_log_bus_info(hif_sc, data, offset);
+
+	return false;
 }
 #endif
 
@@ -686,3 +706,17 @@ int hif_enable_grp_irqs(struct hif_opaque_softc *scn)
 
 	return hif_sc->bus_ops.hif_enable_grp_irqs(hif_sc);
 }
+
+#ifdef FEATURE_IRQ_AFFINITY
+void hif_set_grp_intr_affinity(struct hif_opaque_softc *scn,
+			       uint32_t grp_intr_bitmask, bool perf)
+{
+	struct hif_softc *hif_sc = HIF_GET_SOFTC(scn);
+
+	if (!hif_sc)
+		return;
+
+	hif_sc->bus_ops.hif_set_grp_intr_affinity(hif_sc, grp_intr_bitmask,
+						  perf);
+}
+#endif

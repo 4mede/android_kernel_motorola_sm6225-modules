@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -95,6 +96,36 @@ struct scheduler_msg {
 	uint64_t queued_at_us;
 #endif /* WLAN_SCHED_HISTORY_SIZE */
 };
+
+struct sched_qdf_mc_timer_cb_wrapper;
+
+/**
+ * scheduler_qdf_mc_timer_init() - initialize and fill callback and data
+ * @timer_callback: callback to timer
+ * @data: data pointer
+ *
+ * Return: return pointer to struct sched_qdf_mc_timer_cb_wrapper
+ */
+struct sched_qdf_mc_timer_cb_wrapper *scheduler_qdf_mc_timer_init(
+		qdf_mc_timer_callback_t timer_callback,
+		void *data);
+
+/**
+ * scheduler_qdf_mc_timer_callback_t_wrapper() - wrapper for mc timer callbacks
+ * @wrapper_ptr: wrapper ptr
+ *
+ * Return: return void ptr
+ */
+void *scheduler_qdf_mc_timer_deinit_return_data_ptr(
+		struct sched_qdf_mc_timer_cb_wrapper *wrapper_ptr);
+
+/**
+ * scheduler_qdf_mc_timer_callback_t_wrapper() - wrapper for mc timer callbacks
+ * @msg: message pointer
+ *
+ * Return: None
+ */
+QDF_STATUS scheduler_qdf_mc_timer_callback_t_wrapper(struct scheduler_msg *msg);
 
 /**
  * sched_history_print() - print scheduler history
@@ -218,6 +249,16 @@ QDF_STATUS scheduler_post_message_debug(QDF_MODULE_ID src_id,
  * Return: none
  */
 void scheduler_resume(void);
+
+/**
+ * scheduler_set_timeout() - set scheduler timeout for msg processing
+ *
+ * Configure the timeout for triggering the scheduler watchdog timer
+ * in milliseconds
+ *
+ * Return: none
+ */
+void scheduler_set_watchdog_timeout(uint32_t timeout);
 
 /**
  * scheduler_register_hdd_suspend_callback() - suspend callback to hdd

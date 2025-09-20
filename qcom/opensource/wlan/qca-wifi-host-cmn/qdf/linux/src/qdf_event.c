@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -327,9 +328,8 @@ QDF_STATUS qdf_wait_for_event_completion(qdf_event_t *event, uint32_t timeout)
 		long ret;
 
 		/* update the timeout if it's on an emulation platform */
-		timeout *= qdf_timer_get_multiplier();
 		ret = wait_for_completion_timeout(&event->complete,
-						  msecs_to_jiffies(timeout));
+						  __qdf_scaled_msecs_to_jiffies(timeout));
 
 		if (ret <= 0) {
 			status = QDF_STATUS_E_TIMEOUT;
@@ -385,14 +385,3 @@ void qdf_event_list_destroy(void)
 	qdf_spinlock_destroy(&qdf_wait_event_lock);
 }
 qdf_export_symbol(qdf_event_list_destroy);
-
-QDF_STATUS qdf_exit_thread(QDF_STATUS status)
-{
-	if (status == QDF_STATUS_SUCCESS)
-		do_exit(0);
-	else
-		do_exit(SIGKILL);
-
-	return QDF_STATUS_SUCCESS;
-}
-qdf_export_symbol(qdf_exit_thread);

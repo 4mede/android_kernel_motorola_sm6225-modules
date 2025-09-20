@@ -1,6 +1,6 @@
-
 /*
  * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -62,15 +62,22 @@
 #define DEFAULT_SRNGID_CFR 0
 #endif
 
+#define MAX_CFR_PRD  (10 * 60 * 1000)   /* 10 minutes */
+#define CFR_MOD_PRD  10                 /* CFR period to be multiples of 10ms */
+
+#define MAX_AGC_GAIN 62
+
 enum cfrmetaversion {
 	CFR_META_VERSION_NONE,
-	CFR_META_VERSION_1, /* initial version for leg_cfr_metadata */
+	CFR_META_VERSION_1, /* initial version for legacy_cfr_metadata */
 	CFR_META_VERSION_2, /* initial version for dbr_cfr_metadata */
 	CFR_META_VERSION_3, /* initial version for enh_cfr_metadata */
 	CFR_META_VERSION_4, /* agc gain, cfo, rx_start_ts in dbr_cfr_metadata */
 	CFR_META_VERSION_5, /* agc gain, cfo, rx_start_ts in enh_cfr_metadata */
 	CFR_META_VERSION_6, /* mcs, gi_type in dbr_cfr_metadata */
 	CFR_META_VERSION_7, /* mcs, gi_type, sig_info in enh_cfr_metadata */
+	CFR_META_VERSION_8, /* agc gain table index in dbr_cfr_metadata */
+	CFR_META_VERSION_9, /* agc gain table index in enh_cfr_metadata */
 	CFR_META_VERSION_MAX = 0xFF,
 };
 
@@ -108,6 +115,13 @@ enum cfrradiotype {
 	CFR_CAPTURE_RADIO_ADRASTEA,
 	CFR_CAPTURE_RADIO_MAPLE,
 	CFR_CAPTURE_RADIO_MOSELLE,
+	CFR_CAPTURE_RADIO_SPRUCE,
+	CFR_CAPTURE_RADIO_ALDER,
+	CFR_CAPTURE_RADIO_WAIKIKI,
+	CFR_CAPTURE_RADIO_KIWI,
+	CFR_CAPTURE_RADIO_MANGO,
+	CFR_CAPTURE_RADIO_MIAMI,
+	CFR_CAPTURE_RADIO_YORK,
 	CFR_CAPTURE_RADIO_MAX = 0xFF,
 };
 
@@ -136,24 +150,6 @@ enum cfr_capture_type {
 	CFR_TYPE_METHOD_MAX,
 };
 
-/* ensure to add new members at the end of the structure only */
-struct leg_cfr_metadata {
-	u_int8_t    peer_addr[QDF_MAC_ADDR_SIZE];
-	u_int8_t    status;
-	u_int8_t    capture_bw;
-	u_int8_t    channel_bw;
-	u_int8_t    phy_mode;
-	u_int16_t   prim20_chan;
-	u_int16_t   center_freq1;
-	u_int16_t   center_freq2;
-	u_int8_t    capture_mode;
-	u_int8_t    capture_type;
-	u_int8_t    sts_count;
-	u_int8_t    num_rx_chain;
-	u_int32_t   timestamp;
-	u_int32_t   length;
-} __attribute__ ((__packed__));
-
 #define HOST_MAX_CHAINS 8
 
 /* ensure to add new members at the end of the structure only */
@@ -179,6 +175,7 @@ struct dbr_cfr_metadata {
 	u_int32_t   rx_start_ts;
 	u_int16_t   mcs_rate;
 	u_int16_t   gi_type;
+	u_int8_t    agc_gain_tbl_index[HOST_MAX_CHAINS];
 } __attribute__ ((__packed__));
 
 #ifdef WLAN_ENH_CFR_ENABLE
@@ -221,6 +218,7 @@ struct enh_cfr_metadata {
 	u_int16_t   mcs_rate;
 	u_int16_t   gi_type;
 	struct cfr_su_sig_info sig_info;
+	u_int8_t    agc_gain_tbl_index[HOST_MAX_CHAINS];
 } __attribute__ ((__packed__));
 #endif
 
@@ -235,12 +233,12 @@ struct cfr_header_cmn {
 	u_int8_t    chip_type;
 	u_int8_t    pltform_type;
 	u_int32_t   cfr_metadata_len;
+	u_int64_t   host_real_ts;
 } __attribute__ ((__packed__));
 
 struct csi_cfr_header {
 	struct cfr_header_cmn cmn;
 	union {
-		struct leg_cfr_metadata meta_leg;
 		struct dbr_cfr_metadata meta_dbr;
 #ifdef WLAN_ENH_CFR_ENABLE
 		struct enh_cfr_metadata meta_enh;
@@ -250,7 +248,7 @@ struct csi_cfr_header {
 
 /**
  * struct cfr_capture_params - structure to store cfr config param
- * bandwidth: bandwitdh of capture
+ * bandwidth: bandwidth of capture
  * period: period of capture
  * method: enum of method being followed to capture cfr data. 0-QoS null data
  */
@@ -264,6 +262,7 @@ struct cfr_capture_params {
  * struct psoc_cfr - private psoc object for cfr
  * psoc_obj: pointer to psoc object
  * is_cfr_capable: flag to determine if cfr is enabled or not
+ * is_cfr_pdev_id_soc: flag to send cfr request with PDEV_ID_SOC
  * is_cap_interval_mode_sel_support: flag to determine if target supports both
  *				     capture_count and capture_duration modes
  *				     with a nob provided to configure
@@ -272,9 +271,11 @@ struct cfr_capture_params {
 struct psoc_cfr {
 	struct wlan_objmgr_psoc *psoc_obj;
 	uint8_t is_cfr_capable;
+	uint8_t is_cfr_pdev_id_soc;
 #ifdef WLAN_ENH_CFR_ENABLE
 	uint8_t is_cap_interval_mode_sel_support;
 	uint8_t is_mo_marking_support;
+	uint8_t is_aoa_for_rcc_support;
 #endif
 };
 
@@ -404,9 +405,9 @@ struct unassoc_pool_entry {
  */
 struct ta_ra_cfr_cfg {
 	uint8_t filter_group_id;
-	uint16_t bw                          :5,
+	uint16_t bw                          :6,
 		 nss                         :8,
-		 rsvd0                       :3;
+		 rsvd0                       :2;
 	uint16_t valid_ta                    :1,
 		 valid_ta_mask               :1,
 		 valid_ra                    :1,
@@ -437,8 +438,8 @@ struct ta_ra_cfr_cfg {
  * capture_interval: Capture interval field which is time in between
  * consecutive CFR capture, in microsecond units
  * ul_mu_user_mask_lower: Bitfields indicates which of the users in the current
- * UL MU tranmission are enabled for CFR capture.
- * ul_mu_user_mask_upper: This is contiuation of the above lower mask.
+ * UL MU transmission are enabled for CFR capture.
+ * ul_mu_user_mask_upper: This is continuation of the above lower mask.
  * freeze_tlv_delay_cnt_en: Enable Freeze TLV delay counter in MAC
  * freeze_tlv_delay_cnt_thr: Indicates the number of consecutive Rx packets to
  * be skipped before CFR capture is enabled again.
@@ -495,8 +496,8 @@ struct cfr_rcc_param {
 /**
  * struct nl_event_cb - nl event cb for cfr data
  * vdev_id: vdev id
- * pid: PID to which data is sent via unicast nl evnet
- * cfr_nl_cb: callback to send nl evnet
+ * pid: PID to which data is sent via unicast nl event
+ * cfr_nl_cb: callback to send nl event
  */
 struct nl_event_cb {
 	uint8_t vdev_id;
@@ -549,6 +550,7 @@ struct nl_event_cb {
  * cfr_dma_aborts: No. of CFR DMA aborts in ucode
  * is_cap_interval_mode_sel_support: flag to determine if target supports both
  * is_mo_marking_support: flag to determine if MO marking is supported or not
+ * is_aoa_for_rcc_support: flag to determine if AoA is available for RCC or not
  * capture_count and capture_duration modes with a nob provided to configure.
  * unassoc_pool: Pool of un-associated clients used when capture method is
  * CFR_CAPTURE_METHOD_PROBE_RESPONSE
@@ -557,6 +559,12 @@ struct nl_event_cb {
  * is_prevent_suspend: CFR wake lock acquired or not
  * wake_lock: wake lock for cfr
  * runtime_lock: runtime lock for cfr
+ * freq: current operating freq for which AoA Phase delta values reported by FW
+ * max_aoa_chains: Indicate the max number of chains to which target supports
+ * AoA data.
+ * phase_delta: per chain phase delta associated with 62 gain values reported by
+ * FW via WMI_PDEV_AOA_PHASEDELTA_EVENTID.
+ * ibf_cal_val: Per chain IBF cal value from FW.
  */
 /*
  * To be extended if we get more capbality info
@@ -601,6 +609,7 @@ struct pdev_cfr {
 	uint64_t cfr_dma_aborts;
 	uint8_t is_cap_interval_mode_sel_support;
 	uint8_t is_mo_marking_support;
+	uint8_t is_aoa_for_rcc_support;
 #endif
 	struct unassoc_pool_entry unassoc_pool[MAX_CFR_ENABLED_CLIENTS];
 	struct nl_event_cb nl_cb;
@@ -609,6 +618,12 @@ struct pdev_cfr {
 	bool is_prevent_suspend;
 	qdf_wake_lock_t wake_lock;
 	qdf_runtime_lock_t runtime_lock;
+#endif
+#ifdef WLAN_ENH_CFR_ENABLE
+	uint32_t freq;
+	uint32_t max_aoa_chains;
+	uint16_t phase_delta[HOST_MAX_CHAINS][MAX_AGC_GAIN];
+	uint32_t ibf_cal_val[HOST_MAX_CHAINS];
 #endif
 };
 

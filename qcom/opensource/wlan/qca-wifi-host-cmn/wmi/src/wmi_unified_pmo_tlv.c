@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -316,7 +317,7 @@ static void fill_arp_offload_params_tlv(wmi_unified_t wmi_handle,
 			WMITLV_TAG_STRUC_WMI_ARP_OFFLOAD_TUPLE,
 			WMITLV_GET_STRUCT_TLVLEN(WMI_ARP_OFFLOAD_TUPLE));
 
-		/* Fill data for ARP and NS in the first tupple for LA */
+		/* Fill data for ARP and NS in the first tuple for LA */
 		if ((enable_or_disable & PMO_OFFLOAD_ENABLE) && (i == 0)) {
 			/* Copy the target ip addr and flags */
 			arp_tuple->flags = WMI_ARPOFF_FLAGS_VALID;
@@ -768,7 +769,7 @@ fill_fils_tlv_params(WMI_GTK_OFFLOAD_CMD_fixed_param *cmd,
  * @wmi_handle: wmi handle
  * @params: IGMP offload parameters
  *
- * Return: CDF status
+ * Return: QDF status
  */
 static
 QDF_STATUS send_igmp_offload_cmd_tlv(wmi_unified_t wmi_handle,
@@ -849,15 +850,22 @@ QDF_STATUS send_gtk_offload_cmd_tlv(wmi_unified_t wmi_handle, uint8_t vdev_id,
 				    uint32_t gtk_offload_opcode)
 {
 	int len;
+	uint8_t *buf_ptr;
 	wmi_buf_t buf;
 	WMI_GTK_OFFLOAD_CMD_fixed_param *cmd;
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
 
 	len = sizeof(*cmd);
 
+	len += WMI_TLV_HDR_SIZE;
 	if (params->is_fils_connection)
+		len += sizeof(wmi_gtk_offload_fils_tlv_param);
+
+	if (params->kck_len > 16)
 		len += WMI_TLV_HDR_SIZE +
-		       sizeof(wmi_gtk_offload_fils_tlv_param);
+		       roundup(params->kek_len, sizeof(uint32_t)) +
+		       WMI_TLV_HDR_SIZE +
+		       roundup(params->kck_len, sizeof(uint32_t));
 
 	/* alloc wmi buffer */
 	buf = wmi_buf_alloc(wmi_handle, len);
@@ -872,6 +880,7 @@ QDF_STATUS send_gtk_offload_cmd_tlv(wmi_unified_t wmi_handle, uint8_t vdev_id,
 		       WMITLV_GET_STRUCT_TLVLEN
 			       (WMI_GTK_OFFLOAD_CMD_fixed_param));
 
+	buf_ptr = wmi_buf_data(buf);
 	cmd->vdev_id = vdev_id;
 
 	/* Request target to enable GTK offload */
@@ -886,8 +895,32 @@ QDF_STATUS send_gtk_offload_cmd_tlv(wmi_unified_t wmi_handle, uint8_t vdev_id,
 	} else {
 		cmd->flags = gtk_offload_opcode;
 	}
-	if (params->is_fils_connection)
+
+	buf_ptr = (uint8_t *)cmd + sizeof(*cmd);
+
+	if (params->is_fils_connection) {
 		fill_fils_tlv_params(cmd, vdev_id, params);
+		buf_ptr += sizeof(wmi_gtk_offload_fils_tlv_param);
+	} else {
+		WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_STRUC, 0);
+		buf_ptr += WMI_TLV_HDR_SIZE;
+	}
+
+	if (params->kck_len > 16) {
+		WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_BYTE,
+			       roundup(params->kek_len, sizeof(uint32_t)));
+		buf_ptr += WMI_TLV_HDR_SIZE;
+
+		qdf_mem_copy(buf_ptr, params->kek, params->kek_len);
+		buf_ptr += roundup(params->kek_len, sizeof(uint32_t));
+
+		WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_BYTE,
+			       roundup(params->kck_len, sizeof(uint32_t)));
+		buf_ptr += WMI_TLV_HDR_SIZE;
+
+		qdf_mem_copy(buf_ptr, params->kck, params->kck_len);
+		buf_ptr += roundup(params->kck_len, sizeof(uint32_t));
+	}
 
 	wmi_debug("VDEVID: %d, GTK_FLAGS: x%x kek len %d",
 		 vdev_id, cmd->flags, params->kek_len);
@@ -1685,13 +1718,15 @@ QDF_STATUS wmi_unified_cmd_send_chk(struct wmi_unified *wmi_handle,
 /**
  * send_host_wakeup_ind_to_fw_cmd_tlv() - send wakeup ind to fw
  * @wmi_handle: wmi handle
+ * @tx_pending_ind: flag of TX has pending frames
  *
  * Sends host wakeup indication to FW. On receiving this indication,
  * FW will come out of WOW.
  *
  * Return: CDF status
  */
-static QDF_STATUS send_host_wakeup_ind_to_fw_cmd_tlv(wmi_unified_t wmi_handle)
+static QDF_STATUS send_host_wakeup_ind_to_fw_cmd_tlv(wmi_unified_t wmi_handle,
+						     bool tx_pending_ind)
 {
 	wmi_wow_hostwakeup_from_sleep_cmd_fixed_param *cmd;
 	wmi_buf_t buf;
@@ -1708,6 +1743,12 @@ static QDF_STATUS send_host_wakeup_ind_to_fw_cmd_tlv(wmi_unified_t wmi_handle)
 
 	cmd = (wmi_wow_hostwakeup_from_sleep_cmd_fixed_param *)
 	      wmi_buf_data(buf);
+
+	if (tx_pending_ind) {
+		wmi_debug("TX pending before WoW wake, indicate FW");
+		cmd->flags |= WMI_WOW_RESUME_FLAG_TX_DATA;
+	}
+
 	WMITLV_SET_HDR(&cmd->tlv_header,
 		WMITLV_TAG_STRUC_wmi_wow_hostwakeup_from_sleep_cmd_fixed_param,
 		WMITLV_GET_STRUCT_TLVLEN
@@ -2010,6 +2051,158 @@ void wmi_extwow_attach_tlv(struct wmi_unified *wmi_handle)
 }
 #endif /* WLAN_FEATURE_EXTWOW_SUPPORT */
 
+#ifdef WLAN_FEATURE_ICMP_OFFLOAD
+/**
+ * send_icmp_ipv4_config_cmd_tlv() - send ICMP IPV4 offload command to fw
+ * @wmi_handle: wmi handle
+ * @pmo_icmp_req: ICMP offload parameters
+ *
+ * Return: QDF status
+ */
+static QDF_STATUS
+send_icmp_ipv4_config_cmd_tlv(wmi_unified_t wmi_handle,
+			      struct pmo_icmp_offload *pmo_icmp_req)
+{
+	wmi_buf_t buf;
+	wmi_icmp_offload_fixed_param *cmd;
+	uint16_t len = sizeof(*cmd);
+	QDF_STATUS status;
+
+	buf = wmi_buf_alloc(wmi_handle, len);
+	if (!buf) {
+		wmi_err_rl("Failed to allocate wmi buffer");
+		status = QDF_STATUS_E_NOMEM;
+		return status;
+	}
+	cmd = (wmi_icmp_offload_fixed_param *)wmi_buf_data(buf);
+	WMITLV_SET_HDR(&cmd->tlv_header,
+		       WMITLV_TAG_STRUC_wmi_icmp_offload_fixed_param,
+		       WMITLV_GET_STRUCT_TLVLEN(wmi_icmp_offload_fixed_param));
+
+	cmd->vdev_id = pmo_icmp_req->vdev_id;
+	cmd->enable = pmo_icmp_req->enable;
+	cmd->valid_bitmask = 0;
+
+	WMI_SET_ICMP_OFFLOAD_IPV4_ENABLED_BIT(cmd->valid_bitmask);
+	qdf_mem_copy(&cmd->ipv4_addr, pmo_icmp_req->ipv4_addr,
+		     QDF_IPV4_ADDR_SIZE);
+	wmi_debug("ipv4:%pI4", &cmd->ipv4_addr);
+
+	wmi_mtrace(WMI_VDEV_ICMP_OFFLOAD_CMDID, cmd->vdev_id, 0);
+	status = wmi_unified_cmd_send(wmi_handle, buf, len,
+				      WMI_VDEV_ICMP_OFFLOAD_CMDID);
+
+	if (QDF_IS_STATUS_ERROR(status))
+		wmi_buf_free(buf);
+
+	return status;
+}
+
+/**
+ * send_icmp_ipv6_config_cmd_tlv() - send ICMP IPV6 offload command to fw
+ * @wmi_handle: wmi handle
+ * @pmo_icmp_req: ICMP offload parameters
+ *
+ * Return: QDF status
+ */
+static QDF_STATUS
+send_icmp_ipv6_config_cmd_tlv(wmi_unified_t wmi_handle,
+			      struct pmo_icmp_offload *pmo_icmp_req)
+{
+	wmi_buf_t buf;
+	uint8_t *buf_ptr;
+	uint16_t len;
+	int i;
+	WMI_IPV6_ADDR *ipv6_list;
+	wmi_icmp_offload_fixed_param *cmd;
+	QDF_STATUS status;
+
+	len = sizeof(wmi_icmp_offload_fixed_param) + WMI_TLV_HDR_SIZE +
+	      (pmo_icmp_req->ipv6_count) * sizeof(WMI_IPV6_ADDR);
+
+	buf = wmi_buf_alloc(wmi_handle, len);
+	if (!buf) {
+		wmi_err_rl("Failed to allocate wmi buffer");
+		status = QDF_STATUS_E_NOMEM;
+		return status;
+	}
+
+	buf_ptr = (uint8_t *)wmi_buf_data(buf);
+	cmd = (wmi_icmp_offload_fixed_param *)wmi_buf_data(buf);
+	WMITLV_SET_HDR(&cmd->tlv_header,
+		       WMITLV_TAG_STRUC_wmi_icmp_offload_fixed_param,
+		       WMITLV_GET_STRUCT_TLVLEN(wmi_icmp_offload_fixed_param));
+
+	cmd->vdev_id = pmo_icmp_req->vdev_id;
+	cmd->enable = pmo_icmp_req->enable;
+	cmd->valid_bitmask = 0;
+
+	WMI_SET_ICMP_OFFLOAD_IPV6_ENABLED_BIT(cmd->valid_bitmask);
+	buf_ptr += sizeof(*cmd);
+	WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_FIXED_STRUC,
+		       sizeof(WMI_IPV6_ADDR) * pmo_icmp_req->ipv6_count);
+	ipv6_list = (WMI_IPV6_ADDR *)(buf_ptr + WMI_TLV_HDR_SIZE);
+
+	for (i = 0; i < pmo_icmp_req->ipv6_count; i++) {
+		qdf_mem_copy(((*(ipv6_list + i)).address),
+			     &pmo_icmp_req->ipv6_addr[i],
+			     sizeof(WMI_IPV6_ADDR));
+		wmi_debug("ipv6_list[%d]:%pI6", i, (ipv6_list + i));
+	}
+
+	/* send the wmi command */
+	wmi_mtrace(WMI_VDEV_ICMP_OFFLOAD_CMDID, cmd->vdev_id, 0);
+	status = wmi_unified_cmd_send(wmi_handle, buf, len,
+				      WMI_VDEV_ICMP_OFFLOAD_CMDID);
+
+	if (QDF_IS_STATUS_ERROR(status))
+		wmi_buf_free(buf);
+
+	return status;
+}
+
+/**
+ * send_icmp_offload_config_cmd_tlv() - send ICMP offload command to fw
+ * @wmi_handle: wmi handle
+ * @pmo_icmp_req: ICMP offload parameters
+ *
+ * Return: QDF status
+ */
+static QDF_STATUS
+send_icmp_offload_config_cmd_tlv(wmi_unified_t wmi_handle,
+				 struct pmo_icmp_offload *pmo_icmp_req)
+{
+	QDF_STATUS status;
+
+	switch (pmo_icmp_req->trigger) {
+	case pmo_ipv4_change_notify:
+		status = send_icmp_ipv4_config_cmd_tlv(wmi_handle,
+						       pmo_icmp_req);
+		break;
+	case pmo_ipv6_change_notify:
+		status = send_icmp_ipv6_config_cmd_tlv(wmi_handle,
+						       pmo_icmp_req);
+		break;
+	default:
+		QDF_DEBUG_PANIC("Invalid ICMP trigger %d",
+				pmo_icmp_req->trigger);
+		status = QDF_STATUS_E_FAILURE;
+	}
+
+	return status;
+}
+
+static void wmi_icmp_offload_config_tlv(struct wmi_unified *wmi_handle)
+{
+	struct wmi_ops *ops = wmi_handle->ops;
+
+	ops->send_icmp_offload_config_cmd = send_icmp_offload_config_cmd_tlv;
+}
+#else
+static inline void wmi_icmp_offload_config_tlv(struct wmi_unified *wmi_handle)
+{}
+#endif /* WLAN_FEATURE_ICMP_OFFLOAD */
+
 void wmi_pmo_attach_tlv(wmi_unified_t wmi_handle)
 {
 	struct wmi_ops *ops = wmi_handle->ops;
@@ -2045,4 +2238,5 @@ void wmi_pmo_attach_tlv(wmi_unified_t wmi_handle)
 	wmi_lphb_attach_tlv(wmi_handle);
 	wmi_packet_filtering_attach_tlv(wmi_handle);
 	wmi_extwow_attach_tlv(wmi_handle);
+	wmi_icmp_offload_config_tlv(wmi_handle);
 }

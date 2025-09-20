@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -147,8 +148,8 @@ wlan_vdev_mlme_ser_vdev_restart(struct wlan_serialization_command *cmd)
 	return wlan_serialization_request(cmd);
 }
 
-void wlan_mlme_restart_pdev_iter_cb(struct wlan_objmgr_pdev *pdev,
-				    void *object, void *arg)
+static void wlan_mlme_restart_pdev_iter_cb(struct wlan_objmgr_pdev *pdev,
+					   void *object, void *arg)
 {
 	struct wlan_objmgr_vdev *vdev = (struct wlan_objmgr_vdev *)object;
 	uint8_t *pdev_restart_pending = (uint8_t *)arg;
@@ -198,72 +199,6 @@ wlan_vdev_mlme_ser_pdev_restart(struct wlan_serialization_command *cmd)
 
 	if (pdev_restart_in_pending)
 		return WLAN_SER_CMD_ALREADY_EXISTS;
-
-	return wlan_serialization_request(cmd);
-}
-
-enum wlan_serialization_status
-wlan_vdev_mlme_ser_connect(struct wlan_serialization_command *cmd)
-{
-	struct vdev_mlme_obj *vdev_mlme;
-
-	if (!cmd || !cmd->vdev) {
-		mlme_err("Null input");
-		return WLAN_SER_CMD_DENIED_UNSPECIFIED;
-	}
-
-	if (!wlan_ser_is_vdev_queue_enabled(cmd->vdev))
-		return WLAN_SER_CMD_QUEUE_DISABLED;
-	/*
-	 * Serialization command filtering logic
-	 * a. Cancel any existing CONNECT cmd in the pending queue
-	 * b. If there is an CONNECT cmd in active queue and there is no
-	 * DISCONNECT cmd in pending queue, then explicitly enqueue a
-	 * DISCONNECT cmd to avoid back to back execution of CONNECT cmd.
-	 * c. Enqueue the new CONNECT cmd to the pending queue
-	 */
-	wlan_vdev_mlme_ser_cancel_request(
-			cmd->vdev,
-			WLAN_SER_CMD_VDEV_CONNECT,
-			WLAN_SER_CANCEL_VDEV_NON_SCAN_CMD_TYPE);
-
-	if (wlan_serialization_is_cmd_present_in_active_queue(NULL, cmd)) {
-		vdev_mlme = wlan_vdev_mlme_get_cmpt_obj(cmd->vdev);
-		if (mlme_vdev_enqueue_exp_ser_cmd(vdev_mlme,
-					WLAN_SER_CMD_VDEV_DISCONNECT)) {
-			mlme_err("Unable to add the exception cmd request");
-			return WLAN_SER_CMD_DENIED_UNSPECIFIED;
-		}
-	}
-
-	return wlan_serialization_request(cmd);
-}
-
-enum wlan_serialization_status
-wlan_vdev_mlme_ser_disconnect(struct wlan_serialization_command *cmd)
-{
-	if (!cmd || !cmd->vdev) {
-		mlme_err("Null input");
-		return WLAN_SER_CMD_DENIED_UNSPECIFIED;
-	}
-
-	if (!wlan_ser_is_vdev_queue_enabled(cmd->vdev))
-		return WLAN_SER_CMD_QUEUE_DISABLED;
-	/*
-	 * Serialization command filtering logic
-	 * a.Cancel any existing non-blocking non-scan command in the
-	 * pending queue
-	 * b.If there is a DISCONNECT cmd in active queue then return
-	 * c.Else enqueue the DISCONNECT cmd
-	 */
-	wlan_vdev_mlme_ser_cancel_request(cmd->vdev,
-					  WLAN_SER_CMD_NONSCAN,
-					  WLAN_SER_CANCEL_VDEV_NON_SCAN_NB_CMD);
-
-	if (wlan_serialization_is_cmd_present_in_active_queue(NULL, cmd)) {
-		mlme_debug("Cmd already exist in the active queue");
-		return WLAN_SER_CMD_DENIED_UNSPECIFIED;
-	}
 
 	return wlan_serialization_request(cmd);
 }

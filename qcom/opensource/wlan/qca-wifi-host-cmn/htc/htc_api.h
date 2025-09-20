@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2014, 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -59,6 +59,8 @@ struct htc_init_info {
 	void (*target_initial_wakeup_cb)(void *cb_ctx);
 	void *target_psoc;
 	uint32_t cfg_wmi_credit_cnt;
+	/* HTC Pipe Ready Timeout in msecs */
+	uint32_t htc_ready_timeout_ms;
 };
 
 /* Struct for HTC layer packet stats*/
@@ -298,7 +300,7 @@ struct htc_endpoint_credit_dist {
 #define IS_EP_ACTIVE(epDist)  ((epDist)->DistFlags & HTC_EP_ACTIVE)
 #define SET_EP_ACTIVE(epDist) (epDist)->DistFlags |= HTC_EP_ACTIVE
 
-/* credit distibution code that is passed into the distrbution function,
+/* credit distribution code that is passed into the distrbution function,
  * there are mandatory and optional codes that must be handled
  */
 enum htc_credit_dist_reason {
@@ -366,7 +368,7 @@ struct htc_endpoint_stats {
 	uint32_t TxCreditsFromOther;
 	/* count of credits received via another endpoint */
 	uint32_t TxCreditsFromEp0;
-	/* count of consummed credits */
+	/* count of consumed credits */
 	uint32_t TxCreditsConsummed;
 	/* count of credits returned */
 	uint32_t TxCreditsReturned;
@@ -386,6 +388,28 @@ struct htc_endpoint_stats {
 	uint32_t RxAllocThreshHit;
 	/* total number of bytes */
 	uint32_t RxAllocThreshBytes;
+};
+
+/**
+ * htc_link_vote_user_id - user ids for each link vote type
+ * @HTC_LINK_VOTE_INVALID_MIN_USER_ID: min user id
+ * @HTC_LINK_VOTE_SAP_USER_ID: sap user id
+ * @HTC_LINK_VOTE_GO_USER_ID: go user id
+ * @HTC_LINK_VOTE_NDP_USER_ID: ndp user id
+ * @HTC_LINK_VOTE_SAP_DFS_USER_ID: sap dfs user id
+ * @HTC_LINK_VOTE_STA_USER_ID: sta user id
+ * @HTC_LINK_VOTE_DIRECT_LINK_USER_ID: Direct link user ID
+ * @HTC_LINK_VOTE_INVALID_MAX_USER_ID: max user id
+ */
+enum htc_link_vote_user_id {
+	HTC_LINK_VOTE_INVALID_MIN_USER_ID = 0,
+	HTC_LINK_VOTE_SAP_USER_ID = 1,
+	HTC_LINK_VOTE_GO_USER_ID = 2,
+	HTC_LINK_VOTE_NDP_USER_ID = 3,
+	HTC_LINK_VOTE_SAP_DFS_USER_ID = 4,
+	HTC_LINK_VOTE_STA_USER_ID = 5,
+	HTC_LINK_VOTE_DIRECT_LINK_USER_ID = 6,
+	HTC_LINK_VOTE_INVALID_MAX_USER_ID
 };
 
 /* ------ Function Prototypes ------ */
@@ -758,8 +782,7 @@ void htc_global_credit_flow_enable(void);
 
 /* Disable ASPM : Disable PCIe low power */
 bool htc_can_suspend_link(HTC_HANDLE HTCHandle);
-void htc_vote_link_down(HTC_HANDLE HTCHandle);
-void htc_vote_link_up(HTC_HANDLE HTCHandle);
+
 #ifdef IPA_OFFLOAD
 void htc_ipa_get_ce_resource(HTC_HANDLE htc_handle,
 			     qdf_shared_mem_t **ce_sr,
@@ -794,27 +817,76 @@ int htc_pm_runtime_get(HTC_HANDLE htc_handle);
 int htc_pm_runtime_put(HTC_HANDLE htc_handle);
 
 /**
- * htc_dec_return_runtime_cnt: Decrement htc runtime count
+ * htc_dec_return_htt_runtime_cnt: Decrement htc htt runtime count
  * @htc: HTC handle
  *
  * Return: value of runtime count after decrement
  */
-int32_t htc_dec_return_runtime_cnt(HTC_HANDLE htc);
+int32_t htc_dec_return_htt_runtime_cnt(HTC_HANDLE htc);
 #else
 static inline int htc_pm_runtime_get(HTC_HANDLE htc_handle) { return 0; }
 static inline int htc_pm_runtime_put(HTC_HANDLE htc_handle) { return 0; }
 
 static inline
-int32_t htc_dec_return_runtime_cnt(HTC_HANDLE htc)
+int32_t htc_dec_return_htt_runtime_cnt(HTC_HANDLE htc)
 {
 	return -1;
+}
+#endif
+
+#ifdef WLAN_DEBUG_LINK_VOTE
+/**
+ * htc_log_link_user_votes - API to log link user votes
+ *
+ * API to log the link user votes
+ *
+ * Return: void
+ */
+void htc_log_link_user_votes(void);
+
+/**
+ * htc_vote_link_down - API to vote for link down
+ * @htc_handle: HTC handle
+ * @id: PCIe link vote user id
+ *
+ * API for upper layers to call HIF to vote for link down
+ *
+ * Return: void
+ */
+void htc_vote_link_down(HTC_HANDLE htc_handle, enum htc_link_vote_user_id id);
+
+/**
+ * htc_vote_link_up - API to vote for link up
+ * @htc_handle: HTC Handle
+ * @id: PCIe link vote user id
+ *
+ * API for upper layers to call HIF to vote for link up
+ *
+ * Return: void
+ */
+void htc_vote_link_up(HTC_HANDLE htc_handle, enum htc_link_vote_user_id id);
+
+#else
+static inline
+void htc_log_link_user_votes(void)
+{
+}
+
+static inline
+void htc_vote_link_down(HTC_HANDLE htc_handle, enum htc_link_vote_user_id id)
+{
+}
+
+static inline
+void htc_vote_link_up(HTC_HANDLE htc_handle, enum htc_link_vote_user_id id)
+{
 }
 #endif
 
 /**
   * htc_set_async_ep() - set async HTC end point
   *           user should call this function after htc_connect_service before
-  *           queing any packets to end point
+  *           queueing any packets to end point
   * @HTCHandle: htc handle
   * @HTC_ENDPOINT_ID: end point id
   * @value: true or false
@@ -828,7 +900,7 @@ void htc_set_async_ep(HTC_HANDLE HTCHandle,
 /**
  * htc_set_wmi_endpoint_count: Set number of WMI endpoint
  * @htc_handle: HTC handle
- * @wmi_ep_count: WMI enpoint count
+ * @wmi_ep_count: WMI endpoint count
  *
  * return: None
  */
@@ -838,7 +910,7 @@ void htc_set_wmi_endpoint_count(HTC_HANDLE htc_handle, uint8_t wmi_ep_count);
  * htc_get_wmi_endpoint_count: Get number of WMI endpoint
  * @htc_handle: HTC handle
  *
- * return: WMI enpoint count
+ * return: WMI endpoint count
  */
 uint8_t  htc_get_wmi_endpoint_count(HTC_HANDLE htc_handle);
 

@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -16,6 +17,8 @@
 
 #ifndef _QDF_IPA_H
 #define _QDF_IPA_H
+
+#include <linux/types.h>
 
 #ifdef IPA_OFFLOAD
 
@@ -56,7 +59,7 @@ typedef enum {
 /**
  * qdf_ipa_wdi_meter_evt_type_t - type of event client callback is
  * for AP+STA mode metering
- * @IPA_GET_WDI_SAP_STATS: get IPA_stats betwen SAP and STA -
+ * @IPA_GET_WDI_SAP_STATS: get IPA_stats between SAP and STA -
  *			use ipa_get_wdi_sap_stats structure
  * @IPA_SET_WIFI_QUOTA: set quota limit on STA -
  *			use ipa_set_wifi_quota structure
@@ -256,6 +259,13 @@ typedef __qdf_ipa_wlan_hdr_attrib_val_t qdf_ipa_wlan_hdr_attrib_val_t;
 typedef int (*qdf_ipa_msg_pull_fn)(void *buff, u32 len, u32 type);
 typedef void (*qdf_ipa_ready_cb)(void *user_data);
 
+#ifdef IPA_WDS_EASYMESH_FEATURE
+/**
+ * __qdf_ipa_ast_info_type_t - AST entry create/update information
+ */
+typedef __qdf_ipa_ast_info_type_t qdf_ipa_ast_info_type_t;
+#endif
+
 #define QDF_IPA_SET_META_MSG_TYPE(meta, msg_type) \
 	__QDF_IPA_SET_META_MSG_TYPE(meta, msg_type)
 
@@ -269,14 +279,35 @@ typedef void (*qdf_ipa_ready_cb)(void *user_data);
 #define QDF_IPA_RM_RESOURCE_APPS_CONS __QDF_IPA_RM_RESOURCE_APPS_CONS
 
 #define QDF_IPA_CLIENT_WLAN1_PROD __QDF_IPA_CLIENT_WLAN1_PROD
+#define QDF_IPA_CLIENT_WLAN3_PROD __QDF_IPA_CLIENT_WLAN3_PROD
 #define QDF_IPA_CLIENT_WLAN1_CONS __QDF_IPA_CLIENT_WLAN1_CONS
 #define QDF_IPA_CLIENT_WLAN2_CONS __QDF_IPA_CLIENT_WLAN2_CONS
 #define QDF_IPA_CLIENT_WLAN3_CONS __QDF_IPA_CLIENT_WLAN3_CONS
 #define QDF_IPA_CLIENT_WLAN4_CONS __QDF_IPA_CLIENT_WLAN4_CONS
+#define QDF_IPA_CLIENT_WLAN4_PROD __QDF_IPA_CLIENT_WLAN4_PROD
+#ifdef FEATURE_IPA_PIPE_CHANGE_WDI1
+#define QDF_IPA_CLIENT_WLAN_LEGACY_CONS   QDF_IPA_CLIENT_WLAN3_CONS
+#define QDF_IPA_CLIENT_WLAN_LEGACY_PROD   QDF_IPA_CLIENT_WLAN3_PROD
+#define QDF_IPA_CLIENT_MCC2_CONS          QDF_IPA_CLIENT_WLAN4_CONS
+#else
+#define QDF_IPA_CLIENT_WLAN_LEGACY_CONS   QDF_IPA_CLIENT_WLAN1_CONS
+#define QDF_IPA_CLIENT_WLAN_LEGACY_PROD   QDF_IPA_CLIENT_WLAN1_PROD
+#define QDF_IPA_CLIENT_MCC2_CONS          QDF_IPA_CLIENT_WLAN3_CONS
+#endif
+
+#ifdef QCN7605_SUPPORT
+#define QDF_IPA_CLIENT_WLAN_WDI2_CONS __QDF_IPA_CLIENT_WLAN_WDI2_CONS
+#define QDF_IPA_CLIENT_WLAN_WDI2_PROD __QDF_IPA_CLIENT_WLAN_WDI2_PROD
+#else
+#define QDF_IPA_CLIENT_WLAN_WDI2_CONS QDF_IPA_CLIENT_WLAN1_CONS
+#define QDF_IPA_CLIENT_WLAN_WDI2_PROD QDF_IPA_CLIENT_WLAN1_PROD
+#endif
 
 /*
  * Resume / Suspend
  */
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 static inline int qdf_ipa_reset_endpoint(u32 clnt_hdl)
 {
 	return __qdf_ipa_reset_endpoint(clnt_hdl);
@@ -321,15 +352,6 @@ static inline int qdf_ipa_put_hdr(u32 hdr_hdl)
 static inline int qdf_ipa_copy_hdr(qdf_ipa_ioc_copy_hdr_t *copy)
 {
 	return __qdf_ipa_copy_hdr(copy);
-}
-
-/*
- * Messaging
- */
-static inline int qdf_ipa_send_msg(qdf_ipa_msg_meta_t *meta, void *buff,
-		ipa_msg_free_fn callback)
-{
-	return __qdf_ipa_send_msg(meta, buff, callback);
 }
 
 static inline int qdf_ipa_register_pull_msg(qdf_ipa_msg_meta_t *meta,
@@ -385,28 +407,12 @@ static inline int qdf_ipa_tx_dp_mul(
 	return __qdf_ipa_tx_dp_mul(dst, data_desc);
 }
 
-static inline void qdf_ipa_free_skb(qdf_ipa_rx_data_t *rx_in)
-{
-	return __qdf_ipa_free_skb(rx_in);;
-}
-
 /*
  * System pipes
  */
 static inline u16 qdf_ipa_get_smem_restr_bytes(void)
 {
 	return __qdf_ipa_get_smem_restr_bytes();
-}
-
-static inline int qdf_ipa_setup_sys_pipe(qdf_ipa_sys_connect_params_t *sys_in,
-		u32 *clnt_hdl)
-{
-	return __qdf_ipa_setup_sys_pipe(sys_in, clnt_hdl);
-}
-
-static inline int qdf_ipa_teardown_sys_pipe(u32 clnt_hdl)
-{
-	return __qdf_ipa_teardown_sys_pipe(clnt_hdl);
 }
 
 static inline int qdf_ipa_connect_wdi_pipe(qdf_ipa_wdi_in_params_t *in,
@@ -444,17 +450,6 @@ static inline int qdf_ipa_uc_wdi_get_dbpa(
 	qdf_ipa_wdi_db_params_t *out)
 {
 	return __qdf_ipa_uc_wdi_get_dbpa(out);
-}
-
-static inline int qdf_ipa_uc_reg_rdyCB(
-	qdf_ipa_wdi_uc_ready_params_t *param)
-{
-	return __qdf_ipa_uc_reg_rdyCB(param);
-}
-
-static inline int qdf_ipa_uc_dereg_rdyCB(void)
-{
-	return __qdf_ipa_uc_dereg_rdyCB();
 }
 
 
@@ -564,19 +559,9 @@ static inline void qdf_ipa_bam_reg_dump(void)
 	return __qdf_ipa_bam_reg_dump();
 }
 
-static inline int qdf_ipa_get_wdi_stats(qdf_ipa_hw_stats_wdi_info_data_t *stats)
-{
-	return __qdf_ipa_get_wdi_stats(stats);
-}
-
 static inline int qdf_ipa_get_ep_mapping(qdf_ipa_client_type_t client)
 {
 	return __qdf_ipa_get_ep_mapping(client);
-}
-
-static inline bool qdf_ipa_is_ready(void)
-{
-	return __qdf_ipa_is_ready();
 }
 
 static inline void qdf_ipa_proxy_clk_vote(void)
@@ -638,11 +623,58 @@ static inline int qdf_ipa_stop_gsi_channel(u32 clnt_hdl)
 	return __qdf_ipa_stop_gsi_channel(clnt_hdl);
 }
 
+#endif
+static inline void qdf_ipa_free_skb(qdf_ipa_rx_data_t *rx_in)
+{
+	return __qdf_ipa_free_skb(rx_in);
+}
+
+static inline int qdf_ipa_uc_reg_rdyCB(
+	qdf_ipa_wdi_uc_ready_params_t *param)
+{
+	return __qdf_ipa_uc_reg_rdyCB(param);
+}
+
+static inline int qdf_ipa_uc_dereg_rdyCB(void)
+{
+	return __qdf_ipa_uc_dereg_rdyCB();
+}
+
+static inline int qdf_ipa_get_wdi_stats(qdf_ipa_hw_stats_wdi_info_data_t *stats)
+{
+	return __qdf_ipa_get_wdi_stats(stats);
+}
+
 static inline int qdf_ipa_register_ipa_ready_cb(
 	void (*qdf_ipa_ready_cb)(void *user_data),
 	void *user_data)
 {
 	return __qdf_ipa_register_ipa_ready_cb(qdf_ipa_ready_cb, user_data);
+}
+
+static inline int qdf_ipa_setup_sys_pipe(qdf_ipa_sys_connect_params_t *sys_in,
+					 u32 *clnt_hdl)
+{
+	return __qdf_ipa_setup_sys_pipe(sys_in, clnt_hdl);
+}
+
+static inline int qdf_ipa_teardown_sys_pipe(u32 clnt_hdl)
+{
+	return __qdf_ipa_teardown_sys_pipe(clnt_hdl);
+}
+
+/*
+ * Messaging
+ */
+static inline int qdf_ipa_send_msg(qdf_ipa_msg_meta_t *meta, void *buff,
+				   ipa_msg_free_fn callback)
+{
+	return __qdf_ipa_send_msg(meta, buff, callback);
+}
+
+static inline bool qdf_ipa_is_ready(void)
+{
+	return __qdf_ipa_is_ready();
 }
 
 #ifdef FEATURE_METERING
@@ -682,5 +714,12 @@ static inline bool qdf_ipa_get_lan_rx_napi(void)
 	return false;
 }
 #endif /* IPA_LAN_RX_NAPI_SUPPORT */
+#else
+#ifdef ENABLE_SMMU_S1_TRANSLATION
+static inline bool qdf_get_ipa_smmu_enabled(void)
+{
+	return false;
+}
+#endif
 #endif /* IPA_OFFLOAD */
 #endif /* _QDF_IPA_H */

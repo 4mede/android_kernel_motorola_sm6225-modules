@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2018-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -65,6 +66,8 @@ wlan_mlme_get_lmac_tx_ops(struct wlan_objmgr_psoc *psoc)
  * @WLAN_VDEV_SS_STOP_DOWN_PROGRESS:      Stop down progress sub state
  * @WLAN_VDEV_SS_IDLE:                    Idle sub state (used, only if a state
  *                                        does not have substate)
+ * @WLAN_VDEV_SS_MLO_SYNC_WAIT:           Sync wait sub state for MLO SAP
+ * @WLAN_VDEV_SS_UP_ACTIVE:               Up active sub state
  * @WLAN_VDEV_SS_MAX:                     Max substate
  */
 enum wlan_vdev_state {
@@ -86,7 +89,9 @@ enum wlan_vdev_state {
 	WLAN_VDEV_SS_STOP_STOP_PROGRESS = 15,
 	WLAN_VDEV_SS_STOP_DOWN_PROGRESS = 16,
 	WLAN_VDEV_SS_IDLE = 17,
-	WLAN_VDEV_SS_MAX = 18,
+	WLAN_VDEV_SS_MLO_SYNC_WAIT = 18,
+	WLAN_VDEV_SS_UP_ACTIVE = 19,
+	WLAN_VDEV_SS_MAX = 20,
 };
 
 /**
@@ -105,7 +110,7 @@ enum wlan_vdev_state {
  * @WLAN_VDEV_SM_EV_DFS_CAC_COMPLETED:   Notifies on CAC completion
  * @WLAN_VDEV_SM_EV_DOWN:                Invokes VDEV DOWN operation
  * @WLAN_VDEV_SM_EV_CONNECTION_FAIL:     Notifications for UP/connection failure
- * @WLAN_VDEV_SM_EV_STOP_RESP:           Notifcation of stop response
+ * @WLAN_VDEV_SM_EV_STOP_RESP:           Notification of stop response
  * @WLAN_VDEV_SM_EV_STOP_FAIL:           Notification of stop req failure
  * @WLAN_VDEV_SM_EV_DOWN_FAIL:           Notification of down failure
  * @WLAN_VDEV_SM_EV_DISCONNECT_COMPLETE: Notification of Peer cleanup complete
@@ -126,6 +131,9 @@ enum wlan_vdev_state {
  * @WLAN_VDEV_SM_EV_STOP_REQ:            Invoke API to initiate STOP handshake
  * @WLAN_VDEV_SM_EV_CHAN_SWITCH_DISABLED:Test only, CSA completes without
  *					 change in channel
+ * @WLAN_VDEV_SM_EV_MLO_SYNC_COMPLETE:   MLO mgr triggers this event for the mlo
+ *                                       sap in vdev wait up state, if all the
+ *                                       links finish vdev start rsp.
  */
 enum wlan_vdev_sm_evt {
 	WLAN_VDEV_SM_EV_START = 0,
@@ -159,6 +167,7 @@ enum wlan_vdev_sm_evt {
 	WLAN_VDEV_SM_EV_ROAM = 28,
 	WLAN_VDEV_SM_EV_STOP_REQ = 29,
 	WLAN_VDEV_SM_EV_CHAN_SWITCH_DISABLED = 30,
+	WLAN_VDEV_SM_EV_MLO_SYNC_COMPLETE = 31,
 };
 
 /**
@@ -200,4 +209,18 @@ QDF_STATUS wlan_mlme_psoc_enable(struct wlan_objmgr_psoc *psoc);
  *         FAILURE, if cleanup fails
  */
 QDF_STATUS wlan_mlme_psoc_disable(struct wlan_objmgr_psoc *psoc);
+
+#ifdef WLAN_FEATURE_DYNAMIC_MAC_ADDR_UPDATE
+/**
+ * wlan_vdev_mlme_send_set_mac_addr() - Send set MAC address command to FW
+ * @mac_addr: VDEV MAC address
+ * @mld_addr: VDEV MLD address
+ * @vdev: Pointer to object manager VDEV
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS wlan_vdev_mlme_send_set_mac_addr(struct qdf_mac_addr mac_addr,
+					    struct qdf_mac_addr mld_addr,
+					    struct wlan_objmgr_vdev *vdev);
+#endif
 #endif

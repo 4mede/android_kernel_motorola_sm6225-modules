@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -41,6 +42,7 @@
  * STOP_RESPONSE_BIT: vdev stop response bit
  * DELETE_RESPONSE_BIT:  vdev delete response bit
  * PEER_DELETE_ALL_RESPONSE_BIT: vdev peer delete all response bit
+ * RSO_STOP_RESPONSE_BIT : RSO stop response bit
  */
 enum wlan_vdev_mgr_tgt_if_rsp_bit {
 	START_RESPONSE_BIT = 0,
@@ -48,6 +50,7 @@ enum wlan_vdev_mgr_tgt_if_rsp_bit {
 	STOP_RESPONSE_BIT = 2,
 	DELETE_RESPONSE_BIT = 3,
 	PEER_DELETE_ALL_RESPONSE_BIT = 4,
+	RSO_STOP_RESPONSE_BIT = 5,
 	RESPONSE_BIT_MAX,
 };
 
@@ -65,6 +68,7 @@ static inline char *string_from_rsp_bit(enum wlan_vdev_mgr_tgt_if_rsp_bit bit)
 					"STOP",
 					"DELETE",
 					"PEER DELETE ALL",
+					"RSO STOP",
 					"RESPONE MAX"};
 	return (char *)strings[bit];
 }
@@ -75,11 +79,24 @@ static inline char *string_from_rsp_bit(enum wlan_vdev_mgr_tgt_if_rsp_bit bit)
 #define STOP_RESPONSE_TIMER            (4000 + PMO_RESUME_TIMEOUT)
 #define DELETE_RESPONSE_TIMER          (4000 + PMO_RESUME_TIMEOUT)
 #define PEER_DELETE_ALL_RESPONSE_TIMER (6000 + PMO_RESUME_TIMEOUT)
+#define RSO_STOP_RESPONSE_TIMER        (6000 + PMO_RESUME_TIMEOUT)
+#elif defined(QCA_LOWMEM_CONFIG) || defined(QCA_512M_CONFIG) || \
+defined(QCA_WIFI_QCA5018)
+#define START_RESPONSE_TIMER           15000
+#define STOP_RESPONSE_TIMER            15000
+#define DELETE_RESPONSE_TIMER          15000
+#define PEER_DELETE_ALL_RESPONSE_TIMER 15000
+#define RSO_STOP_RESPONSE_TIMER        15000
 #else
-#define START_RESPONSE_TIMER           6000
-#define STOP_RESPONSE_TIMER            4000
+#define START_RESPONSE_TIMER           8000
+#define STOP_RESPONSE_TIMER            6000
 #define DELETE_RESPONSE_TIMER          4000
 #define PEER_DELETE_ALL_RESPONSE_TIMER 6000
+#define RSO_STOP_RESPONSE_TIMER        6000
+#endif
+
+#ifdef WLAN_FEATURE_DYNAMIC_MAC_ADDR_UPDATE
+#define WLAN_SET_MAC_ADDR_TIMEOUT      START_RESPONSE_TIMER
 #endif
 
 /**
@@ -91,6 +108,7 @@ static inline char *string_from_rsp_bit(enum wlan_vdev_mgr_tgt_if_rsp_bit bit)
  * @timer_status: status of timer
  * @rsp_timer_inuse: Status bit to inform whether the rsp timer is inuse
  * @vdev_id: vdev object id
+ * @peer_type_bitmap: Peer type bitmap
  */
 struct vdev_response_timer {
 	struct wlan_objmgr_psoc *psoc;
@@ -100,6 +118,7 @@ struct vdev_response_timer {
 	QDF_STATUS timer_status;
 	qdf_atomic_t rsp_timer_inuse;
 	uint8_t vdev_id;
+	uint32_t peer_type_bitmap;
 };
 
 /**
@@ -148,10 +167,12 @@ struct vdev_delete_response {
  * struct peer_delete_all_response - peer delete all response structure
  * @vdev_id: vdev id
  * @status: FW status for vdev delete all peer request
+ * @peer_type_bitmap: bitmap of peer type to delete from enum wlan_peer_type
  */
 struct peer_delete_all_response {
 	uint8_t vdev_id;
 	uint8_t status;
+	uint32_t peer_type_bitmap;
 };
 
 /**
@@ -159,11 +180,28 @@ struct peer_delete_all_response {
  * @pdev_id: pdev id
  * @status: FW status for multi vdev restart request
  * @vdev_id_bmap: Bitmap of vdev_ids
+ * @timestamp: Time stamp corresponding to the start of event processing
  */
 struct multi_vdev_restart_resp {
 	uint8_t pdev_id;
 	uint8_t status;
 	qdf_bitmap(vdev_id_bmap, WLAN_UMAC_PSOC_MAX_VDEVS);
+	uint64_t timestamp;
 };
 
+#ifdef WLAN_FEATURE_11BE_MLO
+/**
+ * struct vdev_sta_quiet_event - mlo sta quiet offload structure
+ * @mld_mac: AP mld mac address
+ * @link_mac: AP link mac address
+ * @link_id: Link id associated with AP
+ * @quiet_status: WMI_QUIET_EVENT_FLAG: quiet start or stop
+ */
+struct vdev_sta_quiet_event {
+	struct qdf_mac_addr mld_mac;
+	struct qdf_mac_addr link_mac;
+	uint8_t link_id;
+	bool quiet_status;
+};
+#endif
 #endif /* __WLAN_VDEV_MGR_TGT_IF_RX_DEFS_H__ */
