@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -26,15 +26,6 @@
 #include "wlan_mgmt_txrx_utils_api.h"
 #include "cfg_ucfg_api.h"
 #include "wlan_mgmt_txrx_utils_api.h"
-
-/*
- * The following commit was introduced in v5.17:
- * cead18552660 ("exit: Rename complete_and_exit to kthread_complete_and_exit")
- * Use the old name for kernels before 5.17
- */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0))
-#define kthread_complete_and_exit(c, s) complete_and_exit(c, s)
-#endif
 
 void pkt_capture_mon(struct pkt_capture_cb_context *cb_ctx, qdf_nbuf_t msdu,
 		     struct wlan_objmgr_vdev *vdev, uint16_t ch_freq)
@@ -261,7 +252,7 @@ static int pkt_capture_mon_thread(void *arg)
 	mon_ctx = (struct pkt_capture_mon_context *)arg;
 	set_user_nice(current, -1);
 #ifdef MSM_PLATFORM
-	set_wake_up_idle(true);
+	qdf_set_wake_up_idle(true);
 #endif
 
 	/**
@@ -334,7 +325,7 @@ static int pkt_capture_mon_thread(void *arg)
 		}
 	}
 	pkt_capture_debug("Exiting packet capture mon thread");
-	kthread_complete_and_exit(&mon_ctx->mon_shutdown, 0);
+	complete_and_exit(&mon_ctx->mon_shutdown, 0);
 
 	return 0;
 }

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2015,2020-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -128,13 +128,9 @@ static bool cm_state_init_event(void *ctx, uint16_t event,
 		 */
 		if (wlan_vdev_mlme_is_mlo_link_vdev(cm_ctx->vdev)) {
 			cm_sm_transition_to(cm_ctx, WLAN_CM_S_CONNECTED);
-			status = cm_sm_deliver_event_sync(cm_ctx,
-							  WLAN_CM_SM_EV_ROAM_SYNC,
-							  data_len, data);
-			if (QDF_IS_STATUS_ERROR(status)) {
-				cm_sm_transition_to(cm_ctx, WLAN_CM_S_INIT);
-				event_handled = false;
-			}
+			cm_sm_deliver_event_sync(cm_ctx,
+						 WLAN_CM_SM_EV_ROAM_SYNC,
+						 data_len, data);
 		} else {
 			event_handled = false;
 		}
@@ -277,10 +273,7 @@ bool cm_handle_fw_roam_connected_event(struct cnx_mgr *cm_ctx, uint16_t event,
 			break;
 		}
 		cm_sm_transition_to(cm_ctx, WLAN_CM_S_ROAMING);
-		status = cm_sm_deliver_event_sync(cm_ctx, event, data_len,
-						  data);
-		if (QDF_IS_STATUS_ERROR(status))
-			event_handled = false;
+		cm_sm_deliver_event_sync(cm_ctx, event, data_len, data);
 		break;
 	case WLAN_CM_SM_EV_ROAM_DONE:
 		cm_fw_roam_complete(cm_ctx, data);
@@ -483,9 +476,6 @@ static bool cm_state_disconnecting_event(void *ctx, uint16_t event,
 					 WLAN_CM_SM_EV_DISCONNECT_START,
 					 data_len, data);
 		break;
-	case WLAN_CM_SM_EV_RSO_STOP_RSP:
-		cm_disconnect_continue_after_rso_stop(cm_ctx->vdev, data);
-		break;
 	default:
 		event_handled = false;
 		break;
@@ -585,7 +575,7 @@ static bool cm_subst_join_pending_event(void *ctx, uint16_t event,
 	case WLAN_CM_SM_EV_SCAN_FAILURE:
 		status = QDF_STATUS_E_FAILURE;
 		/* Fall through after setting status failure */
-		fallthrough;
+		/* fallthrough */
 	case WLAN_CM_SM_EV_SCAN_SUCCESS:
 		cm_connect_scan_resp(cm_ctx, data, status);
 		break;
@@ -639,9 +629,6 @@ static bool cm_subst_join_pending_event(void *ctx, uint16_t event,
 		cm_sm_deliver_event_sync(cm_ctx,
 					 WLAN_CM_SM_EV_DISCONNECT_START,
 					 data_len, data);
-		break;
-	case WLAN_CM_SM_EV_RSO_STOP_RSP:
-		cm_disconnect_continue_after_rso_stop(cm_ctx->vdev, data);
 		break;
 	default:
 		event_handled = false;
@@ -742,9 +729,6 @@ static bool cm_subst_scan_event(void *ctx, uint16_t event,
 		cm_sm_deliver_event_sync(cm_ctx,
 					 WLAN_CM_SM_EV_DISCONNECT_START,
 					 data_len, data);
-		break;
-	case WLAN_CM_SM_EV_RSO_STOP_RSP:
-		cm_disconnect_continue_after_rso_stop(cm_ctx->vdev, data);
 		break;
 	default:
 		event_handled = false;
@@ -1071,7 +1055,6 @@ static const char *cm_sm_event_names[] = {
 	"EV_PREAUTH_RESP",
 	"EV_REASSOC_TIMER",
 	"EV_HO_ROAM_DISCONNECT_DONE",
-	"EV_RSO_STOP_RSP",
 };
 
 enum wlan_cm_sm_state cm_get_state(struct cnx_mgr *cm_ctx)

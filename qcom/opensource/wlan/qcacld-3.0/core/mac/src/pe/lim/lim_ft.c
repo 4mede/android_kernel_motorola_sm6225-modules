@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -395,7 +395,7 @@ static uint8_t lim_convert_phymode_to_dot11mode(enum wlan_phymode phymode)
  * @bcn: beacon structure
  * @band: reg_wifi_band
  *
- * The function is to calculate dot11 mode in case fw doesn't send phy mode.
+ * The function is to calculate dot11 mode in case fw doen't send phy mode.
  *
  * Return: dot11mode.
  */
@@ -428,7 +428,7 @@ static uint8_t lim_calculate_dot11_mode(struct mac_context *mac_ctx,
 			return MLME_DOT11_MODE_11AC;
 		else if (bcn->HTCaps.present)
 			return MLME_DOT11_MODE_11N;
-		fallthrough;
+		/* fallthrough */
 	case MLME_DOT11_MODE_11AC:
 	case MLME_DOT11_MODE_11AC_ONLY:
 		if ((bcn->VHTCaps.present ||
@@ -439,12 +439,12 @@ static uint8_t lim_calculate_dot11_mode(struct mac_context *mac_ctx,
 			return MLME_DOT11_MODE_11AC;
 		else if (bcn->HTCaps.present)
 			return MLME_DOT11_MODE_11N;
-		fallthrough;
+		/* fallthrough */
 	case MLME_DOT11_MODE_11N:
 	case MLME_DOT11_MODE_11N_ONLY:
 		if (bcn->HTCaps.present)
 			return MLME_DOT11_MODE_11N;
-		fallthrough;
+		/* fallthrough */
 	default:
 			return new_dot11_mode;
 	}
@@ -528,7 +528,7 @@ void lim_fill_ft_session(struct mac_context *mac,
 	int8_t localPowerConstraint;
 	int8_t regMax;
 	tSchBeaconStruct *pBeaconStruct;
-	uint8_t cb_mode;
+	ePhyChanBondState cbEnabledMode;
 	struct vdev_mlme_obj *mlme_obj;
 	bool is_pwr_constraint;
 
@@ -609,12 +609,14 @@ void lim_fill_ft_session(struct mac_context *mac,
 
 	ft_session->nss = ft_session ->vdev_nss;
 
-	cb_mode = lim_get_cb_mode_for_freq(mac, ft_session,
-					   ft_session->curr_op_freq);
-
+	if (ft_session->limRFBand == REG_BAND_2G) {
+		cbEnabledMode = mac->roam.configParam.channelBondingMode24GHz;
+	} else {
+		cbEnabledMode = mac->roam.configParam.channelBondingMode5GHz;
+	}
 	ft_session->htSupportedChannelWidthSet =
 	    (pBeaconStruct->HTInfo.present) ?
-	    (cb_mode && pBeaconStruct->HTInfo.recommendedTxWidthSet &&
+	    (cbEnabledMode && pBeaconStruct->HTInfo.recommendedTxWidthSet &&
 	     pBeaconStruct->HTCaps.supportedChannelWidthSet) : 0;
 	ft_session->htRecommendedTxWidthSet =
 		ft_session->htSupportedChannelWidthSet;
@@ -673,7 +675,7 @@ void lim_fill_ft_session(struct mac_context *mac,
 	}
 
 	sir_copy_mac_addr(ft_session->self_mac_addr,
-			  wlan_vdev_mlme_get_macaddr(pe_session->vdev));
+			  pe_session->self_mac_addr);
 	sir_copy_mac_addr(ft_session->limReAssocbssId,
 			  pbssDescription->bssId);
 	sir_copy_mac_addr(ft_session->prev_ap_bssid, pe_session->bssId);

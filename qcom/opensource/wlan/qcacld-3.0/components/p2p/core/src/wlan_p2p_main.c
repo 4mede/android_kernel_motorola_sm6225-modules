@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -27,15 +27,14 @@
 #include <wlan_objmgr_pdev_obj.h>
 #include <wlan_objmgr_vdev_obj.h>
 #include <wlan_objmgr_peer_obj.h>
-#include <wlan_scan_api.h>
+#include <wlan_scan_ucfg_api.h>
 #include "wlan_p2p_public_struct.h"
 #include "wlan_p2p_ucfg_api.h"
 #include "wlan_p2p_tgt_api.h"
-#include "wlan_p2p_mcc_quota_tgt_api.h"
 #include "wlan_p2p_main.h"
 #include "wlan_p2p_roc.h"
 #include "wlan_p2p_off_chan_tx.h"
-#include "cfg_p2p.h"
+#include "wlan_p2p_cfg.h"
 #include "cfg_ucfg_api.h"
 #include "wlan_mlme_api.h"
 
@@ -553,8 +552,6 @@ static QDF_STATUS p2p_object_init_params(
 			cfg_get(psoc, CFG_P2P_DEVICE_ADDRESS_ADMINISTRATED);
 	p2p_soc_obj->param.is_random_seq_num_enabled =
 			cfg_get(psoc, CFG_ACTION_FRAME_RANDOM_SEQ_NUM_ENABLED);
-	p2p_soc_obj->param.indoor_channel_support =
-				cfg_get(psoc, CFG_P2P_GO_ON_INDOOR_CHANNEL);
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -727,7 +724,7 @@ QDF_STATUS p2p_psoc_object_open(struct wlan_objmgr_psoc *soc)
 	p2p_soc_obj = wlan_objmgr_psoc_get_comp_private_obj(soc,
 			WLAN_UMAC_COMP_P2P);
 	if (!p2p_soc_obj) {
-		p2p_err("p2p soc private object is NULL");
+		p2p_err("p2p soc priviate object is NULL");
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -847,9 +844,9 @@ QDF_STATUS p2p_psoc_start(struct wlan_objmgr_psoc *soc,
 	tgt_p2p_register_lo_ev_handler(soc);
 	tgt_p2p_register_noa_ev_handler(soc);
 	tgt_p2p_register_macaddr_rx_filter_evt_handler(soc, true);
-	tgt_p2p_register_mcc_quota_ev_handler(soc, true);
+
 	/* register scan request id */
-	p2p_soc_obj->scan_req_id = wlan_scan_register_requester(
+	p2p_soc_obj->scan_req_id = ucfg_scan_register_requester(
 		soc, P2P_MODULE_NAME, tgt_p2p_scan_event_cb,
 		p2p_soc_obj);
 
@@ -891,12 +888,11 @@ QDF_STATUS p2p_psoc_stop(struct wlan_objmgr_psoc *soc)
 
 	/* clean up queue of p2p psoc private object */
 	p2p_cleanup_tx_sync(p2p_soc_obj, NULL);
-	p2p_cleanup_roc(p2p_soc_obj, NULL, true);
+	p2p_cleanup_roc_sync(p2p_soc_obj, NULL);
 
 	/* unrgister scan request id*/
-	wlan_scan_unregister_requester(soc, p2p_soc_obj->scan_req_id);
+	ucfg_scan_unregister_requester(soc, p2p_soc_obj->scan_req_id);
 
-	tgt_p2p_register_mcc_quota_ev_handler(soc, false);
 	/* unregister p2p lo stop and noa event */
 	tgt_p2p_register_macaddr_rx_filter_evt_handler(soc, false);
 	tgt_p2p_unregister_lo_ev_handler(soc);
@@ -1412,7 +1408,7 @@ QDF_STATUS p2p_status_connect(struct wlan_objmgr_vdev *vdev)
 		 * since no scan before 4-way handshake and
 		 * won't enter state P2P_CLIENT_CONNECTING_STATE_2:
 		 */
-		fallthrough;
+		/* fallthrough */
 	case P2P_CLIENT_CONNECTING_STATE_2:
 		p2p_status_update(p2p_soc_obj,
 				  P2P_CLIENT_COMPLETED_STATE);

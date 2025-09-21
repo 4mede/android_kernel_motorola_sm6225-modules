@@ -85,10 +85,6 @@
 
 #include <wlan_twt_api.h>
 
-#ifdef WLAN_FEATURE_COAP
-#include <wlan_coap_main.h>
-#endif
-
 /**
  * DOC: This file provides various init/deinit trigger point for new
  * components.
@@ -100,52 +96,6 @@
  */
 
 struct dispatcher_spectral_ops ops_spectral;
-
-#ifdef WLAN_WIFI_RADAR_ENABLE
-static QDF_STATUS dispatcher_init_wifi_radar(void)
-{
-	return wlan_wifi_radar_init();
-}
-
-static QDF_STATUS dispatcher_deinit_wifi_radar(void)
-{
-	return wlan_wifi_radar_deinit();
-}
-
-static QDF_STATUS dispatcher_wifi_radar_pdev_open
-		(struct wlan_objmgr_pdev *pdev)
-{
-	return wlan_wifi_radar_pdev_open(pdev);
-}
-
-static QDF_STATUS dispatcher_wifi_radar_pdev_close
-		(struct wlan_objmgr_pdev *pdev)
-{
-	return wlan_wifi_radar_pdev_close(pdev);
-}
-#else
-static QDF_STATUS dispatcher_init_wifi_radar(void)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-static QDF_STATUS dispatcher_deinit_wifi_radar(void)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-static QDF_STATUS dispatcher_wifi_radar_pdev_open
-			(struct wlan_objmgr_pdev *pdev)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-static QDF_STATUS dispatcher_wifi_radar_pdev_close
-			(struct wlan_objmgr_pdev *pdev)
-{
-	return QDF_STATUS_SUCCESS;
-}
-#endif
 
 #ifdef WLAN_CFR_ENABLE
 static QDF_STATUS dispatcher_init_cfr(void)
@@ -705,7 +655,7 @@ static QDF_STATUS dispatcher_dfs_psoc_disable(struct wlan_objmgr_psoc *psoc)
 }
 #endif
 
-#if defined(WLAN_SUPPORT_TWT)
+#if defined(WLAN_SUPPORT_TWT) && defined(WLAN_TWT_CONV_SUPPORTED)
 static QDF_STATUS dispatcher_twt_psoc_enable(struct wlan_objmgr_psoc *psoc)
 {
 	return twt_psoc_enable(psoc);
@@ -1011,28 +961,6 @@ dispatcher_coex_psoc_close(struct wlan_objmgr_psoc *psoc)
 }
 #endif /* FEATURE_COEX */
 
-#ifdef WLAN_FEATURE_DBAM_CONFIG
-static QDF_STATUS dbam_psoc_enable(struct wlan_objmgr_psoc *psoc)
-{
-	return wlan_dbam_psoc_enable(psoc);
-}
-
-static QDF_STATUS dbam_psoc_disable(struct wlan_objmgr_psoc *psoc)
-{
-	return wlan_dbam_psoc_disable(psoc);
-}
-#else
-static QDF_STATUS dbam_psoc_enable(struct wlan_objmgr_psoc *psoc)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-static QDF_STATUS dbam_psoc_disable(struct wlan_objmgr_psoc *psoc)
-{
-	return QDF_STATUS_SUCCESS;
-}
-#endif /* WLAN_FEATURE_DBAM_CONFIG */
-
 #ifdef WLAN_FEATURE_11BE_MLO
 static QDF_STATUS mlo_mgr_psoc_enable(struct wlan_objmgr_psoc *psoc)
 {
@@ -1050,48 +978,6 @@ static QDF_STATUS mlo_mgr_psoc_enable(struct wlan_objmgr_psoc *psoc)
 }
 
 static QDF_STATUS mlo_mgr_psoc_disable(struct wlan_objmgr_psoc *psoc)
-{
-	return QDF_STATUS_SUCCESS;
-}
-#endif
-
-#ifdef WLAN_FEATURE_COAP
-static QDF_STATUS dispatcher_coap_init(void)
-{
-	return wlan_coap_init();
-}
-
-static QDF_STATUS dispatcher_coap_deinit(void)
-{
-	return wlan_coap_deinit();
-}
-
-static QDF_STATUS coap_psoc_enable(struct wlan_objmgr_psoc *psoc)
-{
-	return wlan_coap_enable(psoc);
-}
-
-static QDF_STATUS coap_psoc_disable(struct wlan_objmgr_psoc *psoc)
-{
-	return wlan_coap_disable(psoc);
-}
-#else
-static QDF_STATUS dispatcher_coap_init(void)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-static QDF_STATUS dispatcher_coap_deinit(void)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-static QDF_STATUS coap_psoc_enable(struct wlan_objmgr_psoc *psoc)
-{
-	return QDF_STATUS_SUCCESS;
-}
-
-static QDF_STATUS coap_psoc_disable(struct wlan_objmgr_psoc *psoc)
 {
 	return QDF_STATUS_SUCCESS;
 }
@@ -1168,9 +1054,6 @@ QDF_STATUS dispatcher_init(void)
 	if (QDF_STATUS_SUCCESS != dispatcher_init_cfr())
 		goto cfr_init_fail;
 
-	if (QDF_STATUS_SUCCESS != dispatcher_init_wifi_radar())
-		goto wifi_radar_init_fail;
-
 	if (QDF_STATUS_SUCCESS != dispatcher_coex_init())
 		goto coex_init_fail;
 
@@ -1183,9 +1066,6 @@ QDF_STATUS dispatcher_init(void)
 	if (QDF_STATUS_SUCCESS != dispatcher_twt_init())
 		goto twt_init_fail;
 
-	if (QDF_STATUS_SUCCESS != dispatcher_coap_init())
-		goto coap_init_fail;
-
 	/*
 	 * scheduler INIT has to be the last as each component's
 	 * initialization has to happen first and then at the end
@@ -1197,8 +1077,6 @@ QDF_STATUS dispatcher_init(void)
 	return QDF_STATUS_SUCCESS;
 
 scheduler_init_fail:
-	dispatcher_coap_deinit();
-coap_init_fail:
 	dispatcher_twt_deinit();
 twt_init_fail:
 	wlan_gpio_deinit();
@@ -1207,8 +1085,6 @@ gpio_init_fail:
 ifmgr_init_fail:
 	dispatcher_coex_deinit();
 coex_init_fail:
-	dispatcher_deinit_wifi_radar();
-wifi_radar_init_fail:
 	dispatcher_deinit_cfr();
 cfr_init_fail:
 	wlan_cmn_mlme_deinit();
@@ -1266,8 +1142,6 @@ QDF_STATUS dispatcher_deinit(void)
 
 	QDF_BUG(QDF_STATUS_SUCCESS == scheduler_deinit());
 
-	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_coap_deinit());
-
 	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_twt_deinit());
 
 	QDF_BUG(QDF_STATUS_SUCCESS == wlan_gpio_deinit());
@@ -1275,8 +1149,6 @@ QDF_STATUS dispatcher_deinit(void)
 	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_if_mgr_deinit());
 
 	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_coex_deinit());
-
-	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_deinit_wifi_radar());
 
 	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_deinit_cfr());
 
@@ -1498,18 +1370,8 @@ QDF_STATUS dispatcher_psoc_enable(struct wlan_objmgr_psoc *psoc)
 	if (QDF_STATUS_SUCCESS != dispatcher_twt_psoc_enable(psoc))
 		goto twt_psoc_enable_fail;
 
-	if (QDF_STATUS_SUCCESS != dbam_psoc_enable(psoc))
-		goto dbam_psoc_enable_fail;
-
-	if (QDF_STATUS_SUCCESS != coap_psoc_enable(psoc))
-		goto coap_psoc_enable_fail;
-
 	return QDF_STATUS_SUCCESS;
 
-coap_psoc_enable_fail:
-	dbam_psoc_disable(psoc);
-dbam_psoc_enable_fail:
-	dispatcher_twt_psoc_disable(psoc);
 twt_psoc_enable_fail:
 	mlo_mgr_psoc_disable(psoc);
 mlo_mgr_psoc_enable_fail:
@@ -1548,10 +1410,6 @@ qdf_export_symbol(dispatcher_psoc_enable);
 QDF_STATUS dispatcher_psoc_disable(struct wlan_objmgr_psoc *psoc)
 {
 	QDF_STATUS status;
-
-	QDF_BUG(QDF_STATUS_SUCCESS == coap_psoc_disable(psoc));
-
-	QDF_BUG(QDF_STATUS_SUCCESS == dbam_psoc_disable(psoc));
 
 	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_twt_psoc_disable(psoc));
 
@@ -1604,10 +1462,6 @@ QDF_STATUS dispatcher_pdev_open(struct wlan_objmgr_pdev *pdev)
 	if (status != QDF_STATUS_SUCCESS && status != QDF_STATUS_COMP_DISABLED)
 		goto cfr_pdev_open_fail;
 
-	status = dispatcher_wifi_radar_pdev_open(pdev);
-	if (status != QDF_STATUS_SUCCESS && status != QDF_STATUS_COMP_DISABLED)
-		goto wifi_radar_pdev_open_fail;
-
 	if (QDF_STATUS_SUCCESS != wlan_mgmt_txrx_pdev_open(pdev))
 		goto mgmt_txrx_pdev_open_fail;
 
@@ -1619,8 +1473,6 @@ QDF_STATUS dispatcher_pdev_open(struct wlan_objmgr_pdev *pdev)
 green_ap_pdev_open_fail:
 	wlan_mgmt_txrx_pdev_close(pdev);
 mgmt_txrx_pdev_open_fail:
-	dispatcher_wifi_radar_pdev_close(pdev);
-wifi_radar_pdev_open_fail:
 	dispatcher_cfr_pdev_close(pdev);
 cfr_pdev_open_fail:
 	dispatcher_spectral_pdev_close(pdev);
@@ -1639,10 +1491,6 @@ QDF_STATUS dispatcher_pdev_close(struct wlan_objmgr_pdev *pdev)
 	QDF_BUG(QDF_STATUS_SUCCESS == dispatcher_green_ap_pdev_close(pdev));
 
 	QDF_BUG(QDF_STATUS_SUCCESS == wlan_mgmt_txrx_pdev_close(pdev));
-
-	status = dispatcher_wifi_radar_pdev_close(pdev);
-	QDF_BUG((QDF_STATUS_SUCCESS == status) ||
-		(QDF_STATUS_COMP_DISABLED == status));
 
 	status = dispatcher_cfr_pdev_close(pdev);
 	QDF_BUG((QDF_STATUS_SUCCESS == status) ||

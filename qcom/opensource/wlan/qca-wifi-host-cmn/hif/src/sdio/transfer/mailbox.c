@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2013-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -44,15 +43,6 @@
 #include "if_sdio.h"
 #include "regtable.h"
 #include "transfer.h"
-
-/*
- * The following commit was introduced in v5.17:
- * cead18552660 ("exit: Rename complete_and_exit to kthread_complete_and_exit")
- * Use the old name for kernels before 5.17
- */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0))
-#define kthread_complete_and_exit(c, s) complete_and_exit(c, s)
-#endif
 
 /* by default setup a bounce buffer for the data packets,
  * if the underlying host controller driver
@@ -276,7 +266,7 @@ void hif_dev_get_block_size(void *config)
 /**
  * hif_dev_map_service_to_pipe() - maps ul/dl pipe to service id.
  * @pDev: SDIO HIF object
- * @ServiceId: service index
+ * @ServiceId: sevice index
  * @ULPipe: uplink pipe id
  * @DLPipe: down-linklink pipe id
  *
@@ -618,7 +608,7 @@ void hif_fixup_write_param(struct hif_sdio_dev *pdev, uint32_t req,
 }
 
 /**
- * hif_dev_recv_packet() - Receive HTC packet/packet information from device
+ * hif_dev_recv_packet() - Receieve HTC packet/packet information from device
  * @pdev : HIF device object
  * @packet : The HTC packet pointer
  * @recv_length : The length of information to be received
@@ -1362,7 +1352,7 @@ QDF_STATUS hif_dev_process_pending_irqs(struct hif_sdio_device *pdev,
 	} while (false);
 
 	/* an optimization to bypass reading the IRQ status registers
-	 * unnecessarily which can re-wake the target, if upper layers
+	 * unecessarily which can re-wake the target, if upper layers
 	 * determine that we are in a low-throughput mode, we can
 	 * rely on taking another interrupt rather than re-checking
 	 * the status registers which can re-wake the target.
@@ -1897,7 +1887,7 @@ static int async_task(void *param)
 		}
 	}
 
-	kthread_complete_and_exit(&device->async_completion, 0);
+	complete_and_exit(&device->async_completion, 0);
 
 	return 0;
 }

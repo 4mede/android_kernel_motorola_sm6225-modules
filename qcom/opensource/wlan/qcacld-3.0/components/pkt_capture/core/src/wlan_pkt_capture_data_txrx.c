@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021, 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -116,7 +116,6 @@ static unsigned char pkt_capture_get_tx_rate(
 		case 0x0:
 			ret = 0x16;
 			*preamble = LONG_PREAMBLE;
-			break;
 		case 0x1:
 			ret = 0xB;
 			*preamble = LONG_PREAMBLE;

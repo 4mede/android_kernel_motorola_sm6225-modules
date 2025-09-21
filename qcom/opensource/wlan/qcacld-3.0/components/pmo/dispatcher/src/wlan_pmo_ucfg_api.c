@@ -525,11 +525,9 @@ int ucfg_pmo_psoc_clear_target_wake_up(struct wlan_objmgr_psoc *psoc)
 	return pmo_core_psoc_clear_target_wake_up(psoc);
 }
 
-void ucfg_pmo_psoc_target_suspend_acknowledge(void *context, bool wow_nack,
-					      uint16_t reason_code)
+void ucfg_pmo_psoc_target_suspend_acknowledge(void *context, bool wow_nack)
 {
-	pmo_core_psoc_target_suspend_acknowledge(context, wow_nack,
-						 reason_code);
+	pmo_core_psoc_target_suspend_acknowledge(context, wow_nack);
 }
 
 void ucfg_pmo_psoc_wakeup_host_event_received(struct wlan_objmgr_psoc *psoc)
@@ -1026,6 +1024,12 @@ uint32_t ucfg_pmo_get_moddtim_user(struct wlan_objmgr_vdev *vdev)
 	return pmo_core_vdev_get_moddtim_user(vdev);
 }
 
+uint32_t
+ucfg_pmo_get_ssr_frequency_on_pagefault(struct wlan_objmgr_psoc *psoc)
+{
+	return pmo_get_ssr_frequency_on_pagefault(psoc);
+}
+
 bool
 ucfg_pmo_get_disconnect_sap_tdls_in_wow(struct wlan_objmgr_psoc *psoc)
 {
@@ -1055,15 +1059,3 @@ QDF_STATUS ucfg_pmo_config_icmp_offload(struct wlan_objmgr_psoc *psoc,
 	return pmo_tgt_config_icmp_offload_req(psoc, pmo_icmp_req);
 }
 #endif
-
-QDF_STATUS ucfg_pmo_set_vdev_bridge_addr(struct wlan_objmgr_vdev *vdev,
-					 struct qdf_mac_addr *bridgeaddr)
-{
-	return pmo_set_vdev_bridge_addr(vdev, bridgeaddr);
-}
-
-QDF_STATUS ucfg_pmo_get_vdev_bridge_addr(struct wlan_objmgr_vdev *vdev,
-					 struct qdf_mac_addr *bridgeaddr)
-{
-	return pmo_get_vdev_bridge_addr(vdev, bridgeaddr);
-}

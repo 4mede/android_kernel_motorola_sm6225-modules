@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _CNSS_BUS_H
@@ -9,9 +9,25 @@
 
 #include "main.h"
 
+#define QCA6174_VENDOR_ID		0x168C
+#define QCA6174_DEVICE_ID		0x003E
 #define QCA6174_REV_ID_OFFSET		0x08
 #define QCA6174_REV3_VERSION		0x5020000
 #define QCA6174_REV3_2_VERSION		0x5030000
+#define QCA6290_VENDOR_ID		0x17CB
+#define QCA6290_DEVICE_ID		0x1100
+#define QCA6390_VENDOR_ID		0x17CB
+#define QCA6390_DEVICE_ID		0x1101
+#define QCA6490_VENDOR_ID		0x17CB
+#define QCA6490_DEVICE_ID		0x1103
+#define QCN7605_VENDOR_ID               0x17CB
+#define QCN7605_DEVICE_ID               0x1102
+#define KIWI_VENDOR_ID			0x17CB
+#define KIWI_DEVICE_ID			0x1107
+#define MANGO_VENDOR_ID			0x17CB
+#define MANGO_DEVICE_ID			0x110A
+#define PEACH_VENDOR_ID			0x17CB
+#define PEACH_DEVICE_ID			0x110E
 
 enum cnss_dev_bus_type cnss_get_dev_bus_type(struct device *dev);
 enum cnss_dev_bus_type cnss_get_bus_type(struct cnss_plat_data *plat_priv);
@@ -21,13 +37,7 @@ int cnss_bus_init(struct cnss_plat_data *plat_priv);
 void cnss_bus_deinit(struct cnss_plat_data *plat_priv);
 void cnss_bus_add_fw_prefix_name(struct cnss_plat_data *plat_priv,
 				 char *prefix_name, char *name);
-int cnss_bus_load_tme_patch(struct cnss_plat_data *plat_priv);
-int cnss_bus_load_tme_opt_file(struct cnss_plat_data *plat_priv,
-				enum wlfw_tme_lite_file_type_v01 file);
-int cnss_bus_runtime_pm_get_sync(struct cnss_plat_data *plat_priv);
-void cnss_bus_runtime_pm_put(struct cnss_plat_data *plat_priv);
 int cnss_bus_load_m3(struct cnss_plat_data *plat_priv);
-int cnss_bus_load_aux(struct cnss_plat_data *plat_priv);
 int cnss_bus_handle_dev_sol_irq(struct cnss_plat_data *plat_priv);
 int cnss_bus_alloc_fw_mem(struct cnss_plat_data *plat_priv);
 int cnss_bus_alloc_qdss_mem(struct cnss_plat_data *plat_priv);
@@ -55,7 +65,6 @@ int cnss_bus_update_status(struct cnss_plat_data *plat_priv,
 int cnss_bus_update_uevent(struct cnss_plat_data *plat_priv,
 			   enum cnss_driver_status status, void *data);
 int cnss_bus_is_device_down(struct cnss_plat_data *plat_priv);
-int cnss_bus_shutdown_cleanup(struct cnss_plat_data *plat_priv);
 int cnss_bus_check_link_status(struct cnss_plat_data *plat_priv);
 int cnss_bus_recover_link_down(struct cnss_plat_data *plat_priv);
 int cnss_bus_debug_reg_read(struct cnss_plat_data *plat_priv, u32 offset,

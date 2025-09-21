@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2011-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1134,7 +1134,7 @@ ol_txrx_pdev_post_attach(struct cdp_soc_t *soc_hdl, uint8_t pdev_id)
 	 */
 
 	/*
-	 * LL - initialize the target credit ourselves.
+	 * LL - initialize the target credit outselves.
 	 * HL - wait for a HTT target credit initialization
 	 * during htt_attach.
 	 */
@@ -1936,7 +1936,6 @@ ol_txrx_vdev_attach(struct cdp_soc_t *soc_hdl, uint8_t pdev_id,
 	uint8_t vdev_id = vdev_info->vdev_id;
 	enum wlan_op_mode op_mode = vdev_info->op_mode;
 	enum wlan_op_subtype subtype = vdev_info->subtype;
-	enum QDF_OPMODE qdf_opmode = vdev_info->qdf_opmode;
 
 	struct ol_txrx_vdev_t *vdev;
 	QDF_STATUS qdf_status;
@@ -1959,7 +1958,6 @@ ol_txrx_vdev_attach(struct cdp_soc_t *soc_hdl, uint8_t pdev_id,
 	vdev->vdev_id = vdev_id;
 	vdev->opmode = op_mode;
 	vdev->subtype = subtype;
-	vdev->qdf_opmode = qdf_opmode;
 
 	vdev->delete.pending = 0;
 	vdev->safemode = 0;
@@ -2715,12 +2713,11 @@ static int ol_txrx_get_opmode(struct cdp_soc_t *soc_hdl, uint8_t vdev_id)
  * @soc_hdl: datapath soc handle
  * @vdev_id: virtual interface id
  * @peer_mac: peer mac addr
- * @slowpath: called from slow path or not
  *
  * Return: return peer state
  */
 static int ol_txrx_get_peer_state(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
-				  uint8_t *peer_mac, bool slowpath)
+				  uint8_t *peer_mac)
 {
 	struct ol_txrx_soc_t *soc = cdp_soc_t_to_ol_txrx_soc_t(soc_hdl);
 	ol_txrx_pdev_handle pdev =
@@ -3496,8 +3493,7 @@ void peer_unmap_timer_handler(void *data)
  * @soc_hdl: datapath soc handle
  * @vdev_id: virtual interface id
  * @peer_mac: peer MAC address
- * @bitmap: bitmap indicating special handling of request.
- * @peer_type: link or mld peer
+ * @bitmap - bitmap indicating special handling of request.
  * When the host's control SW disassociates a peer, it calls
  * this function to detach and delete the peer. The reference
  * stored in the control peer object to the data peer
@@ -3505,10 +3501,8 @@ void peer_unmap_timer_handler(void *data)
  *
  * Return: SUCCESS or Failure
  */
-static QDF_STATUS ol_txrx_peer_detach(struct cdp_soc_t *soc_hdl,
-				      uint8_t vdev_id, uint8_t *peer_mac,
-				      uint32_t bitmap,
-				      enum cdp_peer_type peer_type)
+static QDF_STATUS ol_txrx_peer_detach(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
+				      uint8_t *peer_mac, uint32_t bitmap)
 {
 	ol_txrx_peer_handle peer;
 	struct ol_txrx_soc_t *soc = cdp_soc_t_to_ol_txrx_soc_t(soc_hdl);
@@ -3617,8 +3611,7 @@ static void ol_txrx_peer_detach_force_delete(struct cdp_soc_t *soc_hdl,
 	/* Clear the peer_id_to_obj map entries */
 	ol_txrx_peer_remove_obj_map_entries(pdev, peer);
 	ol_txrx_peer_detach(soc_hdl, vdev_id, peer_mac,
-			    1 << CDP_PEER_DELETE_NO_SPECIAL,
-			    CDP_LINK_PEER_TYPE);
+			    1 << CDP_PEER_DELETE_NO_SPECIAL);
 }
 
 /**
@@ -3648,8 +3641,7 @@ static void ol_txrx_peer_detach_sync(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
 	if (!pdev->peer_unmap_sync_cb)
 		pdev->peer_unmap_sync_cb = peer_unmap_sync;
 
-	ol_txrx_peer_detach(soc_hdl, vdev_id, peer_mac, bitmap,
-			    CDP_LINK_PEER_TYPE);
+	ol_txrx_peer_detach(soc_hdl, vdev_id, peer_mac, bitmap);
 }
 
 /**
@@ -3834,7 +3826,7 @@ static QDF_STATUS ol_txrx_bus_suspend(struct cdp_soc_t *soc_hdl,
  * @soc_hdl: Datapath soc handle
  * @pdev_id: id of data path pdev handle
  *
- * Dummy function for symmetry
+ * Dummy function for symetry
  *
  * Return: QDF_STATUS_SUCCESS
  */
@@ -3871,7 +3863,7 @@ void ol_txrx_discard_tx_pending(ol_txrx_pdev_handle pdev_handle)
 	/*
 	 * First let hif do the qdf_atomic_dec_and_test(&tx_desc->ref_cnt)
 	 * then let htt do the qdf_atomic_dec_and_test(&tx_desc->ref_cnt)
-	 * which is the same with normal data send complete path
+	 * which is tha same with normal data send complete path
 	 */
 	htt_tx_pending_discard(pdev_handle->htt_pdev);
 
@@ -4255,7 +4247,7 @@ ol_txrx_fw_stats_handler(ol_txrx_pdev_handle pdev,
 				bytes = 0;
 				/* TO DO: specify how many bytes are present */
 				/* TO DO: add copying to the requestor's buf */
-				fallthrough;
+				/* fallthrough */
 			case HTT_DBG_STATS_RX_REMOTE_RING_BUFFER_INFO:
 				bytes = sizeof(struct
 						rx_remote_buffer_mgmt_stats);
@@ -5177,7 +5169,7 @@ void ol_rx_data_process(struct ol_txrx_peer_t *peer,
 				  "%s: failed to enqueue rx frm to cached_bufq",
 				  __func__);
 	} else {
-#ifdef WLAN_DP_LEGACY_OL_RX_THREAD
+#ifdef QCA_CONFIG_SMP
 		/*
 		 * If the kernel is SMP, schedule rx thread to
 		 * better use multicores.
@@ -5202,9 +5194,9 @@ void ol_rx_data_process(struct ol_txrx_peer_t *peer,
 			pkt->staId = peer->local_id;
 			cds_indicate_rxpkt(sched_ctx, pkt);
 		}
-#else                           /* WLAN_DP_LEGACY_OL_RX_THREAD */
+#else                           /* QCA_CONFIG_SMP */
 		ol_rx_data_handler(pdev, rx_buf_list, peer->local_id);
-#endif /* WLAN_DP_LEGACY_OL_RX_THREAD */
+#endif /* QCA_CONFIG_SMP */
 	}
 
 	return;
@@ -5771,7 +5763,7 @@ static void ol_txrx_soc_detach(struct cdp_soc_t *soc)
  * @pdev_id: id of data path pdev handle
  * @scn: device context
  *
- * Return: none
+ * Return: noe
  */
 static void ol_txrx_pkt_log_con_service(struct cdp_soc_t *soc_hdl,
 					uint8_t pdev_id, void *scn)
@@ -5783,7 +5775,7 @@ static void ol_txrx_pkt_log_con_service(struct cdp_soc_t *soc_hdl,
  * @soc_hdl: Datapath soc handle
  * @pdev_id: id of data path pdev handle
  *
- * Return: none
+ * Return: noe
  */
 static void ol_txrx_pkt_log_exit(struct cdp_soc_t *soc_hdl, uint8_t pdev_id)
 {

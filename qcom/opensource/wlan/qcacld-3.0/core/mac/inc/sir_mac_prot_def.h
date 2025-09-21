@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2011-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1028,7 +1028,9 @@ typedef enum eSirMacHTChannelWidth {
 	eHT_CHANNEL_WIDTH_80MHZ = 2,
 	eHT_CHANNEL_WIDTH_160MHZ = 3,
 	eHT_CHANNEL_WIDTH_80P80MHZ = 4,
+#ifdef WLAN_FEATURE_11BE
 	eHT_CHANNEL_WIDTH_320MHZ = 5,
+#endif
 	eHT_MAX_CHANNEL_WIDTH
 } tSirMacHTChannelWidth;
 
@@ -1263,7 +1265,6 @@ typedef struct sSirMacAuthFrameBody {
 	uint8_t nonce[SIR_FILS_NONCE_LENGTH];
 #endif
 	bool is_mlo_ie_present;
-	struct qdf_mac_addr peer_mld;
 } qdf_packed tSirMacAuthFrameBody, *tpSirMacAuthFrameBody;
 
 /* / Common header for all action frames */
@@ -1870,10 +1871,4 @@ struct he_6ghz_capability_info {
 #define SIR_MAC_TXSTBC                             1
 #define SIR_MAC_RXSTBC                             1
 
-#define SIR_MAC_RSNX_CAP_MIN_LEN                   1
-#define SIR_MAC_RSNX_CAP_MAX_LEN                  16
-
-#define SIR_MAC_IE_TYPE_OFFSET                     0
-#define SIR_MAC_IE_LEN_OFFSET                      1
-#define SIR_MAC_IE_TYPE_LEN_SIZE                   2
 #endif /* __MAC_PROT_DEFS_H */
